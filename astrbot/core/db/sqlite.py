@@ -1103,3 +1103,141 @@ class SQLiteDatabase(BaseDatabase):
                         col(PlatformSession.session_id) == session_id,
                     ),
                 )
+
+    # ====
+    # Workflow Management (using Preference table for storage)
+    # ====
+
+    def get_all_workflows(self) -> list[dict]:
+        """Get all workflows stored in the database."""
+        import asyncio
+        import json
+        import threading
+
+        async def _inner():
+            async with self.get_db() as session:
+                session: AsyncSession
+                result = await session.execute(
+                    select(Preference).where(
+                        Preference.scope == "workflow",
+                        Preference.key == "data",
+                    )
+                )
+                preferences = result.scalars().all()
+                workflows = []
+                for pref in preferences:
+                    try:
+                        workflow_data = pref.value if isinstance(pref.value, dict) else json.loads(pref.value)
+                        workflows.append(workflow_data)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                return workflows
+
+        result = None
+
+        def runner():
+            nonlocal result
+            result = asyncio.run(_inner())
+
+        t = threading.Thread(target=runner)
+        t.start()
+        t.join()
+        return result or []
+
+    def get_workflow(self, workflow_id: str) -> dict | None:
+        """Get a specific workflow by ID."""
+        import asyncio
+        import json
+        import threading
+
+        async def _inner():
+            async with self.get_db() as session:
+                session: AsyncSession
+                result = await session.execute(
+                    select(Preference).where(
+                        Preference.scope == "workflow",
+                        Preference.scope_id == workflow_id,
+                        Preference.key == "data",
+                    )
+                )
+                pref = result.scalar_one_or_none()
+                if pref:
+                    try:
+                        return pref.value if isinstance(pref.value, dict) else json.loads(pref.value)
+                    except (json.JSONDecodeError, TypeError):
+                        return None
+                return None
+
+        result = None
+
+        def runner():
+            nonlocal result
+            result = asyncio.run(_inner())
+
+        t = threading.Thread(target=runner)
+        t.start()
+        t.join()
+        return result
+
+    def save_workflow(self, workflow: dict) -> None:
+        """Save a workflow (create or update)."""
+        import asyncio
+        import threading
+
+        workflow_id = workflow.get("workflow_id")
+        if not workflow_id:
+            raise ValueError("workflow_id is required")
+
+        async def _inner():
+            async with self.get_db() as session:
+                session: AsyncSession
+                async with session.begin():
+                    result = await session.execute(
+                        select(Preference).where(
+                            Preference.scope == "workflow",
+                            Preference.scope_id == workflow_id,
+                            Preference.key == "data",
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+                    if existing:
+                        existing.value = workflow
+                    else:
+                        new_pref = Preference(
+                            scope="workflow",
+                            scope_id=workflow_id,
+                            key="data",
+                            value=workflow,
+                        )
+                        session.add(new_pref)
+
+        def runner():
+            asyncio.run(_inner())
+
+        t = threading.Thread(target=runner)
+        t.start()
+        t.join()
+
+    def delete_workflow(self, workflow_id: str) -> None:
+        """Delete a workflow by ID."""
+        import asyncio
+        import threading
+
+        async def _inner():
+            async with self.get_db() as session:
+                session: AsyncSession
+                async with session.begin():
+                    await session.execute(
+                        delete(Preference).where(
+                            Preference.scope == "workflow",
+                            Preference.scope_id == workflow_id,
+                            Preference.key == "data",
+                        )
+                    )
+
+        def runner():
+            asyncio.run(_inner())
+
+        t = threading.Thread(target=runner)
+        t.start()
+        t.join()
