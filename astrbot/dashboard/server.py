@@ -23,6 +23,7 @@ from .routes.platform import PlatformRoute
 from .routes.route import Response, RouteContext
 from .routes.session_management import SessionManagementRoute
 from .routes.t2i import T2iRoute
+from .routes.workflow import WorkflowRoute
 
 APP: Quart
 
@@ -85,12 +86,17 @@ class AstrBotDashboard:
         self.t2i_route = T2iRoute(self.context, core_lifecycle)
         self.kb_route = KnowledgeBaseRoute(self.context, core_lifecycle)
         self.platform_route = PlatformRoute(self.context, core_lifecycle)
+        self.workflow_route = WorkflowRoute(core_lifecycle, db)
 
         self.app.add_url_rule(
             "/api/plug/<path:subpath>",
             view_func=self.srv_plug_route,
             methods=["GET", "POST"],
         )
+
+        # Register workflow routes
+        for route, (method, func) in self.workflow_route.get_routes().items():
+            self.app.add_url_rule(f"/api{route}", view_func=func, methods=[method])
 
         self.shutdown_event = shutdown_event
 
