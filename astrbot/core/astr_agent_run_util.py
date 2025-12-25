@@ -98,6 +98,10 @@ async def run_agent(
                         # display the reasoning content only when configured
                         continue
                     yield resp.data["chain"]  # MessageChain
+                elif resp.type == "llm_result":
+                    # Handle non-streaming LLM result in streaming mode
+                    # This happens with providers that don't support true streaming (e.g., WorkflowProvider)
+                    yield resp.data["chain"]  # MessageChain
             if agent_runner.done():
                 # send agent stats to webchat
                 if astr_event.get_platform_name() == "webchat":

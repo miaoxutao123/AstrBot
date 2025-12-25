@@ -161,6 +161,12 @@ class AstrBotCoreLifecycle:
 
         await self.kb_manager.initialize()
 
+        # Inject kb_manager into workflow providers
+        self.provider_manager.set_kb_manager_for_workflows(self.kb_manager)
+
+        # Load deployed workflows as providers
+        await self._load_deployed_workflows()
+
         # 初始化消息事件流水线调度器
         self.pipeline_scheduler_mapping = await self.load_pipeline_scheduler()
 
@@ -292,6 +298,43 @@ class AstrBotCoreLifecycle:
             name="restart",
             daemon=True,
         ).start()
+
+    async def _load_deployed_workflows(self) -> None:
+        """Load workflows that are marked as deployed and create providers for them."""
+        try:
+            workflows = self.db.get_all_workflows()
+            for workflow in workflows:
+                if workflow.get("deployed", False):
+                    workflow_id = workflow.get("workflow_id")
+                    provider_id = f"workflow_{workflow_id}"
+
+                    # Skip if already loaded
+                    if provider_id in self.provider_manager.inst_map:
+                        continue
+
+                    provider_config = {
+                        "id": provider_id,
+                        "type": "workflow",
+                        "enable": True,
+                        "workflow_id": workflow_id,
+                        "workflow_name": workflow.get("name", "Workflow"),
+                        "workflow_data": workflow.get("data", {}),
+                    }
+
+                    try:
+                        await self.provider_manager.load_provider(provider_config)
+                        # Inject kb_manager
+                        if provider_id in self.provider_manager.inst_map:
+                            provider = self.provider_manager.inst_map[provider_id]
+                            if hasattr(provider, "set_managers"):
+                                provider.set_managers(
+                                    self.provider_manager, self.kb_manager
+                                )
+                        logger.info(f"Loaded deployed workflow as provider: {provider_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to load workflow provider {provider_id}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to load deployed workflows: {e}")
 
     def load_platform(self) -> list[asyncio.Task]:
         """加载平台实例并返回所有平台实例的异步任务列表"""

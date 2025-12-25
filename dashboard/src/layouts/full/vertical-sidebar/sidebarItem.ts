@@ -44,6 +44,11 @@ const sidebarItem: menu[] = [
     to: '/knowledge-base',
   },
   {
+    title: 'core.navigation.workflow',
+    icon: 'mdi-sitemap',
+    to: '/workflow',
+  },
+  {
     title: 'core.navigation.groups.more',
     icon: 'mdi-dots-horizontal',
     children: [

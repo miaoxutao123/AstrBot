@@ -363,6 +363,10 @@ class ProviderManager:
                 from .sources.bailian_rerank_source import (
                     BailianRerankProvider as BailianRerankProvider,
                 )
+            case "workflow":
+                from .sources.workflow_source import (
+                    WorkflowProvider as WorkflowProvider,
+                )
 
     def get_merged_provider_config(self, provider_config: dict) -> dict:
         """获取 provider 配置和 provider_source 配置合并后的结果
@@ -489,6 +493,10 @@ class ProviderManager:
                         self.provider_settings,
                     )
 
+                    # Inject managers for WorkflowProvider
+                    if hasattr(inst, "set_managers"):
+                        inst.set_managers(self, None)  # kb_manager will be set later
+
                     if isinstance(inst, HasInitialize):
                         await inst.initialize()
 
@@ -583,6 +591,12 @@ class ProviderManager:
 
     def get_insts(self):
         return self.provider_insts
+
+    def set_kb_manager_for_workflows(self, kb_manager):
+        """Set knowledge base manager for all workflow providers."""
+        for provider in self.provider_insts:
+            if hasattr(provider, "set_managers") and hasattr(provider, "_kb_manager"):
+                provider._kb_manager = kb_manager
 
     async def terminate_provider(self, provider_id: str):
         if provider_id in self.inst_map:
