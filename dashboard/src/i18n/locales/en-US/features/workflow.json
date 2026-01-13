@@ -25,7 +25,8 @@
     "llm": "LLM",
     "tool": "Tool",
     "knowledgeBase": "Knowledge Base",
-    "condition": "Condition"
+    "condition": "Condition",
+    "llmJudge": "LLM Judge"
   },
   "startNodeInfo": "Start node receives user input",
   "endNodeInfo": "End node outputs the final result",
@@ -66,5 +67,13 @@
   "deploySuccess": "Workflow deployed as Provider successfully",
   "deployFailed": "Failed to deploy",
   "undeploySuccess": "Workflow Provider removed",
-  "undeployFailed": "Failed to undeploy"
+  "undeployFailed": "Failed to undeploy",
+  "enableTools": "Enable Tool Calling",
+  "allowedTools": "Allowed Tools",
+  "allowedToolsHint": "Select tools this LLM node can call. Leave empty to disable tool calling",
+  "judgePrompt": "Judge Prompt",
+  "judgePromptHint": "Describe the question to judge, use {{variable}} to reference variables",
+  "trueKeywords": "True Keywords",
+  "trueKeywordsHint": "Judge as True if LLM response contains these words, separated by comma",
+  "llmJudgeInfo": "LLM Judge node sends a question to LLM and determines true/false based on the response, used for workflow branching"
 }

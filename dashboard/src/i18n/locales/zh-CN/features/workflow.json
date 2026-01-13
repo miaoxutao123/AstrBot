@@ -25,7 +25,8 @@
     "llm": "LLM",
     "tool": "工具",
     "knowledgeBase": "知识库",
-    "condition": "条件"
+    "condition": "条件",
+    "llmJudge": "LLM判断"
   },
   "startNodeInfo": "开始节点接收用户输入",
   "endNodeInfo": "结束节点输出最终结果",
@@ -66,5 +67,13 @@
   "deploySuccess": "工作流已成功部署为 Provider",
   "deployFailed": "部署失败",
   "undeploySuccess": "工作流 Provider 已移除",
-  "undeployFailed": "取消部署失败"
+  "undeployFailed": "取消部署失败",
+  "enableTools": "启用工具调用",
+  "allowedTools": "允许使用的工具",
+  "allowedToolsHint": "选择此 LLM 节点可以调用的工具，不选则禁用工具调用",
+  "judgePrompt": "判断提示词",
+  "judgePromptHint": "描述需要判断的问题，使用 {{变量名}} 引用变量",
+  "trueKeywords": "True 关键词",
+  "trueKeywordsHint": "LLM 返回包含这些词时判断为 True，用逗号分隔",
+  "llmJudgeInfo": "LLM 判断节点会将问题发送给 LLM，根据返回内容判断 true/false，用于流程分支控制"
 }

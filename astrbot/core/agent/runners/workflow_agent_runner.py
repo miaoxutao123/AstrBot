@@ -3,14 +3,21 @@ Workflow Agent Runner
 Executes visual workflow graphs with nodes like LLM, Tool, Knowledge Base, etc.
 """
 
+import json
 import re
 import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
 from astrbot import logger
+from astrbot.core.agent.message import (
+    AssistantMessageSegment,
+    ToolCall,
+    ToolCallMessageSegment,
+)
+from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.knowledge_base.kb_mgr import KnowledgeBaseManager
-from astrbot.core.provider.entities import ProviderRequest
+from astrbot.core.provider.entities import ProviderRequest, ToolCallsResult
 from astrbot.core.provider.manager import ProviderManager
 
 
@@ -100,12 +107,14 @@ class WorkflowAgentRunner:
         return [self.node_map[nid] for nid in next_ids if nid in self.node_map]
 
     async def _execute_llm_node(self, node: dict) -> str:
-        """Execute an LLM node."""
+        """Execute an LLM node with optional tool calling support."""
         data = node.get("data", {})
         provider_id = data.get("provider_id", "")
         raw_prompt = data.get("prompt", "{{input}}")
         raw_system_prompt = data.get("system_prompt", "")
         output_var = data.get("output_variable", "output")
+        enable_tools = data.get("enable_tools", False)
+        allowed_tools = data.get("allowed_tools", [])
 
         self._log(f"LLM node raw prompt: {raw_prompt[:200]}...")
         self._log(f"Current variables: {list(self.variables.keys())}")
@@ -131,12 +140,105 @@ class WorkflowAgentRunner:
             else:
                 raise ValueError("No LLM provider available")
 
-        # Build request
+        # Build tool set if tools are enabled
+        func_tool = None
+        tool_map: dict[str, FunctionTool] = {}
+        if enable_tools and allowed_tools:
+            llm_tools = self.provider_manager.llm_tools
+            func_tool = ToolSet(tools=[])
+            for tool in llm_tools.func_list:
+                if tool.name in allowed_tools and tool.active:
+                    func_tool.add_tool(tool)
+                    tool_map[tool.name] = tool
+            self._log(f"LLM node enabled tools: {[t.name for t in func_tool.tools]}")
+
+        # Build initial request
         request = ProviderRequest(prompt=prompt, system_prompt=system_prompt)
         contexts = await request.assemble_context()
 
-        # Call LLM
-        response = await provider.text_chat(contexts=[contexts])
+        # Tool calling loop
+        max_iterations = 10  # Prevent infinite loops
+        iteration = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+            self._log(f"LLM call iteration {iteration}")
+
+            # Call LLM with or without tools
+            if func_tool and not func_tool.empty():
+                response = await provider.text_chat(
+                    contexts=[contexts],
+                    func_tool=func_tool,
+                    system_prompt=system_prompt,
+                )
+            else:
+                response = await provider.text_chat(
+                    contexts=[contexts],
+                    system_prompt=system_prompt,
+                )
+
+            # Check if LLM wants to call tools
+            if response.tools_call_name and response.tools_call_args:
+                self._log(f"LLM requested tool calls: {response.tools_call_name}")
+
+                # Execute each tool call
+                tool_results: list[ToolCallMessageSegment] = []
+                for i, tool_name in enumerate(response.tools_call_name):
+                    tool_args = response.tools_call_args[i] if i < len(response.tools_call_args) else {}
+                    tool_id = response.tools_call_ids[i] if i < len(response.tools_call_ids) else f"call_{i}"
+
+                    self._log(f"Executing tool: {tool_name} with args: {tool_args}")
+
+                    if tool_name in tool_map:
+                        try:
+                            tool_func = tool_map[tool_name]
+                            result = await tool_func.handler(**tool_args)
+                            result_str = str(result) if result is not None else ""
+                            self._log(f"Tool {tool_name} result: {result_str[:100]}...")
+                        except Exception as e:
+                            result_str = f"Error executing tool: {e}"
+                            self._log(f"Tool {tool_name} error: {e}")
+                    else:
+                        result_str = f"Tool '{tool_name}' not found in allowed tools"
+                        self._log(result_str)
+
+                    tool_results.append(ToolCallMessageSegment(
+                        role="tool",
+                        tool_call_id=tool_id,
+                        content=result_str,
+                    ))
+
+                # Build tool calls result for next iteration
+                assistant_msg = AssistantMessageSegment(
+                    role="assistant",
+                    content=response.completion_text or "",
+                    tool_calls=[
+                        ToolCall(
+                            id=response.tools_call_ids[i] if i < len(response.tools_call_ids) else f"call_{i}",
+                            function=ToolCall.FunctionBody(
+                                name=response.tools_call_name[i],
+                                arguments=json.dumps(response.tools_call_args[i]) if i < len(response.tools_call_args) else "{}",
+                            ),
+                        )
+                        for i in range(len(response.tools_call_name))
+                    ],
+                )
+
+                tool_calls_result = ToolCallsResult(
+                    tool_calls_info=assistant_msg,
+                    tool_calls_result=tool_results,
+                )
+
+                # Update request with tool results for next iteration
+                request = ProviderRequest(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    tool_calls_result=tool_calls_result,
+                )
+                contexts = await request.assemble_context()
+            else:
+                # No more tool calls, we have the final response
+                break
 
         result = response.completion_text or ""
         self.variables[output_var] = result
@@ -267,6 +369,58 @@ class WorkflowAgentRunner:
             self._log(f"Condition evaluation failed: {e}")
             return False
 
+    async def _execute_llm_judge_node(self, node: dict) -> bool:
+        """
+        Execute an LLM judge node.
+        Uses LLM to evaluate a question and returns True/False based on response.
+        """
+        data = node.get("data", {})
+        provider_id = data.get("provider_id", "")
+        raw_judge_prompt = data.get("judge_prompt", "")
+        true_keywords = data.get("true_keywords", "是,yes,true,正确")
+
+        if not raw_judge_prompt:
+            self._log("LLM Judge node: No judge prompt specified")
+            return False
+
+        judge_prompt = self._substitute_variables(raw_judge_prompt)
+        self._log(f"LLM Judge node prompt: {judge_prompt[:200]}...")
+
+        # Parse true keywords
+        keywords = [k.strip().lower() for k in true_keywords.split(",") if k.strip()]
+        self._log(f"LLM Judge true keywords: {keywords}")
+
+        # Find provider
+        provider = None
+        if provider_id:
+            for p in self.provider_manager.provider_insts:
+                if p.meta().id == provider_id:
+                    provider = p
+                    break
+
+        if not provider:
+            if self.provider_manager.provider_insts:
+                provider = self.provider_manager.provider_insts[0]
+            else:
+                raise ValueError("No LLM provider available for judge node")
+
+        # Build request with clear instruction
+        system_prompt = "你是一个判断助手。请根据问题内容，用简短的词语回答'是'或'否'。只需回答一个词。"
+        request = ProviderRequest(prompt=judge_prompt, system_prompt=system_prompt)
+        contexts = await request.assemble_context()
+
+        # Call LLM
+        response = await provider.text_chat(contexts=[contexts], system_prompt=system_prompt)
+        result_text = (response.completion_text or "").strip().lower()
+
+        self._log(f"LLM Judge response: {result_text}")
+
+        # Check if response contains any true keyword
+        is_true = any(keyword in result_text for keyword in keywords)
+        self._log(f"LLM Judge result: {is_true}")
+
+        return is_true
+
     async def _execute_node(self, node: dict) -> Any:
         """Execute a single node based on its type."""
         node_type = node.get("type", "")
@@ -293,6 +447,9 @@ class WorkflowAgentRunner:
 
         elif node_type == "condition":
             return await self._execute_condition_node(node)
+
+        elif node_type == "llmJudge":
+            return await self._execute_llm_judge_node(node)
 
         else:
             self._log(f"Unknown node type: {node_type}")
@@ -365,8 +522,14 @@ class WorkflowAgentRunner:
                         # For simplicity, we continue but don't update output
                         continue
 
+                # Handle LLM judge nodes similarly to condition nodes
+                if node_type == "llmJudge":
+                    if not result:
+                        self._log(f"LLM Judge returned False, skipping downstream nodes")
+                        continue
+
                 # Update output variable if we have a result
-                if result is not None and node_type not in ["start", "condition"]:
+                if result is not None and node_type not in ["start", "condition", "llmJudge"]:
                     self.variables["output"] = result
                     final_result = result
 

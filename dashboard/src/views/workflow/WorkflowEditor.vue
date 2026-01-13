@@ -111,6 +111,9 @@
                 <template v-else-if="node.type === 'knowledgeBase'">
                   <span class="text-caption">{{ getKnowledgeBaseName(node.data.kb_id) || tm('selectKnowledgeBase') }}</span>
                 </template>
+                <template v-else-if="node.type === 'llmJudge'">
+                  <span class="text-caption">{{ tm('nodeTypes.llmJudge') }}</span>
+                </template>
               </div>
               <!-- Connection points -->
               <div
@@ -203,7 +206,39 @@
                 variant="outlined"
                 density="compact"
                 placeholder="output"
+                class="mb-3"
               ></v-text-field>
+              <v-switch
+                v-model="selectedNode.data.enable_tools"
+                :label="tm('enableTools')"
+                density="compact"
+                color="primary"
+                class="mb-2"
+              ></v-switch>
+              <v-select
+                v-if="selectedNode.data.enable_tools"
+                v-model="selectedNode.data.allowed_tools"
+                :items="tools"
+                item-title="name"
+                item-value="name"
+                :label="tm('allowedTools')"
+                :no-data-text="tm('noTools')"
+                variant="outlined"
+                density="compact"
+                multiple
+                chips
+                closable-chips
+                :hint="tm('allowedToolsHint')"
+                persistent-hint
+              >
+                <template v-slot:item="{ item, props }">
+                  <v-list-item v-bind="props">
+                    <template v-slot:prepend>
+                      <v-icon size="small">mdi-wrench</v-icon>
+                    </template>
+                  </v-list-item>
+                </template>
+              </v-select>
             </template>
 
             <!-- Tool Node Properties -->
@@ -330,6 +365,44 @@
                 rows="3"
               ></v-textarea>
             </template>
+
+            <!-- LLM Judge Node Properties -->
+            <template v-else-if="selectedNode.type === 'llmJudge'">
+              <v-select
+                v-model="selectedNode.data.provider_id"
+                :items="providers"
+                item-title="id"
+                item-value="id"
+                :label="tm('provider')"
+                :no-data-text="tm('noProviders')"
+                variant="outlined"
+                density="compact"
+                class="mb-3"
+                clearable
+              ></v-select>
+              <v-textarea
+                v-model="selectedNode.data.judge_prompt"
+                :label="tm('judgePrompt')"
+                :hint="tm('judgePromptHint')"
+                variant="outlined"
+                density="compact"
+                rows="4"
+                class="mb-3"
+              ></v-textarea>
+              <v-text-field
+                v-model="selectedNode.data.true_keywords"
+                :label="tm('trueKeywords')"
+                :hint="tm('trueKeywordsHint')"
+                variant="outlined"
+                density="compact"
+                placeholder="是,yes,true,正确"
+                persistent-hint
+                class="mb-3"
+              ></v-text-field>
+              <v-alert type="info" variant="tonal" density="compact" class="text-caption">
+                {{ tm('llmJudgeInfo') }}
+              </v-alert>
+            </template>
           </template>
 
           <!-- Edge Selected -->
@@ -406,6 +479,7 @@ const NODE_TYPES = [
   { type: 'tool', icon: 'mdi-wrench', color: 'warning' },
   { type: 'knowledgeBase', icon: 'mdi-book-open-variant', color: 'purple' },
   { type: 'condition', icon: 'mdi-source-branch', color: 'info' },
+  { type: 'llmJudge', icon: 'mdi-head-question', color: 'cyan' },
 ];
 
 export default {
