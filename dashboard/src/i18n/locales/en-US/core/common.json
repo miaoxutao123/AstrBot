@@ -3,6 +3,7 @@
   "cancel": "Cancel",
   "close": "Close",
   "copy": "Copy",
+  "copied": "Copied",
   "delete": "Delete",
   "edit": "Edit",
   "add": "Add",
@@ -35,6 +36,7 @@
   "yes": "Yes",
   "no": "No",
   "imagePreview": "Image Preview",
+  "autoDetect": "Auto Detect",
   "dialog": {
     "confirmTitle": "Confirm Action",
     "confirmMessage": "Are you sure you want to perform this action?",
@@ -61,13 +63,28 @@
       "subtitle": "Please check the extension marketplace or contact the extension author for more information."
     }
   },
+  "changelog": {
+    "title": "Changelog",
+    "loading": "Loading changelog...",
+    "empty": {
+      "title": "No changelog available for this plugin",
+      "subtitle": "Developers can add a CHANGELOG.md file in the plugin directory to provide changelog"
+    }
+  },
   "editor": {
     "fullscreen": "Fullscreen Edit",
     "editingTitle": "Editing Content"
   },
+  "templateList": {
+    "addEntry": "Add Entry",
+    "empty": "No entries yet, pick a template to add",
+    "missingTemplate": "Template not found, please remove and add again.",
+    "unknownTemplate": "Template not specified"
+  },
   "list": {
     "addItemPlaceholder": "Add new item, press Enter to confirm",
     "addButton": "Add",
+    "addMore": "Add More",
     "batchImport": "Batch Import",
     "batchImportTitle": "Batch Import",
     "batchImportLabel": "One item per line",
@@ -84,7 +101,6 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "delete": "Delete",
-    "copy": "Copy",
     "edit": "Edit",
     "copy": "Copy",
     "noData": "No data available"

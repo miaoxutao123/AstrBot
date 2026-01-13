@@ -1,11 +1,12 @@
 """本地 Agent 模式的 LLM 调用 Stage"""
 
 import asyncio
-import copy
 import json
 from collections.abc import AsyncGenerator
 
 from astrbot.core import logger
+from astrbot.core.agent.message import Message
+from astrbot.core.agent.response import AgentStats
 from astrbot.core.agent.tool import ToolSet
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.conversation_mgr import Conversation
@@ -23,6 +24,7 @@ from astrbot.core.provider.entities import (
 )
 from astrbot.core.star.star_handler import EventType, star_map
 from astrbot.core.utils.file_extract import extract_file_moonshotai
+from astrbot.core.utils.llm_metadata import LLM_METADATAS
 from astrbot.core.utils.metrics import Metric
 from astrbot.core.utils.session_lock import session_lock_manager
 
@@ -32,7 +34,12 @@ from .....astr_agent_run_util import AgentRunner, run_agent
 from .....astr_agent_tool_exec import FunctionToolExecutor
 from ....context import PipelineContext, call_event_hook
 from ...stage import Stage
-from ...utils import KNOWLEDGE_BASE_QUERY_TOOL, retrieve_knowledge_base
+from ...utils import (
+    KNOWLEDGE_BASE_QUERY_TOOL,
+    LLM_SAFETY_MODE_SYSTEM_PROMPT,
+    decoded_blocked,
+    retrieve_knowledge_base,
+)
 
 
 class InternalAgentSubStage(Stage):
@@ -40,11 +47,6 @@ class InternalAgentSubStage(Stage):
         self.ctx = ctx
         conf = ctx.astrbot_config
         settings = conf["provider_settings"]
-        self.max_context_length = settings["max_context_length"]  # int
-        self.dequeue_context_length: int = min(
-            max(1, settings["dequeue_context_length"]),
-            self.max_context_length - 1,
-        )
         self.streaming_response: bool = settings["streaming_response"]
         self.unsupported_streaming_strategy: str = settings[
             "unsupported_streaming_strategy"
@@ -55,6 +57,10 @@ class InternalAgentSubStage(Stage):
             self.max_step = 30
         self.show_tool_use: bool = settings.get("show_tool_use_status", True)
         self.show_reasoning = settings.get("display_reasoning_text", False)
+        self.sanitize_context_by_modalities: bool = settings.get(
+            "sanitize_context_by_modalities",
+            False,
+        )
         self.kb_agentic_mode: bool = conf.get("kb_agentic_mode", False)
 
         file_extract_conf: dict = settings.get("file_extract", {})
@@ -62,6 +68,30 @@ class InternalAgentSubStage(Stage):
         self.file_extract_prov: str = file_extract_conf.get("provider", "moonshotai")
         self.file_extract_msh_api_key: str = file_extract_conf.get(
             "moonshotai_api_key", ""
+        )
+
+        # 上下文管理相关
+        self.context_limit_reached_strategy: str = settings.get(
+            "context_limit_reached_strategy", "truncate_by_turns"
+        )
+        self.llm_compress_instruction: str = settings.get(
+            "llm_compress_instruction", ""
+        )
+        self.llm_compress_keep_recent: int = settings.get("llm_compress_keep_recent", 4)
+        self.llm_compress_provider_id: str = settings.get(
+            "llm_compress_provider_id", ""
+        )
+        self.max_context_length = settings["max_context_length"]  # int
+        self.dequeue_context_length: int = min(
+            max(1, settings["dequeue_context_length"]),
+            self.max_context_length - 1,
+        )
+        if self.dequeue_context_length <= 0:
+            self.dequeue_context_length = 1
+
+        self.llm_safety_mode = settings.get("llm_safety_mode", True)
+        self.safety_mode_strategy = settings.get(
+            "safety_mode_strategy", "system_prompt"
         )
 
         self.conv_manager = ctx.plugin_manager.context.conversation_manager
@@ -166,34 +196,6 @@ class InternalAgentSubStage(Stage):
                 },
             )
 
-    def _truncate_contexts(
-        self,
-        contexts: list[dict],
-    ) -> list[dict]:
-        """截断上下文列表，确保不超过最大长度"""
-        if self.max_context_length == -1:
-            return contexts
-
-        if len(contexts) // 2 <= self.max_context_length:
-            return contexts
-
-        truncated_contexts = contexts[
-            -(self.max_context_length - self.dequeue_context_length + 1) * 2 :
-        ]
-        # 找到第一个role 为 user 的索引，确保上下文格式正确
-        index = next(
-            (
-                i
-                for i, item in enumerate(truncated_contexts)
-                if item.get("role") == "user"
-            ),
-            None,
-        )
-        if index is not None and index > 0:
-            truncated_contexts = truncated_contexts[index:]
-
-        return truncated_contexts
-
     def _modalities_fix(
         self,
         provider: Provider,
@@ -203,7 +205,16 @@ class InternalAgentSubStage(Stage):
         if req.image_urls:
             provider_cfg = provider.provider_config.get("modalities", ["image"])
             if "image" not in provider_cfg:
-                logger.debug(f"用户设置提供商 {provider} 不支持图像，清空图像列表。")
+                logger.debug(
+                    f"用户设置提供商 {provider} 不支持图像，将图像替换为占位符。"
+                )
+                # 为每个图片添加占位符到 prompt
+                image_count = len(req.image_urls)
+                placeholder = " ".join(["[图片]"] * image_count)
+                if req.prompt:
+                    req.prompt = f"{placeholder} {req.prompt}"
+                else:
+                    req.prompt = placeholder
                 req.image_urls = []
         if req.func_tool:
             provider_cfg = provider.provider_config.get("modalities", ["tool_use"])
@@ -213,6 +224,97 @@ class InternalAgentSubStage(Stage):
                     f"用户设置提供商 {provider} 不支持工具使用，清空工具列表。",
                 )
                 req.func_tool = None
+
+    def _sanitize_context_by_modalities(
+        self,
+        provider: Provider,
+        req: ProviderRequest,
+    ) -> None:
+        """Sanitize `req.contexts` (including history) by current provider modalities."""
+        if not self.sanitize_context_by_modalities:
+            return
+
+        if not isinstance(req.contexts, list) or not req.contexts:
+            return
+
+        modalities = provider.provider_config.get("modalities", None)
+        # if modalities is not configured, do not sanitize.
+        if not modalities or not isinstance(modalities, list):
+            return
+
+        supports_image = bool("image" in modalities)
+        supports_tool_use = bool("tool_use" in modalities)
+
+        if supports_image and supports_tool_use:
+            return
+
+        sanitized_contexts: list[dict] = []
+        removed_image_blocks = 0
+        removed_tool_messages = 0
+        removed_tool_calls = 0
+
+        for msg in req.contexts:
+            if not isinstance(msg, dict):
+                continue
+
+            role = msg.get("role")
+            if not role:
+                continue
+
+            new_msg: dict = msg
+
+            # tool_use sanitize
+            if not supports_tool_use:
+                if role == "tool":
+                    # tool response block
+                    removed_tool_messages += 1
+                    continue
+                if role == "assistant" and "tool_calls" in new_msg:
+                    # assistant message with tool calls
+                    if "tool_calls" in new_msg:
+                        removed_tool_calls += 1
+                    new_msg.pop("tool_calls", None)
+                    new_msg.pop("tool_call_id", None)
+
+            # image sanitize
+            if not supports_image:
+                content = new_msg.get("content")
+                if isinstance(content, list):
+                    filtered_parts: list = []
+                    removed_any_image = False
+                    for part in content:
+                        if isinstance(part, dict):
+                            part_type = str(part.get("type", "")).lower()
+                            if part_type in {"image_url", "image"}:
+                                removed_any_image = True
+                                removed_image_blocks += 1
+                                continue
+                        filtered_parts.append(part)
+
+                    if removed_any_image:
+                        new_msg["content"] = filtered_parts
+
+            # drop empty assistant messages (e.g. only tool_calls without content)
+            if role == "assistant":
+                content = new_msg.get("content")
+                has_tool_calls = bool(new_msg.get("tool_calls"))
+                if not has_tool_calls:
+                    if not content:
+                        continue
+                    if isinstance(content, str) and not content.strip():
+                        continue
+
+            sanitized_contexts.append(new_msg)
+
+        if removed_image_blocks or removed_tool_messages or removed_tool_calls:
+            logger.debug(
+                "sanitize_context_by_modalities applied: "
+                f"removed_image_blocks={removed_image_blocks}, "
+                f"removed_tool_messages={removed_tool_messages}, "
+                f"removed_tool_calls={removed_tool_calls}"
+            )
+
+        req.contexts = sanitized_contexts
 
     def _plugin_tool_fix(
         self,
@@ -294,6 +396,8 @@ class InternalAgentSubStage(Stage):
         event: AstrMessageEvent,
         req: ProviderRequest,
         llm_response: LLMResponse | None,
+        all_messages: list[Message],
+        runner_stats: AgentStats | None,
     ):
         if (
             not req
@@ -307,222 +411,299 @@ class InternalAgentSubStage(Stage):
             logger.debug("LLM 响应为空，不保存记录。")
             return
 
-        if req.contexts is None:
-            req.contexts = []
+        # using agent context messages to save to history
+        message_to_save = []
+        for message in all_messages:
+            if message.role == "system":
+                # we do not save system messages to history
+                continue
+            if message.role in ["assistant", "user"] and getattr(
+                message, "_no_save", None
+            ):
+                # we do not save user and assistant messages that are marked as _no_save
+                continue
+            message_to_save.append(message.model_dump())
 
-        # 历史上下文
-        messages = copy.deepcopy(req.contexts)
-        # 这一轮对话请求的用户输入
-        messages.append(await req.assemble_context())
-        # 这一轮对话的 LLM 响应
-        if req.tool_calls_result:
-            if not isinstance(req.tool_calls_result, list):
-                messages.extend(req.tool_calls_result.to_openai_messages())
-            elif isinstance(req.tool_calls_result, list):
-                for tcr in req.tool_calls_result:
-                    messages.extend(tcr.to_openai_messages())
-        messages.append(
-            {
-                "role": "assistant",
-                "content": llm_response.completion_text or "*No response*",
-            }
-        )
-        messages = list(filter(lambda item: "_no_save" not in item, messages))
+        # get token usage from agent runner stats
+        token_usage = None
+        if runner_stats:
+            token_usage = runner_stats.token_usage.total
+
         await self.conv_manager.update_conversation(
             event.unified_msg_origin,
             req.conversation.cid,
-            history=messages,
+            history=message_to_save,
+            token_usage=token_usage,
         )
 
-    def _fix_messages(self, messages: list[dict]) -> list[dict]:
-        """验证并且修复上下文"""
-        fixed_messages = []
-        for message in messages:
-            if message.get("role") == "tool":
-                # tool block 前面必须要有 user 和 assistant block
-                if len(fixed_messages) < 2:
-                    # 这种情况可能是上下文被截断导致的
-                    # 我们直接将之前的上下文都清空
-                    fixed_messages = []
-                else:
-                    fixed_messages.append(message)
-            else:
-                fixed_messages.append(message)
-        return fixed_messages
+    def _get_compress_provider(self) -> Provider | None:
+        if not self.llm_compress_provider_id:
+            return None
+        if self.context_limit_reached_strategy != "llm_compress":
+            return None
+        provider = self.ctx.plugin_manager.context.get_provider_by_id(
+            self.llm_compress_provider_id,
+        )
+        if provider is None:
+            logger.warning(
+                f"未找到指定的上下文压缩模型 {self.llm_compress_provider_id}，将跳过压缩。",
+            )
+            return None
+        if not isinstance(provider, Provider):
+            logger.warning(
+                f"指定的上下文压缩模型 {self.llm_compress_provider_id} 不是对话模型，将跳过压缩。"
+            )
+            return None
+        return provider
+
+    def _apply_llm_safety_mode(self, req: ProviderRequest) -> None:
+        """Apply LLM safety mode to the provider request."""
+        if self.safety_mode_strategy == "system_prompt":
+            req.system_prompt = (
+                f"{LLM_SAFETY_MODE_SYSTEM_PROMPT}\n\n{req.system_prompt or ''}"
+            )
+        else:
+            logger.warning(
+                f"Unsupported llm_safety_mode strategy: {self.safety_mode_strategy}.",
+            )
 
     async def process(
         self, event: AstrMessageEvent, provider_wake_prefix: str
     ) -> AsyncGenerator[None, None]:
         req: ProviderRequest | None = None
 
-        provider = self._select_provider(event)
-        if provider is None:
-            return
-        if not isinstance(provider, Provider):
-            logger.error(f"选择的提供商类型无效({type(provider)})，跳过 LLM 请求处理。")
-            return
-
-        streaming_response = self.streaming_response
-        if (enable_streaming := event.get_extra("enable_streaming")) is not None:
-            streaming_response = bool(enable_streaming)
-
-        logger.debug("ready to request llm provider")
-        async with session_lock_manager.acquire_lock(event.unified_msg_origin):
-            logger.debug("acquired session lock for llm request")
-            if event.get_extra("provider_request"):
-                req = event.get_extra("provider_request")
-                assert isinstance(req, ProviderRequest), (
-                    "provider_request 必须是 ProviderRequest 类型。"
+        try:
+            provider = self._select_provider(event)
+            if provider is None:
+                return
+            if not isinstance(provider, Provider):
+                logger.error(
+                    f"选择的提供商类型无效({type(provider)})，跳过 LLM 请求处理。"
                 )
+                return
 
-                if req.conversation:
-                    req.contexts = json.loads(req.conversation.history)
+            streaming_response = self.streaming_response
+            if (enable_streaming := event.get_extra("enable_streaming")) is not None:
+                streaming_response = bool(enable_streaming)
 
-            else:
-                req = ProviderRequest()
-                req.prompt = ""
-                req.image_urls = []
-                if sel_model := event.get_extra("selected_model"):
-                    req.model = sel_model
-                if provider_wake_prefix and not event.message_str.startswith(
-                    provider_wake_prefix
-                ):
+            # 检查消息内容是否有效，避免空消息触发钩子
+            has_provider_request = event.get_extra("provider_request") is not None
+            has_valid_message = bool(event.message_str and event.message_str.strip())
+            # 检查是否有图片或其他媒体内容
+            has_media_content = any(
+                isinstance(comp, (Image, File)) for comp in event.message_obj.message
+            )
+
+            if (
+                not has_provider_request
+                and not has_valid_message
+                and not has_media_content
+            ):
+                logger.debug("skip llm request: empty message and no provider_request")
+                return
+
+            api_base = provider.provider_config.get("api_base", "")
+            for host in decoded_blocked:
+                if host in api_base:
+                    logger.error(
+                        f"Provider API base {api_base} is blocked due to security reasons. Please use another ai provider."
+                    )
                     return
 
-                req.prompt = event.message_str[len(provider_wake_prefix) :]
-                # func_tool selection 现在已经转移到 packages/astrbot 插件中进行选择。
-                # req.func_tool = self.ctx.plugin_manager.context.get_llm_tool_manager()
-                for comp in event.message_obj.message:
-                    if isinstance(comp, Image):
-                        image_path = await comp.convert_to_file_path()
-                        req.image_urls.append(image_path)
+            logger.debug("ready to request llm provider")
 
-                conversation = await self._get_session_conv(event)
-                req.conversation = conversation
-                req.contexts = json.loads(conversation.history)
+            # 通知等待调用 LLM（在获取锁之前）
+            await call_event_hook(event, EventType.OnWaitingLLMRequestEvent)
 
-                event.set_extra("provider_request", req)
+            async with session_lock_manager.acquire_lock(event.unified_msg_origin):
+                logger.debug("acquired session lock for llm request")
+                if event.get_extra("provider_request"):
+                    req = event.get_extra("provider_request")
+                    assert isinstance(req, ProviderRequest), (
+                        "provider_request 必须是 ProviderRequest 类型。"
+                    )
 
-            # fix contexts json str
-            if isinstance(req.contexts, str):
-                req.contexts = json.loads(req.contexts)
+                    if req.conversation:
+                        req.contexts = json.loads(req.conversation.history)
 
-            # apply file extract
-            if self.file_extract_enabled:
-                try:
-                    await self._apply_file_extract(event, req)
-                except Exception as e:
-                    logger.error(f"Error occurred while applying file extract: {e}")
+                else:
+                    req = ProviderRequest()
+                    req.prompt = ""
+                    req.image_urls = []
+                    if sel_model := event.get_extra("selected_model"):
+                        req.model = sel_model
+                    if provider_wake_prefix and not event.message_str.startswith(
+                        provider_wake_prefix
+                    ):
+                        return
 
-            if not req.prompt and not req.image_urls:
-                return
+                    req.prompt = event.message_str[len(provider_wake_prefix) :]
+                    # func_tool selection 现在已经转移到 astrbot/builtin_stars/astrbot 插件中进行选择。
+                    # req.func_tool = self.ctx.plugin_manager.context.get_llm_tool_manager()
+                    for comp in event.message_obj.message:
+                        if isinstance(comp, Image):
+                            image_path = await comp.convert_to_file_path()
+                            req.image_urls.append(image_path)
 
-            # call event hook
-            if await call_event_hook(event, EventType.OnLLMRequestEvent, req):
-                return
+                    conversation = await self._get_session_conv(event)
+                    req.conversation = conversation
+                    req.contexts = json.loads(conversation.history)
 
-            # apply knowledge base feature
-            await self._apply_kb(event, req)
+                    event.set_extra("provider_request", req)
 
-            # truncate contexts to fit max length
-            if req.contexts:
-                req.contexts = self._truncate_contexts(req.contexts)
-                self._fix_messages(req.contexts)
+                # fix contexts json str
+                if isinstance(req.contexts, str):
+                    req.contexts = json.loads(req.contexts)
 
-            # session_id
-            if not req.session_id:
-                req.session_id = event.unified_msg_origin
+                # apply file extract
+                if self.file_extract_enabled:
+                    try:
+                        await self._apply_file_extract(event, req)
+                    except Exception as e:
+                        logger.error(f"Error occurred while applying file extract: {e}")
 
-            # check provider modalities, if provider does not support image/tool_use, clear them in request.
-            self._modalities_fix(provider, req)
+                if not req.prompt and not req.image_urls:
+                    return
 
-            # filter tools, only keep tools from this pipeline's selected plugins
-            self._plugin_tool_fix(event, req)
+                # call event hook
+                if await call_event_hook(event, EventType.OnLLMRequestEvent, req):
+                    return
 
-            stream_to_general = (
-                self.unsupported_streaming_strategy == "turn_off"
-                and not event.platform_meta.support_streaming_message
-            )
-            # 备份 req.contexts
-            backup_contexts = copy.deepcopy(req.contexts)
+                # apply knowledge base feature
+                await self._apply_kb(event, req)
 
-            # run agent
-            agent_runner = AgentRunner()
-            logger.debug(
-                f"handle provider[id: {provider.provider_config['id']}] request: {req}",
-            )
-            astr_agent_ctx = AstrAgentContext(
-                context=self.ctx.plugin_manager.context,
-                event=event,
-            )
-            await agent_runner.reset(
-                provider=provider,
-                request=req,
-                run_context=AgentContextWrapper(
-                    context=astr_agent_ctx,
-                    tool_call_timeout=self.tool_call_timeout,
-                ),
-                tool_executor=FunctionToolExecutor(),
-                agent_hooks=MAIN_AGENT_HOOKS,
-                streaming=streaming_response,
-            )
+                # truncate contexts to fit max length
+                # NOW moved to ContextManager inside ToolLoopAgentRunner
+                # if req.contexts:
+                #     req.contexts = self._truncate_contexts(req.contexts)
+                #     self._fix_messages(req.contexts)
 
-            if streaming_response and not stream_to_general:
-                # 流式响应
-                event.set_result(
-                    MessageEventResult()
-                    .set_result_content_type(ResultContentType.STREAMING_RESULT)
-                    .set_async_stream(
-                        run_agent(
-                            agent_runner,
-                            self.max_step,
-                            self.show_tool_use,
-                            show_reasoning=self.show_reasoning,
-                        ),
-                    ),
+                # session_id
+                if not req.session_id:
+                    req.session_id = event.unified_msg_origin
+
+                # check provider modalities, if provider does not support image/tool_use, clear them in request.
+                self._modalities_fix(provider, req)
+
+                # filter tools, only keep tools from this pipeline's selected plugins
+                self._plugin_tool_fix(event, req)
+
+                # sanitize contexts (including history) by provider modalities
+                self._sanitize_context_by_modalities(provider, req)
+
+                # apply llm safety mode
+                if self.llm_safety_mode:
+                    self._apply_llm_safety_mode(req)
+
+                stream_to_general = (
+                    self.unsupported_streaming_strategy == "turn_off"
+                    and not event.platform_meta.support_streaming_message
                 )
-                yield
-                if agent_runner.done():
-                    if final_llm_resp := agent_runner.get_final_llm_resp():
-                        if final_llm_resp.completion_text:
-                            chain = (
-                                MessageChain()
-                                .message(final_llm_resp.completion_text)
-                                .chain
-                            )
-                        elif final_llm_resp.result_chain:
-                            chain = final_llm_resp.result_chain.chain
-                        else:
-                            chain = MessageChain().chain
-                        event.set_result(
-                            MessageEventResult(
-                                chain=chain,
-                                result_content_type=ResultContentType.STREAMING_FINISH,
+
+                # run agent
+                agent_runner = AgentRunner()
+                logger.debug(
+                    f"handle provider[id: {provider.provider_config['id']}] request: {req}",
+                )
+                astr_agent_ctx = AstrAgentContext(
+                    context=self.ctx.plugin_manager.context,
+                    event=event,
+                )
+
+                # inject model context length limit
+                if provider.provider_config.get("max_context_tokens", 0) <= 0:
+                    model = provider.get_model()
+                    if model_info := LLM_METADATAS.get(model):
+                        provider.provider_config["max_context_tokens"] = model_info[
+                            "limit"
+                        ]["context"]
+
+                await agent_runner.reset(
+                    provider=provider,
+                    request=req,
+                    run_context=AgentContextWrapper(
+                        context=astr_agent_ctx,
+                        tool_call_timeout=self.tool_call_timeout,
+                    ),
+                    tool_executor=FunctionToolExecutor(),
+                    agent_hooks=MAIN_AGENT_HOOKS,
+                    streaming=streaming_response,
+                    llm_compress_instruction=self.llm_compress_instruction,
+                    llm_compress_keep_recent=self.llm_compress_keep_recent,
+                    llm_compress_provider=self._get_compress_provider(),
+                    truncate_turns=self.dequeue_context_length,
+                    enforce_max_turns=self.max_context_length,
+                )
+
+                if streaming_response and not stream_to_general:
+                    # 流式响应
+                    event.set_result(
+                        MessageEventResult()
+                        .set_result_content_type(ResultContentType.STREAMING_RESULT)
+                        .set_async_stream(
+                            run_agent(
+                                agent_runner,
+                                self.max_step,
+                                self.show_tool_use,
+                                show_reasoning=self.show_reasoning,
                             ),
-                        )
-            else:
-                async for _ in run_agent(
-                    agent_runner,
-                    self.max_step,
-                    self.show_tool_use,
-                    stream_to_general,
-                    show_reasoning=self.show_reasoning,
-                ):
+                        ),
+                    )
                     yield
+                    if agent_runner.done():
+                        if final_llm_resp := agent_runner.get_final_llm_resp():
+                            if final_llm_resp.completion_text:
+                                chain = (
+                                    MessageChain()
+                                    .message(final_llm_resp.completion_text)
+                                    .chain
+                                )
+                            elif final_llm_resp.result_chain:
+                                chain = final_llm_resp.result_chain.chain
+                            else:
+                                chain = MessageChain().chain
+                            event.set_result(
+                                MessageEventResult(
+                                    chain=chain,
+                                    result_content_type=ResultContentType.STREAMING_FINISH,
+                                ),
+                            )
+                else:
+                    async for _ in run_agent(
+                        agent_runner,
+                        self.max_step,
+                        self.show_tool_use,
+                        stream_to_general,
+                        show_reasoning=self.show_reasoning,
+                    ):
+                        yield
 
-            # 恢复备份的 contexts
-            req.contexts = backup_contexts
+                # 检查事件是否被停止，如果被停止则不保存历史记录
+                if not event.is_stopped():
+                    await self._save_to_history(
+                        event,
+                        req,
+                        agent_runner.get_final_llm_resp(),
+                        agent_runner.run_context.messages,
+                        agent_runner.stats,
+                    )
 
-            await self._save_to_history(event, req, agent_runner.get_final_llm_resp())
+            # 异步处理 WebChat 特殊情况
+            if event.get_platform_name() == "webchat":
+                asyncio.create_task(self._handle_webchat(event, req, provider))
 
-        # 异步处理 WebChat 特殊情况
-        if event.get_platform_name() == "webchat":
-            asyncio.create_task(self._handle_webchat(event, req, provider))
+            asyncio.create_task(
+                Metric.upload(
+                    llm_tick=1,
+                    model_name=agent_runner.provider.get_model(),
+                    provider_type=agent_runner.provider.meta().type,
+                ),
+            )
 
-        asyncio.create_task(
-            Metric.upload(
-                llm_tick=1,
-                model_name=agent_runner.provider.get_model(),
-                provider_type=agent_runner.provider.meta().type,
-            ),
-        )
+        except Exception as e:
+            logger.error(f"Error occurred while processing agent: {e}")
+            await event.send(
+                MessageChain().message(
+                    f"Error occurred while processing agent request: {e}"
+                )
+            )

@@ -5,7 +5,7 @@ from typing import Any, TypedDict
 
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-VERSION = "4.10.2"
+VERSION = "4.11.4"
 DB_PATH = os.path.join(get_astrbot_data_path(), "data_v4.db")
 
 WEBHOOK_SUPPORTED_PLATFORMS = [
@@ -83,10 +83,21 @@ DEFAULT_CONFIG = {
         "default_personality": "default",
         "persona_pool": ["*"],
         "prompt_prefix": "{{prompt}}",
+        "context_limit_reached_strategy": "truncate_by_turns",  # or llm_compress
+        "llm_compress_instruction": (
+            "Based on our full conversation history, produce a concise summary of key takeaways and/or project progress.\n"
+            "1. Systematically cover all core topics discussed and the final conclusion/outcome for each; clearly highlight the latest primary focus.\n"
+            "2. If any tools were used, summarize tool usage (total call count) and extract the most valuable insights from tool outputs.\n"
+            "3. If there was an initial user goal, state it first and describe the current progress/status.\n"
+            "4. Write the summary in the user's language.\n"
+        ),
+        "llm_compress_keep_recent": 4,
+        "llm_compress_provider_id": "",
         "max_context_length": -1,
         "dequeue_context_length": 1,
         "streaming_response": False,
         "show_tool_use_status": False,
+        "sanitize_context_by_modalities": False,
         "agent_runner_type": "local",
         "dify_agent_runner_provider_id": "",
         "coze_agent_runner_provider_id": "",
@@ -95,6 +106,8 @@ DEFAULT_CONFIG = {
         "reachability_check": False,
         "max_agent_step": 30,
         "tool_call_timeout": 60,
+        "llm_safety_mode": True,
+        "safety_mode_strategy": "system_prompt",  # TODO: llm judge
         "file_extract": {
             "enable": False,
             "provider": "moonshotai",
@@ -179,6 +192,7 @@ class ChatProviderTemplate(TypedDict):
     model: str
     modalities: list
     custom_extra_body: dict[str, Any]
+    max_context_tokens: int
 
 
 CHAT_PROVIDER_TEMPLATE = {
@@ -187,6 +201,7 @@ CHAT_PROVIDER_TEMPLATE = {
     "model": "",
     "modalities": [],
     "custom_extra_body": {},
+    "max_context_tokens": 0,
 }
 
 """
@@ -234,16 +249,6 @@ CONFIG_METADATA_2 = {
                         "ws_reverse_host": "0.0.0.0",
                         "ws_reverse_port": 6199,
                         "ws_reverse_token": "",
-                    },
-                    "WeChatPadPro": {
-                        "id": "wechatpadpro",
-                        "type": "wechatpadpro",
-                        "enable": False,
-                        "admin_key": "stay33",
-                        "host": "这里填写你的局域网IP或者公网服务器IP",
-                        "port": 8059,
-                        "wpp_active_message_poll": False,
-                        "wpp_active_message_poll_interval": 3,
                     },
                     "微信公众平台": {
                         "id": "weixin_official_account",
@@ -905,6 +910,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.anthropic.com/v1",
                         "timeout": 120,
+                        "anth_thinking_config": {"budget": 0},
                     },
                     "Moonshot": {
                         "id": "moonshot",
@@ -920,7 +926,7 @@ CONFIG_METADATA_2 = {
                     "xAI": {
                         "id": "xai",
                         "provider": "xai",
-                        "type": "openai_chat_completion",
+                        "type": "xai_chat_completion",
                         "provider_type": "chat_completion",
                         "enable": True,
                         "key": [],
@@ -981,17 +987,6 @@ CONFIG_METADATA_2 = {
                         "enable": True,
                         "key": ["lmstudio"],
                         "api_base": "http://127.0.0.1:1234/v1",
-                        "custom_headers": {},
-                    },
-                    "ModelStack": {
-                        "id": "modelstack",
-                        "provider": "modelstack",
-                        "type": "openai_chat_completion",
-                        "provider_type": "chat_completion",
-                        "enable": True,
-                        "key": [],
-                        "api_base": "https://modelstack.app/v1",
-                        "timeout": 120,
                         "custom_headers": {},
                     },
                     "Gemini_OpenAI_API": {
@@ -1286,7 +1281,7 @@ CONFIG_METADATA_2 = {
                         "minimax-is-timber-weight": False,
                         "minimax-voice-id": "female-shaonv",
                         "minimax-timber-weight": '[\n    {\n        "voice_id": "Chinese (Mandarin)_Warm_Girl",\n        "weight": 25\n    },\n    {\n        "voice_id": "Chinese (Mandarin)_BashfulGirl",\n        "weight": 50\n    }\n]',
-                        "minimax-voice-emotion": "neutral",
+                        "minimax-voice-emotion": "auto",
                         "minimax-voice-latex": False,
                         "minimax-voice-english-normalization": False,
                         "timeout": 20,
@@ -1450,7 +1445,32 @@ CONFIG_METADATA_2 = {
                         "description": "自定义请求体参数",
                         "type": "dict",
                         "items": {},
-                        "hint": "此处添加的键值对将被合并到发送给 API 的 extra_body 中。值可以是字符串、数字或布尔值。",
+                        "hint": "用于在请求时添加额外的参数，如 temperature、top_p、max_tokens 等。",
+                        "template_schema": {
+                            "temperature": {
+                                "name": "Temperature",
+                                "description": "温度参数",
+                                "hint": "控制输出的随机性，范围通常为 0-2。值越高越随机。",
+                                "type": "float",
+                                "default": 0.6,
+                                "slider": {"min": 0, "max": 2, "step": 0.1},
+                            },
+                            "top_p": {
+                                "name": "Top-p",
+                                "description": "Top-p 采样",
+                                "hint": "核采样参数，范围通常为 0-1。控制模型考虑的概率质量。",
+                                "type": "float",
+                                "default": 1.0,
+                                "slider": {"min": 0, "max": 1, "step": 0.01},
+                            },
+                            "max_tokens": {
+                                "name": "Max Tokens",
+                                "description": "最大令牌数",
+                                "hint": "生成的最大令牌数。",
+                                "type": "int",
+                                "default": 8192,
+                            },
+                        },
                     },
                     "provider": {
                         "type": "string",
@@ -1787,6 +1807,17 @@ CONFIG_METADATA_2 = {
                             },
                         },
                     },
+                    "anth_thinking_config": {
+                        "description": "Thinking Config",
+                        "type": "object",
+                        "items": {
+                            "budget": {
+                                "description": "Thinking Budget",
+                                "type": "int",
+                                "hint": "Anthropic thinking.budget_tokens param. Must >= 1024. See: https://platform.claude.com/docs/en/build-with-claude/extended-thinking",
+                            },
+                        },
+                    },
                     "minimax-group-id": {
                         "type": "string",
                         "description": "用户组",
@@ -1858,15 +1889,18 @@ CONFIG_METADATA_2 = {
                     "minimax-voice-emotion": {
                         "type": "string",
                         "description": "情绪",
-                        "hint": "控制合成语音的情绪",
+                        "hint": "控制合成语音的情绪。当为 auto 时，将根据文本内容自动选择情绪。",
                         "options": [
+                            "auto",
                             "happy",
                             "sad",
                             "angry",
                             "fearful",
                             "disgusted",
                             "surprised",
-                            "neutral",
+                            "calm",
+                            "fluent",
+                            "whisper",
                         ],
                     },
                     "minimax-voice-latex": {
@@ -1992,6 +2026,11 @@ CONFIG_METADATA_2 = {
                         "description": "模型 ID",
                         "type": "string",
                         "hint": "模型名称，如 gpt-4o-mini, deepseek-chat。",
+                    },
+                    "max_context_tokens": {
+                        "description": "模型上下文窗口大小",
+                        "type": "int",
+                        "hint": "模型最大上下文 Token 大小。如果为 0，则会自动从模型元数据填充（如有），也可手动修改。",
                     },
                     "dify_api_key": {
                         "description": "API Key",
@@ -2500,6 +2539,66 @@ CONFIG_METADATA_3 = {
             #         "provider_settings.enable": True,
             #     },
             # },
+            "truncate_and_compress": {
+                "description": "上下文管理策略",
+                "type": "object",
+                "items": {
+                    "provider_settings.max_context_length": {
+                        "description": "最多携带对话轮数",
+                        "type": "int",
+                        "hint": "超出这个数量时丢弃最旧的部分，一轮聊天记为 1 条，-1 为不限制",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.dequeue_context_length": {
+                        "description": "丢弃对话轮数",
+                        "type": "int",
+                        "hint": "超出最多携带对话轮数时, 一次丢弃的聊天轮数",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.context_limit_reached_strategy": {
+                        "description": "超出模型上下文窗口时的处理方式",
+                        "type": "string",
+                        "options": ["truncate_by_turns", "llm_compress"],
+                        "labels": ["按对话轮数截断", "由 LLM 压缩上下文"],
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                        "hint": "",
+                    },
+                    "provider_settings.llm_compress_instruction": {
+                        "description": "上下文压缩提示词",
+                        "type": "text",
+                        "hint": "如果为空则使用默认提示词。",
+                        "condition": {
+                            "provider_settings.context_limit_reached_strategy": "llm_compress",
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.llm_compress_keep_recent": {
+                        "description": "压缩时保留最近对话轮数",
+                        "type": "int",
+                        "hint": "始终保留的最近 N 轮对话。",
+                        "condition": {
+                            "provider_settings.context_limit_reached_strategy": "llm_compress",
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.llm_compress_provider_id": {
+                        "description": "用于上下文压缩的模型提供商 ID",
+                        "type": "string",
+                        "_special": "select_provider",
+                        "hint": "留空时将降级为“按对话轮数截断”的策略。",
+                        "condition": {
+                            "provider_settings.context_limit_reached_strategy": "llm_compress",
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                },
+            },
             "others": {
                 "description": "其他配置",
                 "type": "object",
@@ -2509,6 +2608,34 @@ CONFIG_METADATA_3 = {
                         "type": "bool",
                         "condition": {
                             "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.streaming_response": {
+                        "description": "流式输出",
+                        "type": "bool",
+                    },
+                    "provider_settings.unsupported_streaming_strategy": {
+                        "description": "不支持流式回复的平台",
+                        "type": "string",
+                        "options": ["realtime_segmenting", "turn_off"],
+                        "hint": "选择在不支持流式回复的平台上的处理方式。实时分段回复会在系统接收流式响应检测到诸如标点符号等分段点时，立即发送当前已接收的内容",
+                        "labels": ["实时分段回复", "关闭流式回复"],
+                        "condition": {
+                            "provider_settings.streaming_response": True,
+                        },
+                    },
+                    "provider_settings.llm_safety_mode": {
+                        "description": "健康模式",
+                        "type": "bool",
+                        "hint": "引导模型输出健康、安全的内容，避免有害或敏感话题。",
+                    },
+                    "provider_settings.safety_mode_strategy": {
+                        "description": "健康模式策略",
+                        "type": "string",
+                        "options": ["system_prompt"],
+                        "hint": "选择健康模式的实现策略。",
+                        "condition": {
+                            "provider_settings.llm_safety_mode": True,
                         },
                     },
                     "provider_settings.identifier": {
@@ -2536,6 +2663,14 @@ CONFIG_METADATA_3 = {
                             "provider_settings.agent_runner_type": "local",
                         },
                     },
+                    "provider_settings.sanitize_context_by_modalities": {
+                        "description": "按模型能力清理历史上下文",
+                        "type": "bool",
+                        "hint": "开启后，在每次请求 LLM 前会按当前模型提供商中所选择的模型能力删除对话中不支持的图片/工具调用结构（会改变模型看到的历史）",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
                     "provider_settings.max_agent_step": {
                         "description": "工具调用轮数上限",
                         "type": "int",
@@ -2546,36 +2681,6 @@ CONFIG_METADATA_3 = {
                     "provider_settings.tool_call_timeout": {
                         "description": "工具调用超时时间（秒）",
                         "type": "int",
-                        "condition": {
-                            "provider_settings.agent_runner_type": "local",
-                        },
-                    },
-                    "provider_settings.streaming_response": {
-                        "description": "流式输出",
-                        "type": "bool",
-                    },
-                    "provider_settings.unsupported_streaming_strategy": {
-                        "description": "不支持流式回复的平台",
-                        "type": "string",
-                        "options": ["realtime_segmenting", "turn_off"],
-                        "hint": "选择在不支持流式回复的平台上的处理方式。实时分段回复会在系统接收流式响应检测到诸如标点符号等分段点时，立即发送当前已接收的内容",
-                        "labels": ["实时分段回复", "关闭流式回复"],
-                        "condition": {
-                            "provider_settings.streaming_response": True,
-                        },
-                    },
-                    "provider_settings.max_context_length": {
-                        "description": "最多携带对话轮数",
-                        "type": "int",
-                        "hint": "超出这个数量时丢弃最旧的部分，一轮聊天记为 1 条，-1 为不限制",
-                        "condition": {
-                            "provider_settings.agent_runner_type": "local",
-                        },
-                    },
-                    "provider_settings.dequeue_context_length": {
-                        "description": "丢弃对话轮数",
-                        "type": "int",
-                        "hint": "超出最多携带对话轮数时, 一次丢弃的聊天轮数",
                         "condition": {
                             "provider_settings.agent_runner_type": "local",
                         },
@@ -3049,4 +3154,5 @@ DEFAULT_VALUE_MAP = {
     "text": "",
     "list": [],
     "object": {},
+    "template_list": [],
 }

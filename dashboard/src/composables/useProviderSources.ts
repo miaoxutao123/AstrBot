@@ -94,29 +94,7 @@ export function useProviderSources(options: UseProviderSourcesOptions) {
   })
 
   const displayedProviderSources = computed(() => {
-    const existing = filteredProviderSources.value || []
-    const existingProviders = new Set(existing.map((src: any) => src.provider).filter(Boolean))
-    const placeholders: any[] = []
-
-    if (providerTemplates.value && Object.keys(providerTemplates.value).length > 0) {
-      for (const [templateKey, template] of Object.entries(providerTemplates.value)) {
-        if (template.provider_type !== selectedProviderType.value) continue
-        if (!template.provider) continue
-        if (existingProviders.has(template.provider)) continue
-
-        placeholders.push({
-          id: template.id || templateKey,
-          provider: template.provider,
-          provider_type: template.provider_type,
-          type: template.type,
-          api_base: template.api_base || '',
-          templateKey,
-          isPlaceholder: true
-        })
-      }
-    }
-
-    return [...existing, ...placeholders]
+    return filteredProviderSources.value || []
   })
 
   const sourceProviders = computed(() => {
@@ -239,6 +217,24 @@ export function useProviderSources(options: UseProviderSourcesOptions) {
     }
 
     return providers.value.filter((provider: any) => getProviderType(provider) === selectedProviderType.value)
+  })
+
+  const providerSourceSchema = computed(() => {
+    if (!configSchema.value || !configSchema.value.provider) {
+      return configSchema.value
+    }
+
+    // 创建一个深拷贝以避免修改原始 schema
+    const customSchema = JSON.parse(JSON.stringify(configSchema.value))
+
+    // 为 provider source 的 id 字段添加自定义 hint
+    if (customSchema.provider?.items?.id) {
+      customSchema.provider.items.id.hint = tm('providerSources.hints.id')
+      customSchema.provider.items.key.hint = tm('providerSources.hints.key')
+      customSchema.provider.items.api_base.hint = tm('providerSources.hints.apiBase')
+    }
+
+    return customSchema
   })
 
   // ===== Watches =====
@@ -508,12 +504,24 @@ export function useProviderSources(options: UseProviderSourcesOptions) {
     const sourceId = editableProviderSource.value?.id || selectedProviderSource.value.id
     const newId = `${sourceId}/${modelName}`
 
-    const modalities = ['text']
-    if (supportsImageInput(getModelMetadata(modelName))) {
-      modalities.push('image')
+    const metadata = getModelMetadata(modelName)
+    let modalities: string[]
+
+    if (!metadata) {
+      modalities = ['text', 'image', 'tool_use']
+    } else {
+      modalities = ['text']
+      if (supportsImageInput(metadata)) {
+        modalities.push('image')
+      }
+      if (supportsToolCall(metadata)) {
+        modalities.push('tool_use')
+      }
     }
-    if (supportsToolCall(getModelMetadata(modelName))) {
-      modalities.push('tool_use')
+
+    let max_context_tokens = 0
+    if (metadata?.limit?.context && typeof metadata.limit.context === 'number') {
+      max_context_tokens = metadata.limit.context
     }
 
     const newProvider = {
@@ -522,7 +530,8 @@ export function useProviderSources(options: UseProviderSourcesOptions) {
       provider_source_id: sourceId,
       model: modelName,
       modalities,
-      custom_extra_body: {}
+      custom_extra_body: {},
+      max_context_tokens: max_context_tokens
     }
 
     try {
@@ -633,6 +642,7 @@ export function useProviderSources(options: UseProviderSourcesOptions) {
     basicSourceConfig,
     advancedSourceConfig,
     manualProviderId,
+    providerSourceSchema,
 
     // helpers
     resolveSourceIcon,

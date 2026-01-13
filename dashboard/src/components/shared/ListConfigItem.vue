@@ -23,7 +23,7 @@
       </div>
     </div>
     <v-btn size="small" color="primary" variant="tonal" @click="openDialog">
-      {{ preferSingleItem ? '添加更多' : (buttonText || t('core.common.list.modifyButton')) }}
+      {{ preferSingleItem ? t('core.common.list.addMore') : (buttonText || t('core.common.list.modifyButton')) }}
     </v-btn>
   </div>
 
@@ -48,6 +48,14 @@
             :placeholder="t('core.common.list.inputPlaceholder')"
             class="flex-grow-1">
           </v-text-field>
+          <v-btn
+            @click="addItem"
+            variant="tonal"
+            color="primary"
+            size="small"
+            :disabled="!newItem.trim()">
+            {{ t('core.common.list.addButton') }}
+          </v-btn>
           <v-btn 
             @click="showBatchImport = true" 
             variant="tonal" 
@@ -151,7 +159,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from '@/i18n/composables'
 
 const { t } = useI18n()
@@ -167,11 +175,11 @@ const props = defineProps({
   },
   buttonText: {
     type: String,
-    default: '修改'
+    default: ''
   },
   dialogTitle: {
     type: String,
-    default: '修改列表项'
+    default: ''
   },
   maxDisplayItems: {
     type: Number,
@@ -197,8 +205,13 @@ const isSingleItemMode = computed(() => (props.modelValue?.length ?? 0) <= 1 && 
 const singleItemValue = computed({
   get: () => props.modelValue?.[0] ?? '',
   set: (value) => {
-    const newItems = [...(props.modelValue || [])]
+    // 如果值为空或只有空白字符，emit 空数组
+    if (value.trim() === '') {
+      emit('update:modelValue', [])
+      return
+    }
 
+    const newItems = [...(props.modelValue || [])]
     if (newItems.length === 0) {
       newItems.push(value)
     } else {
@@ -224,9 +237,20 @@ const batchImportPreviewCount = computed(() => {
     .length
 })
 
-// 监听 modelValue 变化，同步到 localItems
+// 监听 modelValue 变化，同步到 localItems，并清理空字符串
 watch(() => props.modelValue, (newValue) => {
   localItems.value = [...(newValue || [])]
+  
+  // 自动清理只包含空字符串的数组
+  if (newValue && newValue.length > 0) {
+    const filtered = newValue.filter(item => typeof item === 'string' ? item.trim() !== '' : true)
+    if (filtered.length !== newValue.length) {
+      // 使用 nextTick 确保父组件已准备好接收更新
+      nextTick(() => {
+        emit('update:modelValue', filtered)
+      })
+    }
+  }
 }, { immediate: true })
 
 function openDialog() {
@@ -267,7 +291,9 @@ function cancelEdit() {
 }
 
 function confirmDialog() {
-  emit('update:modelValue', [...localItems.value])
+  // 过滤空字符串，同时处理非字符串类型
+  const filteredItems = localItems.value.filter(item => typeof item === 'string' ? item.trim() !== '' : true)
+  emit('update:modelValue', filteredItems)
   dialog.value = false
 }
 

@@ -1,4 +1,4 @@
-![astrbot-banner-xmas](https://github.com/user-attachments/assets/bf2341de-ec7a-45a7-a04a-02ad36450e99)
+![AstrBot-Logo-Simplified](https://github.com/user-attachments/assets/ffd99b6b-3272-4682-beaa-6fe74250f7d9)
 
 <div align="center">
 
@@ -36,7 +36,7 @@
 
 AstrBot 是一个开源的一站式 Agent 聊天机器人平台，可接入主流即时通讯软件，为个人、开发者和团队打造可靠、可扩展的对话式智能基础设施。无论是个人 AI 伙伴、智能客服、自动化助手，还是企业知识库，AstrBot 都能在你的即时通讯软件平台的工作流中快速构建生产可用的 AI 应用。
 
-<img width="1776" height="1080" alt="image" src="https://github.com/user-attachments/assets/00782c4c-4437-4d97-aabc-605e3738da5c" />
+![521771166-00782c4c-4437-4d97-aabc-605e3738da5c (1)](https://github.com/user-attachments/assets/61e7b505-f7db-41aa-a75f-4ef8f079b8ba)
 
 ## 主要功能
 
@@ -132,10 +132,9 @@ uv run main.py
 
 **社区维护**
 
+- [Matrix](https://github.com/stevessr/astrbot_plugin_matrix_adapter)
 - [KOOK](https://github.com/wuyan1003/astrbot_plugin_kook_adapter)
 - [VoceChat](https://github.com/HikariFroya/astrbot_plugin_vocechat)
-- [Bilibili 私信](https://github.com/Hina-Chat/astrbot_plugin_bilibili_adapter)
-- [wxauto](https://github.com/luosheng520qaq/wxauto-repost-onebotv11)
 
 ## 支持的模型服务
 
@@ -208,6 +207,7 @@ pre-commit install
 - 5 群：822130018
 - 6 群：753075035
 - 7 群：743746109
+- 8 群：1030353265
 - 开发者群：975206796
 
 ### Telegram 群组

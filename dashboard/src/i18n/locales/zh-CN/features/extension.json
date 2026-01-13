@@ -27,6 +27,7 @@
     "configure": "配置",
     "viewInfo": "行为",
     "viewDocs": "文档",
+    "viewRepo": "仓库",
     "close": "关闭",
     "save": "保存",
     "saveAndClose": "保存并关闭",
@@ -89,7 +90,7 @@
     "addSource": "添加插件源",
     "sourceName": "源名称",
     "sourceUrl": "源地址",
-    "defaultSource": "官方插件源",
+    "defaultSource": "默认插件源",
     "removeSource": "删除插件源",
     "confirmRemoveSource": "确定要删除此插件源吗？",
     "sourceAdded": "插件源添加成功",
@@ -145,6 +146,11 @@
       "message": "该插件可能包含不安全的代码或功能，可能导致系统异常或数据损失等。请确认是否继续安装？",
       "confirm": "继续",
       "cancel": "取消"
+    },
+    "forceUpdate": {
+      "title": "未检测到新版本",
+      "message": "当前插件未检测到新版本，是否强制重新安装？这将从远程仓库拉取最新代码。",
+      "confirm": "强制更新"
     }
   },
   "messages": {
@@ -185,7 +191,8 @@
       "reloadPlugin": "重载插件",
       "togglePlugin": "插件",
       "viewHandlers": "查看行为",
-      "updateTo": "更新到"
+      "updateTo": "更新到",
+      "reinstall": "重新安装"
     },
     "status": {
       "hasUpdate": "有新版本可用",
@@ -206,5 +213,8 @@
     "pairs": "对指令冲突",
     "goToManage": "前往处理",
     "later": "稍后处理"
+  },
+  "pluginChangelog": {
+    "menuTitle": "查看更新日志"
   }
 }

@@ -13,6 +13,7 @@ from mcp.types import (
 )
 
 from astrbot import logger
+from astrbot.core.agent.message import TextPart, ThinkPart
 from astrbot.core.message.components import Json
 from astrbot.core.message.message_event_result import (
     MessageChain,
@@ -24,6 +25,10 @@ from astrbot.core.provider.entities import (
 )
 from astrbot.core.provider.provider import Provider
 
+from ..context.compressor import ContextCompressor
+from ..context.config import ContextConfig
+from ..context.manager import ContextManager
+from ..context.token_counter import TokenCounter
 from ..hooks import BaseAgentRunHooks
 from ..message import AssistantMessageSegment, Message, ToolCallMessageSegment
 from ..response import AgentResponseData, AgentStats
@@ -46,10 +51,47 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         run_context: ContextWrapper[TContext],
         tool_executor: BaseFunctionToolExecutor[TContext],
         agent_hooks: BaseAgentRunHooks[TContext],
+        streaming: bool = False,
+        # enforce max turns, will discard older turns when exceeded BEFORE compression
+        # -1 means no limit
+        enforce_max_turns: int = -1,
+        # llm compressor
+        llm_compress_instruction: str | None = None,
+        llm_compress_keep_recent: int = 0,
+        llm_compress_provider: Provider | None = None,
+        # truncate by turns compressor
+        truncate_turns: int = 1,
+        # customize
+        custom_token_counter: TokenCounter | None = None,
+        custom_compressor: ContextCompressor | None = None,
         **kwargs: T.Any,
     ) -> None:
         self.req = request
-        self.streaming = kwargs.get("streaming", False)
+        self.streaming = streaming
+        self.enforce_max_turns = enforce_max_turns
+        self.llm_compress_instruction = llm_compress_instruction
+        self.llm_compress_keep_recent = llm_compress_keep_recent
+        self.llm_compress_provider = llm_compress_provider
+        self.truncate_turns = truncate_turns
+        self.custom_token_counter = custom_token_counter
+        self.custom_compressor = custom_compressor
+        # we will do compress when:
+        # 1. before requesting LLM
+        # TODO: 2. after LLM output a tool call
+        self.context_config = ContextConfig(
+            # <=0 will never do compress
+            max_context_tokens=provider.provider_config.get("max_context_tokens", 0),
+            # enforce max turns before compression
+            enforce_max_turns=self.enforce_max_turns,
+            truncate_turns=self.truncate_turns,
+            llm_compress_instruction=self.llm_compress_instruction,
+            llm_compress_keep_recent=self.llm_compress_keep_recent,
+            llm_compress_provider=self.llm_compress_provider,
+            custom_token_counter=self.custom_token_counter,
+            custom_compressor=self.custom_compressor,
+        )
+        self.context_manager = ContextManager(self.context_config)
+
         self.provider = provider
         self.final_llm_resp = None
         self._state = AgentState.IDLE
@@ -77,10 +119,11 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
     async def _iter_llm_responses(self) -> T.AsyncGenerator[LLMResponse, None]:
         """Yields chunks *and* a final LLMResponse."""
         payload = {
-            "contexts": self.run_context.messages,
+            "contexts": self.run_context.messages,  # list[Message]
             "func_tool": self.req.func_tool,
             "model": self.req.model,  # NOTE: in fact, this arg is None in most cases
             "session_id": self.req.session_id,
+            "extra_user_content_parts": self.req.extra_user_content_parts,  # list[ContentPart]
         }
 
         if self.streaming:
@@ -107,6 +150,12 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         # 开始处理，转换到运行状态
         self._transition_state(AgentState.RUNNING)
         llm_resp_result = None
+
+        # do truncate and compress
+        token_usage = self.req.conversation.token_usage if self.req.conversation else 0
+        self.run_context.messages = await self.context_manager.process(
+            self.run_context.messages, trusted_token_usage=token_usage
+        )
 
         async for llm_response in self._iter_llm_responses():
             if llm_response.is_chunk:
@@ -168,13 +217,20 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
             self.final_llm_resp = llm_resp
             self._transition_state(AgentState.DONE)
             self.stats.end_time = time.time()
+
             # record the final assistant message
-            self.run_context.messages.append(
-                Message(
-                    role="assistant",
-                    content=llm_resp.completion_text or "*No response*",
-                ),
-            )
+            parts = []
+            if llm_resp.reasoning_content or llm_resp.reasoning_signature:
+                parts.append(
+                    ThinkPart(
+                        think=llm_resp.reasoning_content,
+                        encrypted=llm_resp.reasoning_signature,
+                    )
+                )
+            parts.append(TextPart(text=llm_resp.completion_text or "*No response*"))
+            self.run_context.messages.append(Message(role="assistant", content=parts))
+
+            # call the on_agent_done hook
             try:
                 await self.agent_hooks.on_agent_done(self.run_context, llm_resp)
             except Exception as e:
@@ -213,10 +269,19 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                         data=AgentResponseData(chain=result),
                     )
             # 将结果添加到上下文中
+            parts = []
+            if llm_resp.reasoning_content or llm_resp.reasoning_signature:
+                parts.append(
+                    ThinkPart(
+                        think=llm_resp.reasoning_content,
+                        encrypted=llm_resp.reasoning_signature,
+                    )
+                )
+            parts.append(TextPart(text=llm_resp.completion_text or "*No response*"))
             tool_calls_result = ToolCallsResult(
                 tool_calls_info=AssistantMessageSegment(
                     tool_calls=llm_resp.to_openai_to_calls_model(),
-                    content=llm_resp.completion_text,
+                    content=parts,
                 ),
                 tool_calls_result=tool_call_result_blocks,
             )
@@ -404,10 +469,10 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
 
                     elif resp is None:
                         # Tool 直接请求发送消息给用户
-                        # 这里我们将直接结束 Agent Loop。
-                        # 发送消息逻辑在 ToolExecutor 中处理了。
+                        # 这里我们将直接结束 Agent Loop
+                        # 发送消息逻辑在 ToolExecutor 中处理了
                         logger.warning(
-                            f"{func_tool_name} 没有没有返回值或者将结果直接发送给用户。"
+                            f"{func_tool_name} 没有返回值，或者已将结果直接发送给用户。"
                         )
                         self._transition_state(AgentState.DONE)
                         self.stats.end_time = time.time()

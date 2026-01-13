@@ -98,6 +98,9 @@ class ResultDecorateStage(Stage):
                     self.content_safe_check_stage = stage_cls()
                     await self.content_safe_check_stage.initialize(ctx)
 
+        provider_cfg = ctx.astrbot_config.get("provider_settings", {})
+        self.show_reasoning = provider_cfg.get("display_reasoning_text", False)
+
     def _split_text_by_words(self, text: str) -> list[str]:
         """使用分段词列表分段文本"""
         if not self.split_words_pattern:
@@ -254,70 +257,75 @@ class ResultDecorateStage(Stage):
                 event.unified_msg_origin,
             )
 
-            if (
-                self.ctx.astrbot_config["provider_tts_settings"]["enable"]
+            should_tts = (
+                bool(self.ctx.astrbot_config["provider_tts_settings"]["enable"])
                 and result.is_llm_result()
-                and SessionServiceManager.should_process_tts_request(event)
-            ):
-                should_tts = self.tts_trigger_probability >= 1.0 or (
-                    self.tts_trigger_probability > 0.0
-                    and random.random() <= self.tts_trigger_probability
+                and await SessionServiceManager.should_process_tts_request(event)
+                and random.random() <= self.tts_trigger_probability
+                and tts_provider
+            )
+            if should_tts and not tts_provider:
+                logger.warning(
+                    f"会话 {event.unified_msg_origin} 未配置文本转语音模型。",
                 )
 
-                if not should_tts:
-                    logger.debug("跳过 TTS：触发概率未命中。")
-                elif not tts_provider:
-                    logger.warning(
-                        f"会话 {event.unified_msg_origin} 未配置文本转语音模型。",
-                    )
-                else:
-                    new_chain = []
-                    for comp in result.chain:
-                        if isinstance(comp, Plain) and len(comp.text) > 1:
-                            try:
-                                logger.info(f"TTS 请求: {comp.text}")
-                                audio_path = await tts_provider.get_audio(comp.text)
-                                logger.info(f"TTS 结果: {audio_path}")
-                                if not audio_path:
-                                    logger.error(
-                                        f"由于 TTS 音频文件未找到，消息段转语音失败: {comp.text}",
-                                    )
-                                    new_chain.append(comp)
-                                    continue
+            if (
+                not should_tts
+                and self.show_reasoning
+                and event.get_extra("_llm_reasoning_content")
+            ):
+                # inject reasoning content to chain
+                reasoning_content = event.get_extra("_llm_reasoning_content")
+                result.chain.insert(0, Plain(f"🤔 思考: {reasoning_content}\n"))
 
-                                use_file_service = self.ctx.astrbot_config[
-                                    "provider_tts_settings"
-                                ]["use_file_service"]
-                                callback_api_base = self.ctx.astrbot_config[
-                                    "callback_api_base"
-                                ]
-                                dual_output = self.ctx.astrbot_config[
-                                    "provider_tts_settings"
-                                ]["dual_output"]
-
-                                url = None
-                                if use_file_service and callback_api_base:
-                                    token = await file_token_service.register_file(
-                                        audio_path,
-                                    )
-                                    url = f"{callback_api_base}/api/file/{token}"
-                                    logger.debug(f"已注册：{url}")
-
-                                new_chain.append(
-                                    Record(
-                                        file=url or audio_path,
-                                        url=url or audio_path,
-                                    ),
+            if should_tts and tts_provider:
+                new_chain = []
+                for comp in result.chain:
+                    if isinstance(comp, Plain) and len(comp.text) > 1:
+                        try:
+                            logger.info(f"TTS 请求: {comp.text}")
+                            audio_path = await tts_provider.get_audio(comp.text)
+                            logger.info(f"TTS 结果: {audio_path}")
+                            if not audio_path:
+                                logger.error(
+                                    f"由于 TTS 音频文件未找到，消息段转语音失败: {comp.text}",
                                 )
-                                if dual_output:
-                                    new_chain.append(comp)
-                            except Exception:
-                                logger.error(traceback.format_exc())
-                                logger.error("TTS 失败，使用文本发送。")
                                 new_chain.append(comp)
-                        else:
+                                continue
+
+                            use_file_service = self.ctx.astrbot_config[
+                                "provider_tts_settings"
+                            ]["use_file_service"]
+                            callback_api_base = self.ctx.astrbot_config[
+                                "callback_api_base"
+                            ]
+                            dual_output = self.ctx.astrbot_config[
+                                "provider_tts_settings"
+                            ]["dual_output"]
+
+                            url = None
+                            if use_file_service and callback_api_base:
+                                token = await file_token_service.register_file(
+                                    audio_path,
+                                )
+                                url = f"{callback_api_base}/api/file/{token}"
+                                logger.debug(f"已注册：{url}")
+
+                            new_chain.append(
+                                Record(
+                                    file=url or audio_path,
+                                    url=url or audio_path,
+                                ),
+                            )
+                            if dual_output:
+                                new_chain.append(comp)
+                        except Exception:
+                            logger.error(traceback.format_exc())
+                            logger.error("TTS 失败，使用文本发送。")
                             new_chain.append(comp)
-                    result.chain = new_chain
+                    else:
+                        new_chain.append(comp)
+                result.chain = new_chain
 
             # 文本转图片
             elif (

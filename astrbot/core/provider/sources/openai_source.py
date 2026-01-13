@@ -17,7 +17,7 @@ from openai.types.completion_usage import CompletionUsage
 import astrbot.core.message.components as Comp
 from astrbot import logger
 from astrbot.api.provider import Provider
-from astrbot.core.agent.message import Message
+from astrbot.core.agent.message import ContentPart, ImageURLPart, Message, TextPart
 from astrbot.core.agent.tool import ToolSet
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.provider.entities import LLMResponse, TokenUsage, ToolCallsResult
@@ -74,28 +74,6 @@ class ProviderOpenAIOfficial(Provider):
 
         self.reasoning_key = "reasoning_content"
 
-    def _maybe_inject_xai_search(self, payloads: dict, **kwargs):
-        """当开启 xAI 原生搜索时，向请求体注入 Live Search 参数。
-
-        - 仅在 provider_config.xai_native_search 为 True 时生效
-        - 默认注入 {"mode": "auto"}
-        - 允许通过 kwargs 使用 xai_search_mode 覆盖（on/auto/off）
-        """
-        if not bool(self.provider_config.get("xai_native_search", False)):
-            return
-
-        mode = kwargs.get("xai_search_mode", "auto")
-        mode = str(mode).lower()
-        if mode not in ("auto", "on", "off"):
-            mode = "auto"
-
-        # off 时不注入，保持与未开启一致
-        if mode == "off":
-            return
-
-        # OpenAI SDK 不识别的字段会在 _query/_query_stream 中放入 extra_body
-        payloads["search_parameters"] = {"mode": mode}
-
     async def get_models(self):
         try:
             models_str = []
@@ -133,10 +111,6 @@ class ProviderOpenAIOfficial(Provider):
             extra_body.update(custom_extra_body)
 
         model = payloads.get("model", "").lower()
-
-        # 针对 deepseek 模型的特殊处理：deepseek-reasoner调用必须移除 tools ，否则将被切换至 deepseek-chat
-        if model == "deepseek-reasoner" and "tools" in payloads:
-            del payloads["tools"]
 
         completion = await self.client.chat.completions.create(
             **payloads,
@@ -251,10 +225,14 @@ class ProviderOpenAIOfficial(Provider):
     def _extract_usage(self, usage: CompletionUsage) -> TokenUsage:
         ptd = usage.prompt_tokens_details
         cached = ptd.cached_tokens if ptd and ptd.cached_tokens else 0
+        prompt_tokens = 0 if usage.prompt_tokens is None else usage.prompt_tokens
+        completion_tokens = (
+            0 if usage.completion_tokens is None else usage.completion_tokens
+        )
         return TokenUsage(
-            input_other=usage.prompt_tokens - cached,
-            input_cached=ptd.cached_tokens if ptd and ptd.cached_tokens else 0,
-            output=usage.completion_tokens,
+            input_other=prompt_tokens - cached,
+            input_cached=cached,
+            output=completion_tokens,
         )
 
     async def _parse_openai_completion(
@@ -348,6 +326,7 @@ class ProviderOpenAIOfficial(Provider):
         system_prompt: str | None = None,
         tool_calls_result: ToolCallsResult | list[ToolCallsResult] | None = None,
         model: str | None = None,
+        extra_user_content_parts: list[ContentPart] | None = None,
         **kwargs,
     ) -> tuple:
         """准备聊天所需的有效载荷和上下文"""
@@ -355,7 +334,9 @@ class ProviderOpenAIOfficial(Provider):
             contexts = []
         new_record = None
         if prompt is not None:
-            new_record = await self.assemble_context(prompt, image_urls)
+            new_record = await self.assemble_context(
+                prompt, image_urls, extra_user_content_parts
+            )
         context_query = self._ensure_message_to_dicts(contexts)
         if new_record:
             context_query.append(new_record)
@@ -378,10 +359,27 @@ class ProviderOpenAIOfficial(Provider):
 
         payloads = {"messages": context_query, "model": model}
 
-        # xAI origin search tool inject
-        self._maybe_inject_xai_search(payloads, **kwargs)
+        self._finally_convert_payload(payloads)
 
         return payloads, context_query
+
+    def _finally_convert_payload(self, payloads: dict):
+        """Finally convert the payload. Such as think part conversion, tool inject."""
+        for message in payloads.get("messages", []):
+            if message.get("role") == "assistant" and isinstance(
+                message.get("content"), list
+            ):
+                reasoning_content = ""
+                new_content = []  # not including think part
+                for part in message["content"]:
+                    if part.get("type") == "think":
+                        reasoning_content += str(part.get("think"))
+                    else:
+                        new_content.append(part)
+                message["content"] = new_content
+                # reasoning key is "reasoning_content"
+                if reasoning_content:
+                    message["reasoning_content"] = reasoning_content
 
     async def _handle_api_error(
         self,
@@ -476,6 +474,7 @@ class ProviderOpenAIOfficial(Provider):
         system_prompt=None,
         tool_calls_result=None,
         model=None,
+        extra_user_content_parts=None,
         **kwargs,
     ) -> LLMResponse:
         payloads, context_query = await self._prepare_chat_payload(
@@ -485,6 +484,7 @@ class ProviderOpenAIOfficial(Provider):
             system_prompt,
             tool_calls_result,
             model=model,
+            extra_user_content_parts=extra_user_content_parts,
             **kwargs,
         )
 
@@ -624,33 +624,71 @@ class ProviderOpenAIOfficial(Provider):
         self,
         text: str,
         image_urls: list[str] | None = None,
+        extra_user_content_parts: list[ContentPart] | None = None,
     ) -> dict:
         """组装成符合 OpenAI 格式的 role 为 user 的消息段"""
-        if image_urls:
-            user_content = {
-                "role": "user",
-                "content": [{"type": "text", "text": text if text else "[图片]"}],
+
+        async def resolve_image_part(image_url: str) -> dict | None:
+            if image_url.startswith("http"):
+                image_path = await download_image_by_url(image_url)
+                image_data = await self.encode_image_bs64(image_path)
+            elif image_url.startswith("file:///"):
+                image_path = image_url.replace("file:///", "")
+                image_data = await self.encode_image_bs64(image_path)
+            else:
+                image_data = await self.encode_image_bs64(image_url)
+            if not image_data:
+                logger.warning(f"图片 {image_url} 得到的结果为空，将忽略。")
+                return None
+            return {
+                "type": "image_url",
+                "image_url": {"url": image_data},
             }
-            for image_url in image_urls:
-                if image_url.startswith("http"):
-                    image_path = await download_image_by_url(image_url)
-                    image_data = await self.encode_image_bs64(image_path)
-                elif image_url.startswith("file:///"):
-                    image_path = image_url.replace("file:///", "")
-                    image_data = await self.encode_image_bs64(image_path)
+
+        # 构建内容块列表
+        content_blocks = []
+
+        # 1. 用户原始发言（OpenAI 建议：用户发言在前）
+        if text:
+            content_blocks.append({"type": "text", "text": text})
+        elif image_urls:
+            # 如果没有文本但有图片，添加占位文本
+            content_blocks.append({"type": "text", "text": "[图片]"})
+        elif extra_user_content_parts:
+            # 如果只有额外内容块，也需要添加占位文本
+            content_blocks.append({"type": "text", "text": " "})
+
+        # 2. 额外的内容块（系统提醒、指令等）
+        if extra_user_content_parts:
+            for part in extra_user_content_parts:
+                if isinstance(part, TextPart):
+                    content_blocks.append({"type": "text", "text": part.text})
+                elif isinstance(part, ImageURLPart):
+                    image_part = await resolve_image_part(part.image_url.url)
+                    if image_part:
+                        content_blocks.append(image_part)
                 else:
-                    image_data = await self.encode_image_bs64(image_url)
-                if not image_data:
-                    logger.warning(f"图片 {image_url} 得到的结果为空，将忽略。")
-                    continue
-                user_content["content"].append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data},
-                    },
-                )
-            return user_content
-        return {"role": "user", "content": text}
+                    raise ValueError(f"不支持的额外内容块类型: {type(part)}")
+
+        # 3. 图片内容
+        if image_urls:
+            for image_url in image_urls:
+                image_part = await resolve_image_part(image_url)
+                if image_part:
+                    content_blocks.append(image_part)
+
+        # 如果只有主文本且没有额外内容块和图片，返回简单格式以保持向后兼容
+        if (
+            text
+            and not extra_user_content_parts
+            and not image_urls
+            and len(content_blocks) == 1
+            and content_blocks[0]["type"] == "text"
+        ):
+            return {"role": "user", "content": content_blocks[0]["text"]}
+
+        # 否则返回多模态格式
+        return {"role": "user", "content": content_blocks}
 
     async def encode_image_bs64(self, image_url: str) -> str:
         """将图片转换为 base64"""

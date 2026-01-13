@@ -13,6 +13,7 @@ from google.genai.errors import APIError
 import astrbot.core.message.components as Comp
 from astrbot import logger
 from astrbot.api.provider import Provider
+from astrbot.core.agent.message import ContentPart, ImageURLPart, TextPart
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
 from astrbot.core.provider.func_tool_manager import ToolSet
@@ -320,9 +321,37 @@ class ProviderGoogleGenAI(Provider):
                 append_or_extend(gemini_contents, parts, types.UserContent)
 
             elif role == "assistant":
-                if content:
+                if isinstance(content, str):
                     parts = [types.Part.from_text(text=content)]
                     append_or_extend(gemini_contents, parts, types.ModelContent)
+                elif isinstance(content, list):
+                    parts = []
+                    thinking_signature = None
+                    text = ""
+                    for part in content:
+                        # for most cases, assistant content only contains two parts: think and text
+                        if part.get("type") == "think":
+                            thinking_signature = part.get("encrypted") or None
+                        else:
+                            text += str(part.get("text"))
+
+                    if thinking_signature and isinstance(thinking_signature, str):
+                        try:
+                            thinking_signature = base64.b64decode(thinking_signature)
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to decode google gemini thinking signature: {e}",
+                                exc_info=True,
+                            )
+                            thinking_signature = None
+                    parts.append(
+                        types.Part(
+                            text=text,
+                            thought_signature=thinking_signature,
+                        )
+                    )
+                    append_or_extend(gemini_contents, parts, types.ModelContent)
+
                 elif not native_tool_enabled and "tool_calls" in message:
                     parts = []
                     for tool in message["tool_calls"]:
@@ -440,7 +469,8 @@ class ProviderGoogleGenAI(Provider):
         for part in result_parts:
             if part.text:
                 chain.append(Comp.Plain(part.text))
-            elif (
+
+            if (
                 part.function_call
                 and part.function_call.name is not None
                 and part.function_call.args is not None
@@ -457,13 +487,18 @@ class ProviderGoogleGenAI(Provider):
                     llm_response.tools_call_extra_content[tool_call_id] = {
                         "google": {"thought_signature": ts_bs64}
                     }
-            elif (
+
+            if (
                 part.inline_data
                 and part.inline_data.mime_type
                 and part.inline_data.mime_type.startswith("image/")
                 and part.inline_data.data
             ):
                 chain.append(Comp.Image.fromBytes(part.inline_data.data))
+
+            if ts := part.thought_signature:
+                # only keep the last thinking signature
+                llm_response.reasoning_signature = base64.b64encode(ts).decode("utf-8")
         return MessageChain(chain=chain)
 
     async def _query(self, payloads: dict, tools: ToolSet | None) -> LLMResponse:
@@ -680,13 +715,16 @@ class ProviderGoogleGenAI(Provider):
         system_prompt=None,
         tool_calls_result=None,
         model=None,
+        extra_user_content_parts=None,
         **kwargs,
     ) -> LLMResponse:
         if contexts is None:
             contexts = []
         new_record = None
         if prompt is not None:
-            new_record = await self.assemble_context(prompt, image_urls)
+            new_record = await self.assemble_context(
+                prompt, image_urls, extra_user_content_parts
+            )
         context_query = self._ensure_message_to_dicts(contexts)
         if new_record:
             context_query.append(new_record)
@@ -732,13 +770,16 @@ class ProviderGoogleGenAI(Provider):
         system_prompt=None,
         tool_calls_result=None,
         model=None,
+        extra_user_content_parts=None,
         **kwargs,
     ) -> AsyncGenerator[LLMResponse, None]:
         if contexts is None:
             contexts = []
         new_record = None
         if prompt is not None:
-            new_record = await self.assemble_context(prompt, image_urls)
+            new_record = await self.assemble_context(
+                prompt, image_urls, extra_user_content_parts
+            )
         context_query = self._ensure_message_to_dicts(contexts)
         if new_record:
             context_query.append(new_record)
@@ -797,33 +838,75 @@ class ProviderGoogleGenAI(Provider):
         self.chosen_api_key = key
         self._init_client()
 
-    async def assemble_context(self, text: str, image_urls: list[str] | None = None):
+    async def assemble_context(
+        self,
+        text: str,
+        image_urls: list[str] | None = None,
+        extra_user_content_parts: list[ContentPart] | None = None,
+    ):
         """组装上下文。"""
-        if image_urls:
-            user_content = {
-                "role": "user",
-                "content": [{"type": "text", "text": text if text else "[图片]"}],
+
+        async def resolve_image_part(image_url: str) -> dict | None:
+            if image_url.startswith("http"):
+                image_path = await download_image_by_url(image_url)
+                image_data = await self.encode_image_bs64(image_path)
+            elif image_url.startswith("file:///"):
+                image_path = image_url.replace("file:///", "")
+                image_data = await self.encode_image_bs64(image_path)
+            else:
+                image_data = await self.encode_image_bs64(image_url)
+            if not image_data:
+                logger.warning(f"图片 {image_url} 得到的结果为空，将忽略。")
+                return None
+            return {
+                "type": "image_url",
+                "image_url": {"url": image_data},
             }
-            for image_url in image_urls:
-                if image_url.startswith("http"):
-                    image_path = await download_image_by_url(image_url)
-                    image_data = await self.encode_image_bs64(image_path)
-                elif image_url.startswith("file:///"):
-                    image_path = image_url.replace("file:///", "")
-                    image_data = await self.encode_image_bs64(image_path)
+
+        # 构建内容块列表
+        content_blocks = []
+
+        # 1. 用户原始发言（OpenAI 建议：用户发言在前）
+        if text:
+            content_blocks.append({"type": "text", "text": text})
+        elif image_urls:
+            # 如果没有文本但有图片，添加占位文本
+            content_blocks.append({"type": "text", "text": "[图片]"})
+        elif extra_user_content_parts:
+            # 如果只有额外内容块，也需要添加占位文本
+            content_blocks.append({"type": "text", "text": " "})
+
+        # 2. 额外的内容块（系统提醒、指令等）
+        if extra_user_content_parts:
+            for part in extra_user_content_parts:
+                if isinstance(part, TextPart):
+                    content_blocks.append({"type": "text", "text": part.text})
+                elif isinstance(part, ImageURLPart):
+                    image_part = await resolve_image_part(part.image_url.url)
+                    if image_part:
+                        content_blocks.append(image_part)
                 else:
-                    image_data = await self.encode_image_bs64(image_url)
-                if not image_data:
-                    logger.warning(f"图片 {image_url} 得到的结果为空，将忽略。")
-                    continue
-                user_content["content"].append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data},
-                    },
-                )
-            return user_content
-        return {"role": "user", "content": text}
+                    raise ValueError(f"不支持的额外内容块类型: {type(part)}")
+
+        # 3. 图片内容
+        if image_urls:
+            for image_url in image_urls:
+                image_part = await resolve_image_part(image_url)
+                if image_part:
+                    content_blocks.append(image_part)
+
+        # 如果只有主文本且没有额外内容块和图片，返回简单格式以保持向后兼容
+        if (
+            text
+            and not extra_user_content_parts
+            and not image_urls
+            and len(content_blocks) == 1
+            and content_blocks[0]["type"] == "text"
+        ):
+            return {"role": "user", "content": content_blocks[0]["text"]}
+
+        # 否则返回多模态格式
+        return {"role": "user", "content": content_blocks}
 
     async def encode_image_bs64(self, image_url: str) -> str:
         """将图片转换为 base64"""
