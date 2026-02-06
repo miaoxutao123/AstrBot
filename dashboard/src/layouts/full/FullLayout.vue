@@ -6,6 +6,7 @@ import VerticalSidebarVue from './vertical-sidebar/VerticalSidebar.vue';
 import VerticalHeaderVue from './vertical-header/VerticalHeader.vue';
 import MigrationDialog from '@/components/shared/MigrationDialog.vue';
 import Chat from '@/components/chat/Chat.vue';
+import WorkflowList from '@/views/workflow/WorkflowList.vue';
 import { useCustomizerStore } from '@/stores/customizer';
 import { useRouterLoadingStore } from '@/stores/routerLoading';
 
@@ -26,6 +27,16 @@ const showSidebar = computed(() => {
 // 计算是否显示 chat 页面（在 chat 模式下显示）
 const showChatPage = computed(() => {
   return customizer.viewMode === 'chat';
+});
+
+// 计算是否显示 workflow 页面（在 workflow 模式下显示）
+const showWorkflowPage = computed(() => {
+  return customizer.viewMode === 'workflow';
+});
+
+// 计算是否显示全屏模式（chat 或 workflow）
+const isFullscreenMode = computed(() => {
+  return customizer.viewMode === 'chat' || customizer.viewMode === 'workflow';
 });
 
 const migrationDialog = ref<InstanceType<typeof MigrationDialog> | null>(null);
@@ -75,21 +86,24 @@ onMounted(() => {
       <VerticalHeaderVue />
       <VerticalSidebarVue v-if="showSidebar" />
       <v-main :style="{ 
-        height: showChatPage ? 'calc(100vh - 55px)' : undefined,
-        overflow: showChatPage ? 'hidden' : undefined
+        height: isFullscreenMode ? 'calc(100vh - 55px)' : undefined,
+        overflow: isFullscreenMode ? 'hidden' : undefined
       }">
         <v-container 
           fluid 
           class="page-wrapper" 
-          :class="{ 'chat-mode-container': showChatPage }"
+          :class="{ 'chat-mode-container': isFullscreenMode }"
           :style="{ 
-            height: showChatPage ? '100%' : 'calc(100% - 8px)',
-            padding: (isChatPage || showChatPage) ? '0' : undefined,
-            minHeight: showChatPage ? 'unset' : undefined
+            height: isFullscreenMode ? '100%' : 'calc(100% - 8px)',
+            padding: (isChatPage || isFullscreenMode) ? '0' : undefined,
+            minHeight: isFullscreenMode ? 'unset' : undefined
           }">
-          <div :style="{ height: '100%', width: '100%', overflow: showChatPage ? 'hidden' : undefined }">
+          <div :style="{ height: '100%', width: '100%', overflow: isFullscreenMode ? 'hidden' : undefined }">
             <div v-if="showChatPage" style="height: 100%; width: 100%; overflow: hidden;">
               <Chat />
+            </div>
+            <div v-else-if="showWorkflowPage" style="height: 100%; width: 100%; overflow: auto;">
+              <WorkflowList />
             </div>
             <RouterView v-else />
           </div>

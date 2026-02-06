@@ -27,6 +27,7 @@ from .routes.route import Response, RouteContext
 from .routes.session_management import SessionManagementRoute
 from .routes.subagent import SubAgentRoute
 from .routes.t2i import T2iRoute
+from .routes.workflow import WorkflowRoute
 
 
 class _AddrWithPort(Protocol):
@@ -100,12 +101,17 @@ class AstrBotDashboard:
         self.platform_route = PlatformRoute(self.context, core_lifecycle)
         self.backup_route = BackupRoute(self.context, db, core_lifecycle)
         self.live_chat_route = LiveChatRoute(self.context, db, core_lifecycle)
+        self.workflow_route = WorkflowRoute(core_lifecycle, db)
 
         self.app.add_url_rule(
             "/api/plug/<path:subpath>",
             view_func=self.srv_plug_route,
             methods=["GET", "POST"],
         )
+
+        # Register workflow routes
+        for route, (method, func) in self.workflow_route.get_routes().items():
+            self.app.add_url_rule(f"/api{route}", view_func=func, methods=[method])
 
         self.shutdown_event = shutdown_event
 

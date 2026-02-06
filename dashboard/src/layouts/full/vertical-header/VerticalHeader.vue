@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { useCustomizerStore } from '@/stores/customizer';
+import { useCustomizerStore, type ViewMode } from '@/stores/customizer';
 import axios from 'axios';
 import Logo from '@/components/shared/Logo.vue';
 import { md5 } from 'js-md5';
@@ -264,6 +264,8 @@ function openReleaseNotesDialog(body: string, tag: string) {
 function handleLogoClick() {
   if (customizer.viewMode === 'chat') {
     aboutDialog.value = true;
+  } else if (customizer.viewMode === 'workflow') {
+    aboutDialog.value = true;
   } else {
     router.push('/about');
   }
@@ -279,15 +281,15 @@ commonStore.getStartTime();
 // 视图模式切换
 const viewMode = computed({
   get: () => customizer.viewMode,
-  set: (value: 'bot' | 'chat') => {
+  set: (value: ViewMode) => {
     customizer.SET_VIEW_MODE(value);
   }
 });
 
 // 监听 viewMode 变化，切换到 bot 模式时跳转到首页
 watch(() => customizer.viewMode, (newMode, oldMode) => {
-  if (newMode === 'bot' && oldMode === 'chat') {
-    // 从 chat 模式切换到 bot 模式时，跳转到首页
+  if (newMode === 'bot' && (oldMode === 'chat' || oldMode === 'workflow')) {
+    // 从 chat/workflow 模式切换到 bot 模式时，跳转到首页
     if (route.path !== '/') {
       router.push('/');
     }
@@ -363,7 +365,7 @@ const changeLanguage = async (langCode: string) => {
       </small>
     </div>
     
-    <!-- Bot/Chat 模式切换按钮 -->
+    <!-- Bot/Chat/Workflow 模式切换按钮 -->
     <v-btn-toggle
       v-model="viewMode"
       mandatory
@@ -379,6 +381,10 @@ const changeLanguage = async (langCode: string) => {
       <v-btn value="chat" size="small">
         <v-icon start>mdi-chat</v-icon>
         Chat
+      </v-btn>
+      <v-btn value="workflow" size="small">
+        <v-icon start>mdi-sitemap</v-icon>
+        Workflow
       </v-btn>
     </v-btn-toggle>
 

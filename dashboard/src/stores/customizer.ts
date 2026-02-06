@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import config from '@/config';
 
+export type ViewMode = 'bot' | 'chat' | 'workflow';
+
 export const useCustomizerStore = defineStore({
   id: 'customizer',
   state: () => ({
@@ -10,7 +12,7 @@ export const useCustomizerStore = defineStore({
     fontTheme: "Poppins",
     uiTheme: config.uiTheme,
     inputBg: config.inputBg,
-    viewMode: (localStorage.getItem('viewMode') as 'bot' | 'chat') || 'bot' // 'bot' 或 'chat'
+    viewMode: (localStorage.getItem('viewMode') as ViewMode) || 'bot' // 'bot', 'chat' 或 'workflow'
   }),
 
   getters: {},
@@ -28,7 +30,7 @@ export const useCustomizerStore = defineStore({
       this.uiTheme = payload;
       localStorage.setItem("uiTheme", payload);
     },
-    SET_VIEW_MODE(payload: 'bot' | 'chat') {
+    SET_VIEW_MODE(payload: ViewMode) {
       this.viewMode = payload;
       localStorage.setItem("viewMode", payload);
     },

@@ -151,6 +151,23 @@ const MainRoutes = {
       name: 'About',
       path: '/about',
       component: () => import('@/views/AboutPage.vue')
+    },
+    {
+      name: 'WorkflowList',
+      path: '/workflow',
+      component: () => import('@/views/workflow/WorkflowList.vue')
+    },
+    {
+      name: 'WorkflowNew',
+      path: '/workflow/new',
+      component: () => import('@/views/workflow/WorkflowEditor.vue'),
+      props: { id: null }
+    },
+    {
+      name: 'WorkflowEditor',
+      path: '/workflow/edit/:id',
+      component: () => import('@/views/workflow/WorkflowEditor.vue'),
+      props: true
     }
   ]
 };

@@ -623,6 +623,30 @@ class BaseDatabase(abc.ABC):
         ...
 
     # ====
+    # Workflow Management
+    # ====
+
+    @abc.abstractmethod
+    async def get_all_workflows(self) -> list[dict]:
+        """Get all workflows stored in the database."""
+        ...
+
+    @abc.abstractmethod
+    async def get_workflow(self, workflow_id: str) -> dict | None:
+        """Get a specific workflow by ID."""
+        ...
+
+    @abc.abstractmethod
+    async def save_workflow(self, workflow: dict) -> None:
+        """Save a workflow (create or update)."""
+        ...
+
+    @abc.abstractmethod
+    async def delete_workflow(self, workflow_id: str) -> None:
+        """Delete a workflow by ID."""
+        ...
+
+    # ====
     # ChatUI Project Management
     # ====
 

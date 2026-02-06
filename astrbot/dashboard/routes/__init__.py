@@ -19,6 +19,7 @@ from .static_file import StaticFileRoute
 from .subagent import SubAgentRoute
 from .tools import ToolsRoute
 from .update import UpdateRoute
+from .workflow import WorkflowRoute
 
 __all__ = [
     "AuthRoute",
@@ -42,4 +43,5 @@ __all__ = [
     "ToolsRoute",
     "SkillsRoute",
     "UpdateRoute",
+    "WorkflowRoute",
 ]
