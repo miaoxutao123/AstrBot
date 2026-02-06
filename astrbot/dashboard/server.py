@@ -111,7 +111,23 @@ class AstrBotDashboard:
 
         # Register workflow routes
         for route, (method, func) in self.workflow_route.get_routes().items():
-            self.app.add_url_rule(f"/api{route}", view_func=func, methods=[method])
+            # NOTE: If we don't specify `endpoint`, Quart/Flask will use `view_func.__name__`.
+            # That can easily collide with existing endpoints (e.g. another route also has a
+            # `get_available_tools` handler), causing:
+            #   AssertionError: View function mapping is overwriting an existing endpoint function
+            endpoint = (
+                f"workflow_{method.lower()}_{route.lstrip('/')}"
+                .replace("/", "_")
+                .replace("-", "_")
+                .replace("<", "")
+                .replace(">", "")
+            )
+            self.app.add_url_rule(
+                f"/api{route}",
+                endpoint=endpoint,
+                view_func=func,
+                methods=[method],
+            )
 
         self.shutdown_event = shutdown_event
 
