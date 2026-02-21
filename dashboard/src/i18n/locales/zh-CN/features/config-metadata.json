@@ -814,6 +814,201 @@
           }
         }
       }
+    },
+    "long_term_memory": {
+      "description": "长期记忆",
+      "hint": "让 AI 助手跨对话记住用户偏好、习惯和重要信息，提供更个性化的服务。",
+      "provider_ltm_settings": {
+        "long_term_memory": {
+          "enable": {
+            "description": "启用长期记忆",
+            "hint": "长期记忆总开关"
+          },
+          "extraction_provider_id": {
+            "description": "记忆提取模型",
+            "hint": "用于从对话中提取结构化记忆的 LLM 模型"
+          },
+          "write_policy": {
+            "enable": {
+              "description": "启用写入策略",
+              "hint": "控制是否将提取的记忆写入数据库"
+            },
+            "mode": {
+              "description": "写入模式",
+              "hint": "shadow: 记忆存储但不注入对话（默认）；auto: 自动激活记忆并注入对话"
+            },
+            "min_confidence": {
+              "description": "最低置信度",
+              "hint": "低于此置信度的记忆将被丢弃"
+            },
+            "max_items_per_scope": {
+              "description": "每个作用域最大记忆数",
+              "hint": "每个作用域（用户/群组等）允许存储的最大记忆条目数"
+            },
+            "eviction_enabled": {
+              "description": "启用智能淘汰",
+              "hint": "记忆数量达到上限时，自动淘汰低优先级记忆为新记忆腾出空间"
+            }
+          },
+          "read_policy": {
+            "enable": {
+              "description": "启用读取策略",
+              "hint": "控制是否在对话中召回相关记忆"
+            },
+            "max_items": {
+              "description": "最大召回条目数",
+              "hint": "每次对话最多召回的记忆条目数量"
+            },
+            "max_tokens": {
+              "description": "最大召回 Token 数",
+              "hint": "召回记忆内容的最大 Token 数量"
+            }
+          },
+          "emergency_read_only": {
+            "description": "紧急只读模式",
+            "hint": "启用后仅允许读取记忆，禁止写入新记忆"
+          },
+          "maintenance": {
+            "event_retention_days": {
+              "description": "事件保留天数",
+              "hint": "已处理的原始事件在数据库中保留的天数"
+            },
+            "enable_consolidation": {
+              "description": "启用记忆合并",
+              "hint": "定期将相似的记忆条目合并为更精炼的单条记忆"
+            }
+          }
+        }
+      }
+    },
+    "project_context": {
+      "description": "项目上下文",
+      "hint": "让 AstrBot 理解代码项目结构，提供智能代码检索和理解能力。",
+      "provider_settings": {
+        "project_context": {
+          "enable": {
+            "description": "启用项目上下文",
+            "hint": "开启后 AstrBot 将索引代码项目，提供代码理解和检索工具"
+          },
+          "auto_build_on_startup": {
+            "description": "启动时自动构建索引",
+            "hint": "启用后，AstrBot 启动时自动构建项目索引"
+          },
+          "max_files": {
+            "description": "最大索引文件数",
+            "hint": "项目索引的最大文件数量"
+          },
+          "max_file_bytes": {
+            "description": "最大文件大小(字节)",
+            "hint": "超过此大小的文件将被跳过"
+          },
+          "semantic_enable": {
+            "description": "启用语义检索",
+            "hint": "使用向量嵌入进行语义代码检索"
+          },
+          "semantic_provider_id": {
+            "description": "语义检索模型",
+            "hint": "用于语义检索的嵌入模型"
+          },
+          "semantic_max_docs": {
+            "description": "语义索引最大文档数"
+          },
+          "semantic_max_doc_chars": {
+            "description": "语义索引文档最大字符数"
+          },
+          "semantic_path_prefix": {
+            "description": "语义索引路径前缀",
+            "hint": "仅索引匹配此前缀的文件路径，留空表示索引全部"
+          }
+        }
+      }
+    },
+    "tool_evolution": {
+      "description": "工具自迭代",
+      "hint": "让 AstrBot 自动分析工具调用数据，提出和应用优化策略。",
+      "provider_settings": {
+        "tool_evolution": {
+          "enable": {
+            "description": "启用工具自迭代",
+            "hint": "开启后，系统会记录工具调用数据并自动提出优化策略"
+          },
+          "auto_apply": {
+            "description": "自动应用策略",
+            "hint": "达到条件时自动应用优化策略，无需手动确认"
+          },
+          "min_samples": {
+            "description": "最少样本数",
+            "hint": "提出优化策略前需要的最少工具调用样本数"
+          },
+          "dry_run_default": {
+            "description": "默认预览模式",
+            "hint": "启用后新策略默认为预览模式，不会直接生效"
+          },
+          "auto_apply_every_calls": {
+            "description": "自动应用间隔(调用次数)",
+            "hint": "每隔多少次工具调用检查并自动应用策略"
+          }
+        }
+      }
+    },
+    "background_task": {
+      "description": "后台任务",
+      "hint": "管理 AstrBot 后台异步任务的执行策略。",
+      "provider_settings": {
+        "background_task": {
+          "enable": {
+            "description": "启用后台任务"
+          },
+          "default_max_attempts": {
+            "description": "默认最大重试次数",
+            "hint": "任务失败时的最大重试次数"
+          },
+          "default_backoff_seconds": {
+            "description": "默认退避时间(秒)",
+            "hint": "重试前的初始等待时间"
+          },
+          "default_max_backoff_seconds": {
+            "description": "最大退避时间(秒)",
+            "hint": "重试等待时间的上限"
+          }
+        }
+      }
+    },
+    "professional_mcp": {
+      "description": "MCP 预设",
+      "hint": "管理 MCP（模型上下文协议）预设工具集。",
+      "provider_settings": {
+        "professional_mcp": {
+          "enable_presets": {
+            "description": "启用 MCP 预设",
+            "hint": "开启后，Agent 将获得 MCP 预设发现和安装工具"
+          }
+        }
+      }
+    },
+    "multimodal_copilot": {
+      "description": "多模态助手",
+      "hint": "视频流分析等多模态扩展能力。",
+      "provider_settings": {
+        "multimodal_copilot": {
+          "enable_video_stream_analysis": {
+            "description": "启用视频流分析",
+            "hint": "开启后，AI 助手可在实时聊天中分析视频流"
+          },
+          "frame_sample_interval_ms": {
+            "description": "帧采样间隔(毫秒)",
+            "hint": "视频流帧采样间隔，越小分析越精细但消耗越大"
+          },
+          "max_frame_bytes": {
+            "description": "最大帧大小(字节)",
+            "hint": "单帧图像的最大字节数"
+          },
+          "ocr_hint_keywords": {
+            "description": "OCR 提示关键词",
+            "hint": "当画面中出现这些关键词时优先进行 OCR 识别"
+          }
+        }
+      }
     }
   },
   "system_group": {

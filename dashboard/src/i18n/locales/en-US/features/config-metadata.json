@@ -811,6 +811,203 @@
           }
         }
       }
+    },
+    "long_term_memory": {
+      "description": "Long-term Memory",
+      "hint": "Enables the AI assistant to remember user preferences, habits, and important information across conversations for a more personalized experience.",
+      "provider_ltm_settings": {
+        "long_term_memory": {
+          "enable": {
+            "description": "Enable Long-term Memory",
+            "hint": "Master switch for long-term memory"
+          },
+          "extraction_provider_id": {
+            "description": "Memory Extraction Model",
+            "hint": "LLM model used to extract structured memories from conversations"
+          },
+          "write_policy": {
+            "enable": {
+              "description": "Enable Write Policy",
+              "hint": "Controls whether extracted memories are written to the database"
+            },
+            "mode": {
+              "description": "Write Mode",
+              "hint": "shadow: memories are stored but not injected into conversations (default); auto: memories are automatically activated and injected"
+            },
+            "min_confidence": {
+              "description": "Minimum Confidence",
+              "hint": "Memories below this confidence threshold will be discarded"
+            },
+            "max_items_per_scope": {
+              "description": "Max Items Per Scope",
+              "hint": "Maximum number of memory items allowed per scope (user/group, etc.)"
+            }
+          },
+          "read_policy": {
+            "enable": {
+              "description": "Enable Read Policy",
+              "hint": "Controls whether relevant memories are recalled during conversations"
+            },
+            "max_items": {
+              "description": "Max Recall Items",
+              "hint": "Maximum number of memory items recalled per conversation"
+            },
+            "max_tokens": {
+              "description": "Max Recall Tokens",
+              "hint": "Maximum token count for recalled memory content"
+            }
+          },
+          "emergency_read_only": {
+            "description": "Emergency Read-only Mode",
+            "hint": "When enabled, only reading memories is allowed; writing new memories is disabled"
+          },
+          "write_policy": {
+            "eviction_enabled": {
+              "description": "Enable Smart Eviction",
+              "hint": "When memory count reaches the limit, automatically evict low-priority memories to make room for new ones"
+            }
+          },
+          "maintenance": {
+            "event_retention_days": {
+              "description": "Event Retention Days",
+              "hint": "Number of days to retain processed raw events in the database"
+            },
+            "enable_consolidation": {
+              "description": "Enable Memory Consolidation",
+              "hint": "Periodically merge similar memory entries into more refined single memories"
+            }
+          }
+        }
+      }
+    },
+    "project_context": {
+      "description": "Project Context",
+      "hint": "Enables AstrBot to understand code project structure, providing intelligent code search and comprehension.",
+      "provider_settings": {
+        "project_context": {
+          "enable": {
+            "description": "Enable Project Context",
+            "hint": "When enabled, AstrBot will index code projects and provide code understanding and search tools"
+          },
+          "auto_build_on_startup": {
+            "description": "Auto-build Index on Startup",
+            "hint": "When enabled, AstrBot will automatically build the project index on startup"
+          },
+          "max_files": {
+            "description": "Max Indexed Files",
+            "hint": "Maximum number of files for project indexing"
+          },
+          "max_file_bytes": {
+            "description": "Max File Size (bytes)",
+            "hint": "Files larger than this size will be skipped"
+          },
+          "semantic_enable": {
+            "description": "Enable Semantic Search",
+            "hint": "Use vector embeddings for semantic code search"
+          },
+          "semantic_provider_id": {
+            "description": "Semantic Search Model",
+            "hint": "Embedding model for semantic search"
+          },
+          "semantic_max_docs": {
+            "description": "Semantic Index Max Documents"
+          },
+          "semantic_max_doc_chars": {
+            "description": "Semantic Index Max Document Characters"
+          },
+          "semantic_path_prefix": {
+            "description": "Semantic Index Path Prefix",
+            "hint": "Only index file paths matching this prefix. Leave empty to index all"
+          }
+        }
+      }
+    },
+    "tool_evolution": {
+      "description": "Tool Evolution",
+      "hint": "Enables AstrBot to automatically analyze tool call data and propose/apply optimization policies.",
+      "provider_settings": {
+        "tool_evolution": {
+          "enable": {
+            "description": "Enable Tool Evolution",
+            "hint": "When enabled, the system records tool call data and automatically proposes optimization policies"
+          },
+          "auto_apply": {
+            "description": "Auto-apply Policies",
+            "hint": "Automatically apply optimization policies when conditions are met, without manual confirmation"
+          },
+          "min_samples": {
+            "description": "Minimum Samples",
+            "hint": "Minimum number of tool call samples required before proposing policies"
+          },
+          "dry_run_default": {
+            "description": "Default Preview Mode",
+            "hint": "When enabled, new policies default to preview mode and won't take effect directly"
+          },
+          "auto_apply_every_calls": {
+            "description": "Auto-apply Interval (calls)",
+            "hint": "Check and auto-apply policies every N tool calls"
+          }
+        }
+      }
+    },
+    "background_task": {
+      "description": "Background Tasks",
+      "hint": "Manage execution policies for AstrBot background async tasks.",
+      "provider_settings": {
+        "background_task": {
+          "enable": {
+            "description": "Enable Background Tasks"
+          },
+          "default_max_attempts": {
+            "description": "Default Max Retry Attempts",
+            "hint": "Maximum retry attempts when a task fails"
+          },
+          "default_backoff_seconds": {
+            "description": "Default Backoff Time (seconds)",
+            "hint": "Initial wait time before retrying"
+          },
+          "default_max_backoff_seconds": {
+            "description": "Max Backoff Time (seconds)",
+            "hint": "Upper limit for retry wait time"
+          }
+        }
+      }
+    },
+    "professional_mcp": {
+      "description": "MCP Presets",
+      "hint": "Manage MCP (Model Context Protocol) preset tool collections.",
+      "provider_settings": {
+        "professional_mcp": {
+          "enable_presets": {
+            "description": "Enable MCP Presets",
+            "hint": "When enabled, the Agent gains tools for discovering and installing MCP presets"
+          }
+        }
+      }
+    },
+    "multimodal_copilot": {
+      "description": "Multimodal Copilot",
+      "hint": "Video stream analysis and other multimodal capabilities.",
+      "provider_settings": {
+        "multimodal_copilot": {
+          "enable_video_stream_analysis": {
+            "description": "Enable Video Stream Analysis",
+            "hint": "When enabled, the AI assistant can analyze video streams in live chat"
+          },
+          "frame_sample_interval_ms": {
+            "description": "Frame Sample Interval (ms)",
+            "hint": "Video stream frame sampling interval. Smaller values yield finer analysis but higher cost"
+          },
+          "max_frame_bytes": {
+            "description": "Max Frame Size (bytes)",
+            "hint": "Maximum byte size for a single frame image"
+          },
+          "ocr_hint_keywords": {
+            "description": "OCR Hint Keywords",
+            "hint": "Prioritize OCR recognition when these keywords appear in the frame"
+          }
+        }
+      }
     }
   },
   "system_group": {

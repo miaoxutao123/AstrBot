@@ -38,6 +38,8 @@ import zhCNCommand from './locales/zh-CN/features/command.json';
 import zhCNSubagent from './locales/zh-CN/features/subagent.json';
 import zhCNWorkflow from './locales/zh-CN/features/workflow.json';
 import zhCNWelcome from './locales/zh-CN/features/welcome.json';
+import zhCNEngineeringOps from './locales/zh-CN/features/engineering-ops.json';
+import zhCNLongTermMemory from './locales/zh-CN/features/long-term-memory.json';
 
 import zhCNErrors from './locales/zh-CN/messages/errors.json';
 import zhCNSuccess from './locales/zh-CN/messages/success.json';
@@ -80,6 +82,8 @@ import enUSCommand from './locales/en-US/features/command.json';
 import enUSSubagent from './locales/en-US/features/subagent.json';
 import enUSWorkflow from './locales/en-US/features/workflow.json';
 import enUSWelcome from './locales/en-US/features/welcome.json';
+import enUSEngineeringOps from './locales/en-US/features/engineering-ops.json';
+import enUSLongTermMemory from './locales/en-US/features/long-term-memory.json';
 
 import enUSErrors from './locales/en-US/messages/errors.json';
 import enUSSuccess from './locales/en-US/messages/success.json';
@@ -129,7 +133,9 @@ export const translations = {
       command: zhCNCommand,
       subagent: zhCNSubagent,
       workflow: zhCNWorkflow,
-      welcome: zhCNWelcome
+      welcome: zhCNWelcome,
+      'engineering-ops': zhCNEngineeringOps,
+      'long-term-memory': zhCNLongTermMemory
     },
     messages: {
       errors: zhCNErrors,
@@ -179,7 +185,9 @@ export const translations = {
       command: enUSCommand,
       subagent: enUSSubagent,
       workflow: enUSWorkflow,
-      welcome: enUSWelcome
+      welcome: enUSWelcome,
+      'engineering-ops': enUSEngineeringOps,
+      'long-term-memory': enUSLongTermMemory
     },
     messages: {
       errors: enUSErrors,

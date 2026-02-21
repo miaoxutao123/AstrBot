@@ -1,8 +1,12 @@
 <template>
   <div class="w-100">
     <!-- Special handling for specific metadata types -->
-    <template v-if="itemMeta?._special === 'select_provider'">
-      <ProviderSelector :model-value="modelValue" @update:model-value="emitUpdate" :provider-type="'chat_completion'" />
+    <template v-if="isSelectProviderSpecial(itemMeta?._special)">
+      <ProviderSelector
+        :model-value="modelValue"
+        @update:model-value="emitUpdate"
+        :provider-type="getProviderTypeForSelectProvider(itemMeta?._special)"
+      />
     </template>
     <template v-else-if="itemMeta?._special === 'select_provider_stt'">
       <ProviderSelector :model-value="modelValue" @update:model-value="emitUpdate" :provider-type="'speech_to_text'" />
@@ -322,6 +326,41 @@ function getSpecialName(value) {
 
 function getSpecialSubtype(value) {
   return parseSpecialValue(value).subtype
+}
+
+function isSelectProviderSpecial(value) {
+  const special = String(value || '').trim()
+  if (!special) {
+    return false
+  }
+  return special === 'select_provider_embedding' || getSpecialName(special) === 'select_provider'
+}
+
+function getProviderTypeForSelectProvider(value) {
+  const special = String(value || '').trim().toLowerCase()
+  if (special === 'select_provider_embedding') {
+    return 'embedding'
+  }
+
+  const subtype = String(getSpecialSubtype(special) || '').trim().toLowerCase()
+  if (!subtype) {
+    return 'chat_completion'
+  }
+
+  const mapping = {
+    chat: 'chat_completion',
+    llm: 'chat_completion',
+    chat_completion: 'chat_completion',
+    stt: 'speech_to_text',
+    speech_to_text: 'speech_to_text',
+    tts: 'text_to_speech',
+    text_to_speech: 'text_to_speech',
+    embedding: 'embedding',
+    rerank: 'rerank',
+    agent_runner: 'agent_runner'
+  }
+
+  return mapping[subtype] || subtype
 }
 </script>
 

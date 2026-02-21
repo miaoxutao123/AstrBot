@@ -46,5 +46,7 @@
   "configTabs": {
     "normal": "普通配置",
     "system": "系统配置"
-  }
+  },
+  "engineeringOps": "工程运维驾驶舱",
+  "longTermMemory": "长期记忆"
 }

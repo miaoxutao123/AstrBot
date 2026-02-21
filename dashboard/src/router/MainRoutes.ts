@@ -90,6 +90,16 @@ const MainRoutes = {
       component: () => import('@/views/TracePage.vue')
     },
     {
+      name: 'EngineeringOps',
+      path: '/engineering-ops',
+      component: () => import('@/views/EngineeringOpsPage.vue')
+    },
+    {
+      name: 'LongTermMemory',
+      path: '/long-term-memory',
+      component: () => import('@/views/LongTermMemoryPage.vue')
+    },
+    {
       name: 'NativeKnowledgeBase',
       path: '/knowledge-base',
       component: () => import('@/views/knowledge-base/index.vue'),

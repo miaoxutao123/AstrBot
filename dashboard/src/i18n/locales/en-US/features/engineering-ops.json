@@ -1,0 +1,101 @@
+{
+  "hero": {
+    "title": "Engineering Ops Cockpit",
+    "subtitle": "Visualize project indexing, semantic retrieval, runtime retries, and tool self-evolution in one place."
+  },
+  "actions": {
+    "autoRefresh": "Auto Refresh",
+    "refresh": "Refresh",
+    "rebuildFullIndex": "Rebuild Full Index",
+    "rebuildFrontendIndex": "Rebuild Frontend Index",
+    "buildSemanticIndex": "Build Semantic Index",
+    "search": "Search",
+    "preview": "Preview",
+    "apply": "Apply",
+    "cancel": "Cancel",
+    "resetCounters": "Reset Counters"
+  },
+  "labels": {
+    "embeddingProvider": "Embedding Provider",
+    "pathPrefix": "Path Prefix",
+    "targetTool": "Target Tool",
+    "symbolKeyword": "Symbol keyword",
+    "semanticQuery": "Semantic query",
+    "na": "N/A"
+  },
+  "sections": {
+    "projectIndex": "Project Index & Semantic Build",
+    "languageDistribution": "Language Distribution",
+    "topHeavyFiles": "Top Heavy Files",
+    "backgroundTasks": "Background Tasks",
+    "hybridRetrieval": "Hybrid Retrieval Console",
+    "toolEvolution": "Tool Evolution & Resilience",
+    "recentResilienceEvents": "Recent Resilience Events"
+  },
+  "tabs": {
+    "symbol": "Symbol",
+    "semantic": "Semantic"
+  },
+  "table": {
+    "task": "Task",
+    "status": "Status",
+    "attempt": "Attempt",
+    "action": "Action",
+    "symbol": "Symbol",
+    "path": "Path",
+    "line": "Line",
+    "score": "Score",
+    "excerpt": "Excerpt",
+    "time": "Time",
+    "event": "Event",
+    "detail": "Detail"
+  },
+  "metrics": {
+    "indexedFiles": "Indexed Files",
+    "semanticDocs": "Semantic Docs",
+    "runningTasks": "Running Tasks",
+    "activePolicies": "Active Policies",
+    "lines": "Lines: {count}",
+    "provider": "Provider: {provider}",
+    "total": "Total: {count}",
+    "activePolicySub": "Recovered: {recovered} · Retries: {retries}"
+  },
+  "list": {
+    "heavyFileSubtitle": "lines {lines} · symbols {symbols}"
+  },
+  "resilience": {
+    "llmRetries": "LLM Retries",
+    "streamFallback": "Stream Fallback",
+    "recovered": "Recovered",
+    "failed": "Failed",
+    "lastFailure": "Last transient failure: {error}"
+  },
+  "panels": {
+    "policyPreview": "Policy Preview",
+    "policyApplyResult": "Policy Apply Result"
+  },
+  "toast": {
+    "refreshFailed": "Refresh failed: {error}",
+    "indexRebuilt": "Index rebuilt: {count} files.",
+    "indexBuildFailed": "Index build failed: {error}",
+    "semanticRebuilt": "Semantic index rebuilt: {count} docs.",
+    "semanticBuildFailed": "Semantic build failed: {error}",
+    "symbolSearchFailed": "Symbol search failed: {error}",
+    "semanticSearchFailed": "Semantic search failed: {error}",
+    "policyPreviewFailed": "Policy preview failed: {error}",
+    "policyApplyFinished": "Policy apply request finished.",
+    "policyApplyFailed": "Policy apply failed: {error}",
+    "resilienceReset": "Resilience counters reset.",
+    "resilienceResetFailed": "Reset resilience failed: {error}",
+    "taskCancelled": "Task cancelled: {taskId}...",
+    "cancelFailed": "Cancel failed: {error}",
+    "semanticRebuiltWithSkips": "Semantic index rebuilt: {count} docs, skipped {skipped} docs blocked/rejected by provider."
+  },
+  "alerts": {
+    "projectIndexMissing": "Project index is not built yet. Build the full index first to enable architecture insights.",
+    "semanticIndexMissing": "Semantic index is not built yet. Build it to enable intent-level retrieval.",
+    "buildIndexNow": "Build Full Index Now",
+    "buildSemanticNow": "Build Semantic Index Now",
+    "semanticSkippedDocs": "The last semantic build skipped {count} docs blocked or rejected by the provider. Narrow the path prefix to reduce these files."
+  }
+}

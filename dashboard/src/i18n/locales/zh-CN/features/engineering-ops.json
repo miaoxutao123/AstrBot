@@ -1,0 +1,101 @@
+{
+  "hero": {
+    "title": "工程运维驾驶舱",
+    "subtitle": "在一个页面中可视化项目索引、语义检索、运行时重试与工具自迭代。"
+  },
+  "actions": {
+    "autoRefresh": "自动刷新",
+    "refresh": "刷新",
+    "rebuildFullIndex": "重建全量索引",
+    "rebuildFrontendIndex": "重建前端索引",
+    "buildSemanticIndex": "构建语义索引",
+    "search": "搜索",
+    "preview": "预览",
+    "apply": "应用",
+    "cancel": "取消",
+    "resetCounters": "重置计数"
+  },
+  "labels": {
+    "embeddingProvider": "嵌入模型提供商",
+    "pathPrefix": "路径前缀",
+    "targetTool": "目标工具",
+    "symbolKeyword": "符号关键词",
+    "semanticQuery": "语义查询",
+    "na": "无"
+  },
+  "sections": {
+    "projectIndex": "项目索引与语义构建",
+    "languageDistribution": "语言分布",
+    "topHeavyFiles": "高复杂文件",
+    "backgroundTasks": "后台任务",
+    "hybridRetrieval": "混合检索控制台",
+    "toolEvolution": "工具演化与抗波动",
+    "recentResilienceEvents": "近期抗波动事件"
+  },
+  "tabs": {
+    "symbol": "符号",
+    "semantic": "语义"
+  },
+  "table": {
+    "task": "任务",
+    "status": "状态",
+    "attempt": "尝试",
+    "action": "操作",
+    "symbol": "符号",
+    "path": "路径",
+    "line": "行号",
+    "score": "得分",
+    "excerpt": "摘要",
+    "time": "时间",
+    "event": "事件",
+    "detail": "详情"
+  },
+  "metrics": {
+    "indexedFiles": "已索引文件",
+    "semanticDocs": "语义文档数",
+    "runningTasks": "运行中任务",
+    "activePolicies": "生效策略",
+    "lines": "总行数: {count}",
+    "provider": "提供商: {provider}",
+    "total": "总计: {count}",
+    "activePolicySub": "已恢复: {recovered} · 重试: {retries}"
+  },
+  "list": {
+    "heavyFileSubtitle": "行数 {lines} · 符号 {symbols}"
+  },
+  "resilience": {
+    "llmRetries": "LLM 重试",
+    "streamFallback": "流式降级",
+    "recovered": "恢复成功",
+    "failed": "最终失败",
+    "lastFailure": "最近一次瞬态失败: {error}"
+  },
+  "panels": {
+    "policyPreview": "策略预览",
+    "policyApplyResult": "策略应用结果"
+  },
+  "toast": {
+    "refreshFailed": "刷新失败: {error}",
+    "indexRebuilt": "索引重建完成: {count} 个文件。",
+    "indexBuildFailed": "索引构建失败: {error}",
+    "semanticRebuilt": "语义索引重建完成: {count} 个文档。",
+    "semanticBuildFailed": "语义索引构建失败: {error}",
+    "symbolSearchFailed": "符号搜索失败: {error}",
+    "semanticSearchFailed": "语义搜索失败: {error}",
+    "policyPreviewFailed": "策略预览失败: {error}",
+    "policyApplyFinished": "策略应用请求已完成。",
+    "policyApplyFailed": "策略应用失败: {error}",
+    "resilienceReset": "抗波动计数器已重置。",
+    "resilienceResetFailed": "重置抗波动计数器失败: {error}",
+    "taskCancelled": "任务已取消: {taskId}...",
+    "cancelFailed": "取消失败: {error}",
+    "semanticRebuiltWithSkips": "语义索引重建完成: {count} 个文档，跳过 {skipped} 个被提供商拦截/拒绝的文档。"
+  },
+  "alerts": {
+    "projectIndexMissing": "项目索引尚未构建，请先构建全量索引以启用架构分析。",
+    "semanticIndexMissing": "语义索引尚未构建，构建后可启用意图级检索。",
+    "buildIndexNow": "立即构建全量索引",
+    "buildSemanticNow": "立即构建语义索引",
+    "semanticSkippedDocs": "上次语义构建中有 {count} 个文档被提供商拦截或拒绝，系统已自动跳过。可通过收窄路径前缀减少此类文档。"
+  }
+}

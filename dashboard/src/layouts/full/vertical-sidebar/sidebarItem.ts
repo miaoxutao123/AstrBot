@@ -131,6 +131,16 @@ const sidebarItem: menu[] = [
         icon: 'mdi-timeline-text-outline',
         to: '/trace'
       },
+      {
+        title: 'core.navigation.engineeringOps',
+        icon: 'mdi-chart-scatter-plot-hexbin',
+        to: '/engineering-ops'
+      },
+      {
+        title: 'core.navigation.longTermMemory',
+        icon: 'mdi-brain',
+        to: '/long-term-memory'
+      },
     ]
   }
   // {

@@ -1,0 +1,170 @@
+{
+  "title": "Long-term Memory",
+  "subtitle": "Manage AI assistant's long-term memory data",
+  "tabs": {
+    "items": "Memory Items",
+    "events": "Raw Events",
+    "stats": "Statistics"
+  },
+  "filters": {
+    "scope": "Scope",
+    "scopeId": "Scope ID",
+    "type": "Type",
+    "status": "Status",
+    "minConfidence": "Min Confidence",
+    "search": "Search memory content...",
+    "allScopes": "All Scopes",
+    "allTypes": "All Types",
+    "allStatuses": "All Statuses"
+  },
+  "scopes": {
+    "user": "User",
+    "group": "Group",
+    "project": "Project",
+    "global": "Global"
+  },
+  "types": {
+    "profile": "Profile",
+    "preference": "Preference",
+    "task_state": "Task State",
+    "constraint": "Constraint",
+    "episode": "Episode"
+  },
+  "statuses": {
+    "active": "Active",
+    "shadow": "Shadow",
+    "disabled": "Disabled",
+    "expired": "Expired"
+  },
+  "table": {
+    "headers": {
+      "fact": "Memory Content",
+      "factKey": "Memory Key",
+      "scope": "Scope",
+      "scopeId": "Scope ID",
+      "type": "Type",
+      "status": "Status",
+      "confidence": "Confidence",
+      "importance": "Importance",
+      "evidenceCount": "Evidence",
+      "ttlDays": "TTL (days)",
+      "createdAt": "Created At",
+      "updatedAt": "Updated At",
+      "actions": "Actions"
+    }
+  },
+  "events": {
+    "headers": {
+      "eventId": "Event ID",
+      "scope": "Scope",
+      "scopeId": "Scope ID",
+      "sourceType": "Source Type",
+      "sourceRole": "Source Role",
+      "content": "Content",
+      "platformId": "Platform ID",
+      "sessionId": "Session ID",
+      "processed": "Processed",
+      "createdAt": "Created At"
+    },
+    "sourceTypes": {
+      "message": "Message",
+      "tool_result": "Tool Result"
+    },
+    "sourceRoles": {
+      "user": "User",
+      "assistant": "Assistant",
+      "tool": "Tool"
+    },
+    "processedStatus": {
+      "yes": "Yes",
+      "no": "No"
+    }
+  },
+  "stats": {
+    "totalItems": "Total Items",
+    "activeItems": "Active Items",
+    "shadowItems": "Shadow Items",
+    "totalEvents": "Total Events",
+    "byType": "By Type",
+    "byScope": "By Scope",
+    "byStatus": "By Status",
+    "avgConfidence": "Avg Confidence",
+    "avgImportance": "Avg Importance"
+  },
+  "dialogs": {
+    "detail": {
+      "title": "Memory Details",
+      "basicInfo": "Basic Information",
+      "evidenceTitle": "Related Evidence",
+      "evidenceId": "Evidence ID",
+      "eventId": "Event ID",
+      "extractionMethod": "Extraction Method",
+      "extractionMeta": "Extraction Metadata",
+      "noEvidence": "No related evidence",
+      "close": "Close"
+    },
+    "edit": {
+      "title": "Edit Memory",
+      "factLabel": "Memory Content",
+      "statusLabel": "Status",
+      "importanceLabel": "Importance",
+      "ttlDaysLabel": "TTL (days)",
+      "ttlDaysHint": "Leave empty for no expiration",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "delete": {
+      "title": "Confirm Delete",
+      "message": "Are you sure you want to delete this memory? This action cannot be undone.",
+      "factPreview": "Memory content: {fact}",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    }
+  },
+  "actions": {
+    "refresh": "Refresh",
+    "view": "View Details",
+    "edit": "Edit",
+    "delete": "Delete"
+  },
+  "pagination": {
+    "itemsPerPage": "Items per page",
+    "showingItems": "Showing {start}-{end} of {total}"
+  },
+  "messages": {
+    "fetchError": "Failed to fetch data",
+    "updateSuccess": "Updated successfully",
+    "updateError": "Failed to update",
+    "deleteSuccess": "Deleted successfully",
+    "deleteError": "Failed to delete",
+    "statsError": "Failed to fetch statistics"
+  },
+  "empty": {
+    "items": "No memory items yet",
+    "events": "No raw events yet",
+    "itemsHint": "Memory items are automatically extracted during conversations",
+    "eventsHint": "Conversation events are automatically recorded during chats"
+  },
+  "guide": {
+    "title": "Getting Started with Long-term Memory",
+    "dismiss": "Got it",
+    "steps": {
+      "what": {
+        "title": "What is Long-term Memory?",
+        "desc": "Long-term Memory enables the AI assistant to remember user preferences, habits, and important information across conversations, delivering a more personalized experience. The system automatically extracts key facts from conversations and persists them."
+      },
+      "how": {
+        "title": "How are memories created?",
+        "desc": "When you chat with the AI assistant, the system automatically records raw events, then uses an LLM to extract structured memory items. Each memory has a confidence score — the higher the score, the more reliable the information."
+      },
+      "status": {
+        "title": "Memory status explained",
+        "desc": "Shadow: Memory is stored but not injected into conversations (default). Active: Memory is automatically recalled in relevant conversations. Disabled: Manually turned off. Expired: Past its time-to-live."
+      },
+      "manage": {
+        "title": "How to manage memories?",
+        "desc": "In the Memory Items tab, you can view, edit, or delete memories. You can change a memory's status (e.g. promote from Shadow to Active), adjust importance, and set expiration. The Statistics tab provides an overview of all memory data."
+      }
+    }
+  }
+}

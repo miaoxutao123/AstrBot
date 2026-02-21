@@ -1,0 +1,170 @@
+{
+  "title": "长期记忆",
+  "subtitle": "管理 AI 助手的长期记忆数据",
+  "tabs": {
+    "items": "记忆条目",
+    "events": "原始事件",
+    "stats": "统计概览"
+  },
+  "filters": {
+    "scope": "作用域",
+    "scopeId": "作用域 ID",
+    "type": "类型",
+    "status": "状态",
+    "minConfidence": "最低置信度",
+    "search": "搜索记忆内容...",
+    "allScopes": "全部作用域",
+    "allTypes": "全部类型",
+    "allStatuses": "全部状态"
+  },
+  "scopes": {
+    "user": "用户",
+    "group": "群组",
+    "project": "项目",
+    "global": "全局"
+  },
+  "types": {
+    "profile": "用户画像",
+    "preference": "偏好设置",
+    "task_state": "任务状态",
+    "constraint": "限制约束",
+    "episode": "事件片段"
+  },
+  "statuses": {
+    "active": "生效中",
+    "shadow": "影子模式",
+    "disabled": "已禁用",
+    "expired": "已过期"
+  },
+  "table": {
+    "headers": {
+      "fact": "记忆内容",
+      "factKey": "记忆键",
+      "scope": "作用域",
+      "scopeId": "作用域 ID",
+      "type": "类型",
+      "status": "状态",
+      "confidence": "置信度",
+      "importance": "重要度",
+      "evidenceCount": "证据数",
+      "ttlDays": "有效期(天)",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间",
+      "actions": "操作"
+    }
+  },
+  "events": {
+    "headers": {
+      "eventId": "事件 ID",
+      "scope": "作用域",
+      "scopeId": "作用域 ID",
+      "sourceType": "来源类型",
+      "sourceRole": "来源角色",
+      "content": "内容",
+      "platformId": "平台 ID",
+      "sessionId": "会话 ID",
+      "processed": "已处理",
+      "createdAt": "创建时间"
+    },
+    "sourceTypes": {
+      "message": "消息",
+      "tool_result": "工具结果"
+    },
+    "sourceRoles": {
+      "user": "用户",
+      "assistant": "助手",
+      "tool": "工具"
+    },
+    "processedStatus": {
+      "yes": "是",
+      "no": "否"
+    }
+  },
+  "stats": {
+    "totalItems": "记忆条目总数",
+    "activeItems": "生效中条目",
+    "shadowItems": "影子模式条目",
+    "totalEvents": "原始事件总数",
+    "byType": "按类型分布",
+    "byScope": "按作用域分布",
+    "byStatus": "按状态分布",
+    "avgConfidence": "平均置信度",
+    "avgImportance": "平均重要度"
+  },
+  "dialogs": {
+    "detail": {
+      "title": "记忆详情",
+      "basicInfo": "基本信息",
+      "evidenceTitle": "关联证据",
+      "evidenceId": "证据 ID",
+      "eventId": "事件 ID",
+      "extractionMethod": "提取方法",
+      "extractionMeta": "提取元数据",
+      "noEvidence": "暂无关联证据",
+      "close": "关闭"
+    },
+    "edit": {
+      "title": "编辑记忆",
+      "factLabel": "记忆内容",
+      "statusLabel": "状态",
+      "importanceLabel": "重要度",
+      "ttlDaysLabel": "有效期(天)",
+      "ttlDaysHint": "留空表示永不过期",
+      "cancel": "取消",
+      "save": "保存"
+    },
+    "delete": {
+      "title": "确认删除",
+      "message": "确定要删除这条记忆吗？此操作不可撤销。",
+      "factPreview": "记忆内容: {fact}",
+      "cancel": "取消",
+      "confirm": "删除"
+    }
+  },
+  "actions": {
+    "refresh": "刷新",
+    "view": "查看详情",
+    "edit": "编辑",
+    "delete": "删除"
+  },
+  "pagination": {
+    "itemsPerPage": "每页条数",
+    "showingItems": "显示 {start}-{end} 条，共 {total} 条"
+  },
+  "messages": {
+    "fetchError": "获取数据失败",
+    "updateSuccess": "更新成功",
+    "updateError": "更新失败",
+    "deleteSuccess": "删除成功",
+    "deleteError": "删除失败",
+    "statsError": "获取统计数据失败"
+  },
+  "empty": {
+    "items": "暂无记忆条目",
+    "events": "暂无原始事件",
+    "itemsHint": "记忆条目会在对话过程中自动提取和积累",
+    "eventsHint": "对话事件会在聊天时自动记录"
+  },
+  "guide": {
+    "title": "长期记忆使用引导",
+    "dismiss": "知道了",
+    "steps": {
+      "what": {
+        "title": "什么是长期记忆？",
+        "desc": "长期记忆让 AI 助手能够跨对话记住用户的偏好、习惯和重要信息，提供更个性化的服务。系统会自动从对话中提取关键事实并持久化存储。"
+      },
+      "how": {
+        "title": "记忆是如何产生的？",
+        "desc": "当你与 AI 助手对话时，系统会自动记录原始事件，然后通过 LLM 提取出结构化的记忆条目。每条记忆都有置信度评分，置信度越高表示信息越可靠。"
+      },
+      "status": {
+        "title": "记忆状态说明",
+        "desc": "影子模式：记忆已存储但不会注入到对话中（默认状态）。生效中：记忆会在相关对话中被自动召回。已禁用：手动关闭的记忆。已过期：超过有效期的记忆。"
+      },
+      "manage": {
+        "title": "如何管理记忆？",
+        "desc": "在「记忆条目」标签页中，你可以查看、编辑或删除记忆。可以调整记忆的状态（如从影子模式切换为生效中）、修改重要度和有效期。「统计概览」标签页提供记忆数据的整体视图。"
+      }
+    }
+  }
+}

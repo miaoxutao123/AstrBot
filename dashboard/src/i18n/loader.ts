@@ -61,6 +61,8 @@ export class I18nLoader {
       { name: 'features/migration', path: 'features/migration.json' },
       { name: 'features/workflow', path: 'features/workflow.json' },
       { name: 'features/welcome', path: 'features/welcome.json' },
+      { name: 'features/engineering-ops', path: 'features/engineering-ops.json' },
+      { name: 'features/long-term-memory', path: 'features/long-term-memory.json' },
       
       // 消息模块
       { name: 'messages/errors', path: 'messages/errors.json' },
