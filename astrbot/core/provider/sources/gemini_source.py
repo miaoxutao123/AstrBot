@@ -153,7 +153,7 @@ class ProviderGoogleGenAI(Provider):
         native_search = self.provider_config.get("gm_native_search", False)
         url_context = self.provider_config.get("gm_url_context", False)
 
-        if "gemini-2.5" in model_name:
+        if "gemini-2.5" in model_name or "gemini-3" in model_name:
             if native_coderunner:
                 tool_list.append(types.Tool(code_execution=types.ToolCodeExecution()))
                 if native_search:
@@ -227,32 +227,23 @@ class ProviderGoogleGenAI(Provider):
                 thinking_config = types.ThinkingConfig(
                     thinking_budget=thinking_budget,
                 )
-        elif model_name in [
-            "gemini-3-pro",
-            "gemini-3-pro-preview",
-            "gemini-3-flash",
-            "gemini-3-flash-preview",
-            "gemini-3-flash-lite",
-            "gemini-3-flash-lite-preview",
-        ]:
-            # The thinkingLevel parameter, recommended for Gemini 3 models and onwards
+        elif "gemini-3" in model_name:
+            # The thinkingLevel parameter, recommended for Gemini 3 models and onwards.
             # Gemini 2.5 series models don't support thinkingLevel; use thinkingBudget instead.
+            # See: https://ai.google.dev/gemini-api/docs/gemini-3
             thinking_level = self.provider_config.get("gm_thinking_config", {}).get(
-                "level", "HIGH"
+                "level", "high"
             )
             if thinking_level and isinstance(thinking_level, str):
-                thinking_level = thinking_level.upper()
-                if thinking_level not in ["MINIMAL", "LOW", "MEDIUM", "HIGH"]:
+                thinking_level = thinking_level.lower()
+                if thinking_level not in ["minimal", "low", "medium", "high"]:
                     logger.warning(
-                        f"Invalid thinking level: {thinking_level}, using HIGH"
+                        f"Invalid thinking level: {thinking_level}, using high"
                     )
-                    thinking_level = "HIGH"
-                level = types.ThinkingLevel(thinking_level)
-                thinking_config = types.ThinkingConfig()
-                if not hasattr(types.ThinkingConfig, "thinking_level"):
-                    setattr(types.ThinkingConfig, "thinking_level", level)
-                else:
-                    thinking_config.thinking_level = level
+                    thinking_level = "high"
+                thinking_config = types.ThinkingConfig(
+                    thinking_level=thinking_level,
+                )
 
         return types.GenerateContentConfig(
             system_instruction=system_instruction,

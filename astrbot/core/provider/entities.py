@@ -216,12 +216,43 @@ class ProviderRequest:
 
     async def _encode_image_bs64(self, image_url: str) -> str:
         """将图片转换为 base64"""
+        if image_url.startswith("data:"):
+            return self._normalize_data_url(image_url)
         if image_url.startswith("base64://"):
-            return image_url.replace("base64://", "data:image/jpeg;base64,")
+            raw_base64 = image_url.removeprefix("base64://")
+            normalized = self._normalize_base64_payload(raw_base64)
+            if not normalized:
+                return ""
+            return f"data:image/jpeg;base64,{normalized}"
         with open(image_url, "rb") as f:
             image_bs64 = base64.b64encode(f.read()).decode("utf-8")
             return "data:image/jpeg;base64," + image_bs64
         return ""
+
+    @staticmethod
+    def _normalize_base64_payload(raw_base64: str) -> str:
+        normalized = "".join(str(raw_base64 or "").split())
+        if not normalized:
+            return ""
+        normalized = normalized.replace("-", "+").replace("_", "/")
+        normalized += "=" * (-len(normalized) % 4)
+        try:
+            base64.b64decode(normalized, validate=True)
+        except Exception:
+            return ""
+        return normalized
+
+    @staticmethod
+    def _normalize_data_url(data_url: str) -> str:
+        if "," not in data_url:
+            return ""
+        prefix, raw_base64 = data_url.split(",", 1)
+        if ";base64" not in prefix.lower():
+            return ""
+        normalized = ProviderRequest._normalize_base64_payload(raw_base64)
+        if not normalized:
+            return ""
+        return f"{prefix},{normalized}"
 
 
 @dataclass

@@ -26,6 +26,12 @@ from astrbot.core.db.po import (
     SessionProjectRelation,
     SQLModel,
 )
+# Import LTM models so their tables are registered with SQLModel metadata
+from astrbot.core.long_term_memory.models import (  # noqa: F401
+    MemoryEvent,
+    MemoryEvidence,
+    MemoryItem,
+)
 from astrbot.core.db.po import (
     Platform as DeprecatedPlatformStat,
 )
@@ -58,6 +64,7 @@ class SQLiteDatabase(BaseDatabase):
             # 确保 personas 表有 folder_id、sort_order、skills 列（前向兼容）
             await self._ensure_persona_folder_columns(conn)
             await self._ensure_persona_skills_column(conn)
+            await self._ensure_memory_item_consolidation_column(conn)
             await conn.commit()
 
     async def _ensure_persona_folder_columns(self, conn) -> None:
@@ -91,6 +98,21 @@ class SQLiteDatabase(BaseDatabase):
 
         if "skills" not in columns:
             await conn.execute(text("ALTER TABLE personas ADD COLUMN skills JSON"))
+
+    async def _ensure_memory_item_consolidation_column(self, conn) -> None:
+        """Ensure memory_items table has consolidation_count column (forward compat)."""
+        try:
+            result = await conn.execute(text("PRAGMA table_info(memory_items)"))
+            columns = {row[1] for row in result.fetchall()}
+            if "consolidation_count" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_items ADD COLUMN consolidation_count INTEGER DEFAULT 0"
+                    )
+                )
+        except Exception:
+            # Table may not exist yet — create_all will handle it
+            pass
 
     # ====
     # Platform Statistics

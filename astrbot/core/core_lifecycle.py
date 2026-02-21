@@ -28,7 +28,9 @@ from astrbot.core.persona_mgr import PersonaManager
 from astrbot.core.pipeline.scheduler import PipelineContext, PipelineScheduler
 from astrbot.core.platform.manager import PlatformManager
 from astrbot.core.platform_message_history_mgr import PlatformMessageHistoryManager
+from astrbot.core.project_context.index_manager import project_index_manager
 from astrbot.core.provider.manager import ProviderManager
+from astrbot.core.provider.provider import EmbeddingProvider, Provider
 from astrbot.core.star import PluginManager
 from astrbot.core.star.context import Context
 from astrbot.core.star.star_handler import EventType, star_handlers_registry, star_map
@@ -114,6 +116,15 @@ class AstrBotCoreLifecycle:
             LogManager.configure_trace_logger(self.astrbot_config)
 
         await self.db.initialize()
+
+        # Initialize Long-Term Memory system
+        try:
+            from astrbot.core.long_term_memory.manager import init_ltm_manager
+
+            init_ltm_manager(self.db)
+            logger.info("Long-term memory system initialized.")
+        except Exception as e:
+            logger.debug("LTM initialization skipped: %s", e)
 
         await html_renderer.initialize()
 
@@ -227,6 +238,68 @@ class AstrBotCoreLifecycle:
         # 根据配置实例化各个平台适配器
         await self.platform_manager.initialize()
 
+        pctx_cfg = self.astrbot_config.get("provider_settings", {}).get(
+            "project_context", {}
+        )
+        if pctx_cfg.get("enable", False) and pctx_cfg.get(
+            "auto_build_on_startup", False
+        ):
+            try:
+                logger.info("Building project context index on startup...")
+                project_index_manager.build_index(
+                    max_files=int(pctx_cfg.get("max_files", 12000) or 12000),
+                    max_file_bytes=int(
+                        pctx_cfg.get("max_file_bytes", 1500000) or 1500000
+                    ),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Failed to build project context index on startup: {e}")
+
+            if pctx_cfg.get("semantic_enable", False):
+                try:
+                    provider_id = str(pctx_cfg.get("semantic_provider_id", "") or "")
+                    provider = None
+                    if provider_id:
+                        provider = self.star_context.get_provider_by_id(provider_id)
+                    if not isinstance(provider, EmbeddingProvider):
+                        providers = self.star_context.get_all_embedding_providers()
+                        provider = providers[0] if providers else None
+
+                    if isinstance(provider, EmbeddingProvider):
+                        meta = provider.meta()
+                        logger.info(
+                            "Building semantic project context index on startup with provider %s...",
+                            meta.id,
+                        )
+                        await project_index_manager.build_semantic_index(
+                            embed_many=lambda texts: provider.get_embeddings_batch(
+                                texts,
+                                batch_size=16,
+                                tasks_limit=2,
+                                max_retries=3,
+                            ),
+                            provider_id=meta.id,
+                            provider_model=meta.model or "",
+                            max_docs=int(
+                                pctx_cfg.get("semantic_max_docs", 1800) or 1800
+                            ),
+                            max_doc_chars=int(
+                                pctx_cfg.get("semantic_max_doc_chars", 1200) or 1200
+                            ),
+                            path_prefix=str(
+                                pctx_cfg.get("semantic_path_prefix", "") or ""
+                            )
+                            or None,
+                        )
+                    else:
+                        logger.info(
+                            "Skip semantic project context build on startup: no embedding provider available."
+                        )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"Failed to build semantic project context index on startup: {e}"
+                    )
+
         # 初始化关闭控制面板的事件
         self.dashboard_shutdown_event = asyncio.Event()
 
@@ -252,6 +325,43 @@ class AstrBotCoreLifecycle:
                 self.temp_dir_cleaner.run(),
                 name="temp_dir_cleaner",
             )
+
+        # Register LTM maintenance cron jobs
+        if self.cron_manager:
+            try:
+                from astrbot.core.long_term_memory.manager import get_ltm_manager
+                from astrbot.core.long_term_memory.policy import MemoryMaintenancePolicy
+
+                ltm_mgr = get_ltm_manager()
+                if ltm_mgr is not None:
+                    ltm_cfg = self.astrbot_config.get("provider_ltm_settings", {}).get(
+                        "long_term_memory", {}
+                    )
+                    maint_cfg = ltm_cfg.get("maintenance", {})
+                    maint_policy = MemoryMaintenancePolicy.from_dict(maint_cfg)
+
+                    consolidation_provider: Provider | None = None
+                    extraction_provider_id = str(
+                        ltm_cfg.get("extraction_provider_id", "") or ""
+                    )
+                    if extraction_provider_id:
+                        p = self.star_context.get_provider_by_id(extraction_provider_id)
+                        if isinstance(p, Provider):
+                            consolidation_provider = p
+                    if consolidation_provider is None:
+                        p = self.star_context.get_using_provider()
+                        if isinstance(p, Provider):
+                            consolidation_provider = p
+
+                    asyncio.create_task(
+                        ltm_mgr.register_cron_jobs(
+                            cron_manager=self.cron_manager,
+                            maintenance_policy=maint_policy,
+                            provider=consolidation_provider,
+                        )
+                    )
+            except Exception as e:
+                logger.debug("LTM cron registration skipped: %s", e)
 
         # 把插件中注册的所有协程函数注册到事件总线中并执行
         extra_tasks = []

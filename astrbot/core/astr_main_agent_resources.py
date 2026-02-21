@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import uuid
+from pathlib import Path
 
 from pydantic import Field
 from pydantic.dataclasses import dataclass
@@ -21,8 +22,62 @@ from astrbot.core.computer.tools import (
 )
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.message_session import MessageSession
+from astrbot.core.professional_tools.mcp_presets import (
+    MCP_PRESET_INSTALL_TOOL as _MCP_PRESET_INSTALL_TOOL,
+)
+from astrbot.core.professional_tools.mcp_presets import (
+    MCP_PRESET_LIST_TOOL as _MCP_PRESET_LIST_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_ARCH_SUMMARY_TOOL as _PROJECT_ARCH_SUMMARY_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_DEP_TRACE_TOOL as _PROJECT_DEP_TRACE_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_INDEX_BUILD_TOOL as _PROJECT_INDEX_BUILD_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_SEMANTIC_INDEX_BUILD_TOOL as _PROJECT_SEMANTIC_INDEX_BUILD_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_SEMANTIC_INDEX_INFO_TOOL as _PROJECT_SEMANTIC_INDEX_INFO_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_SEMANTIC_SEARCH_TOOL as _PROJECT_SEMANTIC_SEARCH_TOOL,
+)
+from astrbot.core.project_context.tools import (
+    PROJECT_SYMBOL_SEARCH_TOOL as _PROJECT_SYMBOL_SEARCH_TOOL,
+)
+from astrbot.core.runtime.tools import (
+    BACKGROUND_TASK_CANCEL_TOOL as _BACKGROUND_TASK_CANCEL_TOOL,
+)
+from astrbot.core.runtime.tools import (
+    BACKGROUND_TASK_LIST_TOOL as _BACKGROUND_TASK_LIST_TOOL,
+)
+from astrbot.core.runtime.tools import (
+    BACKGROUND_TASK_STATUS_TOOL as _BACKGROUND_TASK_STATUS_TOOL,
+)
 from astrbot.core.star.context import Context
-from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+from astrbot.core.tool_evolution.tools import (
+    TOOL_EVOLUTION_APPLY_TOOL as _TOOL_EVOLUTION_APPLY_TOOL,
+)
+from astrbot.core.tool_evolution.tools import (
+    TOOL_EVOLUTION_GUARDRAILS_TOOL as _TOOL_EVOLUTION_GUARDRAILS_TOOL,
+)
+from astrbot.core.tool_evolution.tools import (
+    TOOL_EVOLUTION_OVERVIEW_TOOL as _TOOL_EVOLUTION_OVERVIEW_TOOL,
+)
+from astrbot.core.tool_evolution.tools import (
+    TOOL_EVOLUTION_PROPOSE_TOOL as _TOOL_EVOLUTION_PROPOSE_TOOL,
+)
+from astrbot.core.tool_evolution.tools import (
+    TOOL_EVOLUTION_RESILIENCE_TOOL as _TOOL_EVOLUTION_RESILIENCE_TOOL,
+)
+from astrbot.core.utils.astrbot_path import (
+    get_astrbot_skills_path,
+    get_astrbot_temp_path,
+)
 
 LLM_SAFETY_MODE_SYSTEM_PROMPT = """You are running in Safe Mode.
 
@@ -364,6 +419,75 @@ class SendMessageToUserTool(FunctionTool[AstrAgentContext]):
         return f"Message sent to session {target_session}"
 
 
+@dataclass
+class ReadSkillTool(FunctionTool[AstrAgentContext]):
+    name: str = "astrbot_read_skill"
+    description: str = "Read a local skill's SKILL.md by skill name. Use this for grounding before following a skill."
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Skill folder name under AstrBot data/skills.",
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "1-based start line.",
+                    "default": 1,
+                },
+                "max_lines": {
+                    "type": "integer",
+                    "description": "Maximum number of lines to return.",
+                    "default": 200,
+                },
+            },
+            "required": ["skill_name"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        skill_name = str(kwargs.get("skill_name", "")).strip()
+        if not skill_name:
+            return "error: skill_name is required."
+
+        try:
+            start_line = int(kwargs.get("start_line", 1) or 1)
+            max_lines = int(kwargs.get("max_lines", 200) or 200)
+        except Exception:
+            start_line = 1
+            max_lines = 200
+
+        start_line = max(1, start_line)
+        max_lines = max(1, min(400, max_lines))
+
+        skills_root = Path(get_astrbot_skills_path()).resolve()
+        skill_md = (skills_root / skill_name / "SKILL.md").resolve()
+
+        # Path traversal guard
+        if skills_root not in skill_md.parents:
+            return "error: invalid skill_name."
+
+        if not skill_md.exists() or not skill_md.is_file():
+            return f"error: skill SKILL.md not found: {skill_name}"
+
+        try:
+            content = skill_md.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            return f"error: failed to read SKILL.md: {exc}"
+
+        lines = content.splitlines()
+        if not lines:
+            return f"[{skill_name}/SKILL.md] (empty)"
+
+        start_idx = min(len(lines) - 1, start_line - 1)
+        end_idx = min(len(lines), start_idx + max_lines)
+        excerpt = "\n".join(lines[start_idx:end_idx])
+        return f"[{skill_name}/SKILL.md] lines {start_idx + 1}-{end_idx} of {len(lines)}\n{excerpt}"
+
+
 async def retrieve_knowledge_base(
     query: str,
     umo: str,
@@ -449,6 +573,32 @@ PYTHON_TOOL = PythonTool()
 LOCAL_PYTHON_TOOL = LocalPythonTool()
 FILE_UPLOAD_TOOL = FileUploadTool()
 FILE_DOWNLOAD_TOOL = FileDownloadTool()
+READ_SKILL_TOOL = ReadSkillTool()
+
+# project-wide context tools
+PROJECT_INDEX_BUILD_TOOL = _PROJECT_INDEX_BUILD_TOOL
+PROJECT_SEMANTIC_INDEX_BUILD_TOOL = _PROJECT_SEMANTIC_INDEX_BUILD_TOOL
+PROJECT_SEMANTIC_INDEX_INFO_TOOL = _PROJECT_SEMANTIC_INDEX_INFO_TOOL
+PROJECT_SEMANTIC_SEARCH_TOOL = _PROJECT_SEMANTIC_SEARCH_TOOL
+PROJECT_SYMBOL_SEARCH_TOOL = _PROJECT_SYMBOL_SEARCH_TOOL
+PROJECT_DEP_TRACE_TOOL = _PROJECT_DEP_TRACE_TOOL
+PROJECT_ARCH_SUMMARY_TOOL = _PROJECT_ARCH_SUMMARY_TOOL
+
+# background task observability tools
+BACKGROUND_TASK_STATUS_TOOL = _BACKGROUND_TASK_STATUS_TOOL
+BACKGROUND_TASK_LIST_TOOL = _BACKGROUND_TASK_LIST_TOOL
+BACKGROUND_TASK_CANCEL_TOOL = _BACKGROUND_TASK_CANCEL_TOOL
+
+# tool self-iteration tools
+TOOL_EVOLUTION_OVERVIEW_TOOL = _TOOL_EVOLUTION_OVERVIEW_TOOL
+TOOL_EVOLUTION_PROPOSE_TOOL = _TOOL_EVOLUTION_PROPOSE_TOOL
+TOOL_EVOLUTION_APPLY_TOOL = _TOOL_EVOLUTION_APPLY_TOOL
+TOOL_EVOLUTION_GUARDRAILS_TOOL = _TOOL_EVOLUTION_GUARDRAILS_TOOL
+TOOL_EVOLUTION_RESILIENCE_TOOL = _TOOL_EVOLUTION_RESILIENCE_TOOL
+
+# professional mcp preset tools
+MCP_PRESET_LIST_TOOL = _MCP_PRESET_LIST_TOOL
+MCP_PRESET_INSTALL_TOOL = _MCP_PRESET_INSTALL_TOOL
 
 # we prevent astrbot from connecting to known malicious hosts
 # these hosts are base64 encoded

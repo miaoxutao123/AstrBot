@@ -21,6 +21,9 @@ from astrbot.core.astr_agent_hooks import MAIN_AGENT_HOOKS
 from astrbot.core.astr_agent_run_util import AgentRunner
 from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
 from astrbot.core.astr_main_agent_resources import (
+    BACKGROUND_TASK_CANCEL_TOOL,
+    BACKGROUND_TASK_LIST_TOOL,
+    BACKGROUND_TASK_STATUS_TOOL,
     CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT,
     EXECUTE_SHELL_TOOL,
     FILE_DOWNLOAD_TOOL,
@@ -30,11 +33,26 @@ from astrbot.core.astr_main_agent_resources import (
     LLM_SAFETY_MODE_SYSTEM_PROMPT,
     LOCAL_EXECUTE_SHELL_TOOL,
     LOCAL_PYTHON_TOOL,
+    MCP_PRESET_INSTALL_TOOL,
+    MCP_PRESET_LIST_TOOL,
+    PROJECT_ARCH_SUMMARY_TOOL,
+    PROJECT_DEP_TRACE_TOOL,
+    PROJECT_INDEX_BUILD_TOOL,
+    PROJECT_SEMANTIC_INDEX_BUILD_TOOL,
+    PROJECT_SEMANTIC_INDEX_INFO_TOOL,
+    PROJECT_SEMANTIC_SEARCH_TOOL,
+    PROJECT_SYMBOL_SEARCH_TOOL,
     PYTHON_TOOL,
+    READ_SKILL_TOOL,
     SANDBOX_MODE_PROMPT,
     SEND_MESSAGE_TO_USER_TOOL,
     TOOL_CALL_PROMPT,
     TOOL_CALL_PROMPT_SKILLS_LIKE_MODE,
+    TOOL_EVOLUTION_APPLY_TOOL,
+    TOOL_EVOLUTION_GUARDRAILS_TOOL,
+    TOOL_EVOLUTION_OVERVIEW_TOOL,
+    TOOL_EVOLUTION_PROPOSE_TOOL,
+    TOOL_EVOLUTION_RESILIENCE_TOOL,
     retrieve_knowledge_base,
 )
 from astrbot.core.conversation_mgr import Conversation
@@ -265,6 +283,55 @@ def _apply_local_env_tools(req: ProviderRequest) -> None:
     req.func_tool.add_tool(LOCAL_PYTHON_TOOL)
 
 
+def _project_context_tools(cfg: dict, req: ProviderRequest) -> None:
+    pctx_cfg = cfg.get("project_context", {})
+    if not pctx_cfg.get("enable", False):
+        return
+    if req.func_tool is None:
+        req.func_tool = ToolSet()
+    req.func_tool.add_tool(PROJECT_INDEX_BUILD_TOOL)
+    req.func_tool.add_tool(PROJECT_SEMANTIC_INDEX_BUILD_TOOL)
+    req.func_tool.add_tool(PROJECT_SEMANTIC_INDEX_INFO_TOOL)
+    req.func_tool.add_tool(PROJECT_SEMANTIC_SEARCH_TOOL)
+    req.func_tool.add_tool(PROJECT_SYMBOL_SEARCH_TOOL)
+    req.func_tool.add_tool(PROJECT_DEP_TRACE_TOOL)
+    req.func_tool.add_tool(PROJECT_ARCH_SUMMARY_TOOL)
+
+
+def _background_task_tools(cfg: dict, req: ProviderRequest) -> None:
+    bg_cfg = cfg.get("background_task", {})
+    if not bg_cfg.get("enable", True):
+        return
+    if req.func_tool is None:
+        req.func_tool = ToolSet()
+    req.func_tool.add_tool(BACKGROUND_TASK_STATUS_TOOL)
+    req.func_tool.add_tool(BACKGROUND_TASK_LIST_TOOL)
+    req.func_tool.add_tool(BACKGROUND_TASK_CANCEL_TOOL)
+
+
+def _tool_evolution_tools(cfg: dict, req: ProviderRequest) -> None:
+    evo_cfg = cfg.get("tool_evolution", {})
+    if not evo_cfg.get("enable", True):
+        return
+    if req.func_tool is None:
+        req.func_tool = ToolSet()
+    req.func_tool.add_tool(TOOL_EVOLUTION_OVERVIEW_TOOL)
+    req.func_tool.add_tool(TOOL_EVOLUTION_PROPOSE_TOOL)
+    req.func_tool.add_tool(TOOL_EVOLUTION_APPLY_TOOL)
+    req.func_tool.add_tool(TOOL_EVOLUTION_GUARDRAILS_TOOL)
+    req.func_tool.add_tool(TOOL_EVOLUTION_RESILIENCE_TOOL)
+
+
+def _professional_mcp_preset_tools(cfg: dict, req: ProviderRequest) -> None:
+    professional_cfg = cfg.get("professional_mcp", {})
+    if not professional_cfg.get("enable_presets", True):
+        return
+    if req.func_tool is None:
+        req.func_tool = ToolSet()
+    req.func_tool.add_tool(MCP_PRESET_LIST_TOOL)
+    req.func_tool.add_tool(MCP_PRESET_INSTALL_TOOL)
+
+
 async def _ensure_persona_and_skills(
     req: ProviderRequest,
     cfg: dict,
@@ -321,6 +388,7 @@ async def _ensure_persona_and_skills(
     runtime = cfg.get("computer_use_runtime", "local")
     skill_manager = SkillManager()
     skills = skill_manager.list_skills(active_only=True, runtime=runtime)
+    skills_prompt_injected = False
 
     if skills:
         if persona and persona.get("skills") is not None:
@@ -330,6 +398,7 @@ async def _ensure_persona_and_skills(
                 allowed = set(persona["skills"])
                 skills = [skill for skill in skills if skill.name in allowed]
         if skills:
+            skills_prompt_injected = True
             req.system_prompt += f"\n{build_skills_prompt(skills)}\n"
             if runtime == "none":
                 req.system_prompt += (
@@ -423,6 +492,12 @@ async def _ensure_persona_and_skills(
         ).strip()
         if router_prompt:
             req.system_prompt += f"\n{router_prompt}\n"
+
+    # Always provide a shell-free way to inspect SKILL.md for grounding.
+    if skills_prompt_injected:
+        if req.func_tool is None:
+            req.func_tool = ToolSet()
+        req.func_tool.add_tool(READ_SKILL_TOOL)
     try:
         event.trace.record(
             "sel_persona",
@@ -762,6 +837,8 @@ def _plugin_tool_fix(event: AstrMessageEvent, req: ProviderRequest) -> None:
                 continue
             mp = tool.handler_module_path
             if not mp:
+                # 保留没有 handler_module_path 的工具（通常为非插件工具）
+                new_tool_set.add_tool(tool)
                 continue
             plugin = star_map.get(mp)
             if not plugin:
@@ -1075,6 +1152,11 @@ async def build_main_agent(
         _apply_sandbox_tools(config, req, req.session_id)
     elif config.computer_use_runtime == "local":
         _apply_local_env_tools(req)
+
+    _project_context_tools(config.provider_settings, req)
+    _background_task_tools(config.provider_settings, req)
+    _tool_evolution_tools(config.provider_settings, req)
+    _professional_mcp_preset_tools(config.provider_settings, req)
 
     agent_runner = AgentRunner()
     astr_agent_ctx = AstrAgentContext(

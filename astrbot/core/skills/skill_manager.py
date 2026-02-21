@@ -71,8 +71,8 @@ def build_skills_prompt(skills: list[SkillInfo]) -> str:
         "- Discovery: The list above shows all skills available in this session. Full instructions live in the referenced `SKILL.md`.\n"
         "- Trigger rules: Use a skill if the user names it or the task matches its description. Do not carry skills across turns unless re-mentioned\n"
         "### How to use a skill (progressive disclosure):\n"
-        "  0) Mandatory grounding: Before using any skill, you MUST inspect its `SKILL.md` using shell tools"
-        " (e.g., `cat`, `head`, `sed`, `awk`, `grep`). Do not rely on assumptions or memory.\n"
+        "  0) Mandatory grounding: Before using any skill, you MUST inspect its `SKILL.md` using available tools.\n"
+        "     Prefer `astrbot_read_skill` (works without shell access). If shell tools are permitted, you may also use `cat`, `head`, `sed`, `awk`, `grep`.\n"
         "  1) Load only directly referenced files, DO NOT bulk-load everything.\n"
         "  2) If `scripts/` exist, prefer running or patching them instead of retyping large blocks of code.\n"
         "  3) If `assets/` or templates exist, reuse them rather than recreating everything from scratch.\n"
@@ -84,7 +84,7 @@ def build_skills_prompt(skills: list[SkillInfo]) -> str:
         "  - Avoid deep reference chasing: unless blocked, open only files that are directly linked from `SKILL.md`.\n"
         "- Failure handling: If a skill cannot be applied, state the issue and continue with the best alternative.\n"
         "### Example\n"
-        "When you decided to use a skill, use shell tool to read its `SKILL.md`, e.g., `head -40 skills/code_formatter/SKILL.md`, and you can increase or decrease the number of lines as needed.\n"
+        "When you decided to use a skill, read its `SKILL.md` via `astrbot_read_skill` (recommended) or shell tools when permitted (e.g., `head -40 skills/code_formatter/SKILL.md`).\n"
     )
 
 

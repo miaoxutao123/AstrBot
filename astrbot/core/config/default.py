@@ -127,6 +127,58 @@ DEFAULT_CONFIG = {
         "proactive_capability": {
             "add_cron_tools": True,
         },
+        "project_context": {
+            "enable": False,
+            "auto_build_on_startup": False,
+            "max_files": 12000,
+            "max_file_bytes": 1500000,
+            "semantic_enable": False,
+            "semantic_provider_id": "",
+            "semantic_max_docs": 1800,
+            "semantic_max_doc_chars": 1200,
+            "semantic_path_prefix": "",
+        },
+        "background_task": {
+            "enable": True,
+            "default_max_attempts": 3,
+            "default_backoff_seconds": 2.0,
+            "default_max_backoff_seconds": 30.0,
+        },
+        "tool_evolution": {
+            "enable": True,
+            "auto_apply": False,
+            "min_samples": 12,
+            "dry_run_default": True,
+            "auto_apply_every_calls": 10,
+        },
+        "coding_resilience": {
+            "enable": True,
+            "llm_max_retries": 2,
+            "llm_base_backoff_seconds": 1.5,
+            "llm_max_backoff_seconds": 12.0,
+            "step_max_retries": 2,
+            "stream_fallback_to_non_stream": True,
+            "max_tool_result_chars": 12000,
+            "max_message_chars": 12000,
+            "max_total_context_chars": 250000,
+            "hard_keep_recent_messages": 14,
+            "max_total_payload_chars": 360000,
+            "auto_compact_tool_schema": True,
+            "tool_schema_compact_threshold_chars": 90000,
+            "compact_tool_description_chars": 160,
+            "overflow_max_retries": 4,
+            "overflow_disable_tools_last_resort": True,
+            "drop_extra_user_content_parts_on_overflow": True,
+        },
+        "professional_mcp": {
+            "enable_presets": True,
+        },
+        "multimodal_copilot": {
+            "enable_video_stream_analysis": False,
+            "frame_sample_interval_ms": 500,
+            "max_frame_bytes": 900000,
+            "ocr_hint_keywords": ["error", "traceback", "exception", "failed"],
+        },
         "computer_use_runtime": "local",
         "computer_use_require_admin": True,
         "sandbox": {
@@ -173,6 +225,61 @@ DEFAULT_CONFIG = {
             "method": "possibility_reply",
             "possibility_reply": 0.1,
             "whitelist": [],
+        },
+        "long_term_memory": {
+            "enable": False,
+            "write_policy": {
+                "enable": True,
+                "mode": "shadow",
+                "min_confidence": 0.6,
+                "min_evidence_count": 1,
+                "allowed_types": ["profile", "preference", "task_state", "constraint", "episode"],
+                "max_writes_per_session": 10,
+                "max_writes_per_hour": 50,
+                "max_items_per_scope": 200,
+                "require_approval_types": [],
+                "eviction_enabled": True,
+                "eviction_buffer_ratio": 0.9,
+            },
+            "read_policy": {
+                "enable": True,
+                "max_items": 15,
+                "max_tokens": 800,
+                "max_per_type": 5,
+                "min_confidence": 0.5,
+                "recency_weight": 0.3,
+                "importance_weight": 0.4,
+                "similarity_weight": 0.3,
+            },
+            "identity": {
+                # user_scope_strategy:
+                # - unified_msg_origin: legacy behavior, per-platform-session memory
+                # - sender_id: cross-session memory for same sender id
+                # - platform_sender_id: <platform_id>:<sender_id>, stable per platform user
+                # - session_id: event.session_id
+                "user_scope_strategy": "unified_msg_origin",
+                # Optional explicit aliases for cross-platform identity unification.
+                # e.g. {"telegram:12345": "user_todd", "discord:998877": "user_todd"}
+                "cross_platform_aliases": {},
+                # When strategy changes from legacy mode, still read old UMO scope memory.
+                "include_legacy_umo_on_read": True,
+            },
+            "extraction_provider_id": "",
+            "embedding_provider_id": "",
+            "retention_days": {
+                "profile": -1,
+                "preference": 90,
+                "task_state": 7,
+                "constraint": -1,
+                "episode": 30,
+            },
+            "emergency_read_only": False,
+            "maintenance": {
+                "event_retention_days": 7,
+                "maintenance_cron": "0 3 * * *",
+                "enable_consolidation": False,
+                "consolidation_cron": "0 4 * * 0",
+            },
         },
     },
     "content_safety": {
@@ -3432,6 +3539,349 @@ CONFIG_METADATA_3 = {
                             "provider_ltm_settings.active_reply.enable": True,
                         },
                     },
+                },
+            },
+            "long_term_memory": {
+                "description": "长期记忆",
+                "type": "object",
+                "items": {
+                    "provider_ltm_settings.long_term_memory.enable": {
+                        "description": "启用长期记忆",
+                        "type": "bool",
+                        "hint": "开启后，AI 助手将自动从对话中提取并记忆关键信息。",
+                    },
+                    "provider_ltm_settings.long_term_memory.extraction_provider_id": {
+                        "description": "记忆提取模型",
+                        "type": "string",
+                        "_special": "select_provider",
+                        "hint": "用于从对话中提取记忆的 LLM 模型。留空则使用当前活跃模型。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.write_policy.enable": {
+                        "description": "启用记忆写入",
+                        "type": "bool",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.write_policy.mode": {
+                        "description": "写入模式",
+                        "type": "string",
+                        "options": ["shadow", "auto"],
+                        "hint": "shadow: 记忆仅存储不注入对话（需手动激活）；auto: 达标记忆自动生效。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                            "provider_ltm_settings.long_term_memory.write_policy.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.write_policy.min_confidence": {
+                        "description": "最低置信度",
+                        "type": "float",
+                        "hint": "低于此置信度的记忆将被丢弃。",
+                        "slider": {"min": 0, "max": 1, "step": 0.05},
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                            "provider_ltm_settings.long_term_memory.write_policy.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.write_policy.max_items_per_scope": {
+                        "description": "每个作用域最大记忆数",
+                        "type": "int",
+                        "hint": "每个用户/群组最多保留的记忆条目数量。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                            "provider_ltm_settings.long_term_memory.write_policy.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.read_policy.enable": {
+                        "description": "启用记忆召回",
+                        "type": "bool",
+                        "hint": "开启后，相关记忆会在对话时自动注入到系统提示词中。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.read_policy.max_items": {
+                        "description": "最大召回条数",
+                        "type": "int",
+                        "hint": "每次对话最多注入的记忆条目数量。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                            "provider_ltm_settings.long_term_memory.read_policy.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.read_policy.max_tokens": {
+                        "description": "最大召回 Token 数",
+                        "type": "int",
+                        "hint": "注入记忆的最大 Token 预算。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                            "provider_ltm_settings.long_term_memory.read_policy.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.emergency_read_only": {
+                        "description": "紧急只读模式",
+                        "type": "bool",
+                        "hint": "开启后停止所有记忆写入，仅保留读取功能。用于紧急情况。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.write_policy.eviction_enabled": {
+                        "description": "启用智能淘汰",
+                        "type": "bool",
+                        "hint": "记忆数量达到上限时，自动淘汰低优先级记忆为新记忆腾出空间，而非直接拒绝写入。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                            "provider_ltm_settings.long_term_memory.write_policy.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.maintenance.event_retention_days": {
+                        "description": "事件保留天数",
+                        "type": "int",
+                        "hint": "已处理的原始事件在数据库中保留的天数，超期后自动清理。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.long_term_memory.maintenance.enable_consolidation": {
+                        "description": "启用记忆合并",
+                        "type": "bool",
+                        "hint": "定期将相似的记忆条目合并为更精炼的单条记忆，减少冗余。需要消耗 LLM 调用额度。",
+                        "condition": {
+                            "provider_ltm_settings.long_term_memory.enable": True,
+                        },
+                    },
+                },
+            },
+            "project_context": {
+                "description": "项目上下文",
+                "hint": "让 AstrBot 理解代码项目结构，提供智能代码检索和理解能力。",
+                "type": "object",
+                "items": {
+                    "provider_settings.project_context.enable": {
+                        "description": "启用项目上下文",
+                        "type": "bool",
+                        "hint": "开启后 AstrBot 将索引代码项目，提供代码理解和检索工具。",
+                    },
+                    "provider_settings.project_context.auto_build_on_startup": {
+                        "description": "启动时自动构建索引",
+                        "type": "bool",
+                        "hint": "启用后，AstrBot 启动时自动构建项目索引。",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.max_files": {
+                        "description": "最大索引文件数",
+                        "type": "int",
+                        "hint": "项目索引的最大文件数量。",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.max_file_bytes": {
+                        "description": "最大文件大小(字节)",
+                        "type": "int",
+                        "hint": "超过此大小的文件将被跳过。",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.semantic_enable": {
+                        "description": "启用语义检索",
+                        "type": "bool",
+                        "hint": "使用向量嵌入进行语义代码检索。",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.semantic_provider_id": {
+                        "description": "语义检索模型",
+                        "type": "string",
+                        "_special": "select_provider:embedding",
+                        "hint": "用于语义检索的嵌入模型。",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                            "provider_settings.project_context.semantic_enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.semantic_max_docs": {
+                        "description": "语义索引最大文档数",
+                        "type": "int",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                            "provider_settings.project_context.semantic_enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.semantic_max_doc_chars": {
+                        "description": "语义索引文档最大字符数",
+                        "type": "int",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                            "provider_settings.project_context.semantic_enable": True,
+                        },
+                    },
+                    "provider_settings.project_context.semantic_path_prefix": {
+                        "description": "语义索引路径前缀",
+                        "type": "string",
+                        "hint": "仅索引匹配此前缀的文件路径。留空表示索引全部。",
+                        "condition": {
+                            "provider_settings.project_context.enable": True,
+                            "provider_settings.project_context.semantic_enable": True,
+                        },
+                    },
+                },
+                "condition": {
+                    "provider_settings.agent_runner_type": "local",
+                    "provider_settings.enable": True,
+                },
+            },
+            "tool_evolution": {
+                "description": "工具自迭代",
+                "hint": "让 AstrBot 自动分析工具调用数据，提出和应用优化策略。",
+                "type": "object",
+                "items": {
+                    "provider_settings.tool_evolution.enable": {
+                        "description": "启用工具自迭代",
+                        "type": "bool",
+                        "hint": "开启后，系统会记录工具调用数据并自动提出优化策略。",
+                    },
+                    "provider_settings.tool_evolution.auto_apply": {
+                        "description": "自动应用策略",
+                        "type": "bool",
+                        "hint": "达到条件时自动应用优化策略，无需手动确认。",
+                        "condition": {
+                            "provider_settings.tool_evolution.enable": True,
+                        },
+                    },
+                    "provider_settings.tool_evolution.min_samples": {
+                        "description": "最少样本数",
+                        "type": "int",
+                        "hint": "提出优化策略前需要的最少工具调用样本数。",
+                        "condition": {
+                            "provider_settings.tool_evolution.enable": True,
+                        },
+                    },
+                    "provider_settings.tool_evolution.dry_run_default": {
+                        "description": "默认预览模式",
+                        "type": "bool",
+                        "hint": "启用后新策略默认为预览模式，不会直接生效。",
+                        "condition": {
+                            "provider_settings.tool_evolution.enable": True,
+                        },
+                    },
+                    "provider_settings.tool_evolution.auto_apply_every_calls": {
+                        "description": "自动应用间隔(调用次数)",
+                        "type": "int",
+                        "hint": "每隔多少次工具调用检查并自动应用策略。",
+                        "condition": {
+                            "provider_settings.tool_evolution.enable": True,
+                            "provider_settings.tool_evolution.auto_apply": True,
+                        },
+                    },
+                },
+                "condition": {
+                    "provider_settings.agent_runner_type": "local",
+                    "provider_settings.enable": True,
+                },
+            },
+            "background_task": {
+                "description": "后台任务",
+                "hint": "管理 AstrBot 后台异步任务的执行策略。",
+                "type": "object",
+                "items": {
+                    "provider_settings.background_task.enable": {
+                        "description": "启用后台任务",
+                        "type": "bool",
+                    },
+                    "provider_settings.background_task.default_max_attempts": {
+                        "description": "默认最大重试次数",
+                        "type": "int",
+                        "hint": "任务失败时的最大重试次数。",
+                        "condition": {
+                            "provider_settings.background_task.enable": True,
+                        },
+                    },
+                    "provider_settings.background_task.default_backoff_seconds": {
+                        "description": "默认退避时间(秒)",
+                        "type": "float",
+                        "hint": "重试前的初始等待时间。",
+                        "condition": {
+                            "provider_settings.background_task.enable": True,
+                        },
+                    },
+                    "provider_settings.background_task.default_max_backoff_seconds": {
+                        "description": "最大退避时间(秒)",
+                        "type": "float",
+                        "hint": "重试等待时间的上限。",
+                        "condition": {
+                            "provider_settings.background_task.enable": True,
+                        },
+                    },
+                },
+                "condition": {
+                    "provider_settings.agent_runner_type": "local",
+                    "provider_settings.enable": True,
+                },
+            },
+            "professional_mcp": {
+                "description": "MCP 预设",
+                "hint": "管理 MCP（模型上下文协议）预设工具集。",
+                "type": "object",
+                "items": {
+                    "provider_settings.professional_mcp.enable_presets": {
+                        "description": "启用 MCP 预设",
+                        "type": "bool",
+                        "hint": "开启后，Agent 将获得 MCP 预设发现和安装工具。",
+                    },
+                },
+                "condition": {
+                    "provider_settings.agent_runner_type": "local",
+                    "provider_settings.enable": True,
+                },
+            },
+            "multimodal_copilot": {
+                "description": "多模态助手",
+                "hint": "视频流分析等多模态扩展能力。",
+                "type": "object",
+                "items": {
+                    "provider_settings.multimodal_copilot.enable_video_stream_analysis": {
+                        "description": "启用视频流分析",
+                        "type": "bool",
+                        "hint": "开启后，AI 助手可在实时聊天中分析视频流。",
+                    },
+                    "provider_settings.multimodal_copilot.frame_sample_interval_ms": {
+                        "description": "帧采样间隔(毫秒)",
+                        "type": "int",
+                        "hint": "视频流帧采样间隔，越小分析越精细但消耗越大。",
+                        "condition": {
+                            "provider_settings.multimodal_copilot.enable_video_stream_analysis": True,
+                        },
+                    },
+                    "provider_settings.multimodal_copilot.max_frame_bytes": {
+                        "description": "最大帧大小(字节)",
+                        "type": "int",
+                        "hint": "单帧图像的最大字节数。",
+                        "condition": {
+                            "provider_settings.multimodal_copilot.enable_video_stream_analysis": True,
+                        },
+                    },
+                    "provider_settings.multimodal_copilot.ocr_hint_keywords": {
+                        "description": "OCR 提示关键词",
+                        "type": "list",
+                        "items": {"type": "string"},
+                        "hint": "当画面中出现这些关键词时优先进行 OCR 识别。",
+                        "condition": {
+                            "provider_settings.multimodal_copilot.enable_video_stream_analysis": True,
+                        },
+                    },
+                },
+                "condition": {
+                    "provider_settings.agent_runner_type": "local",
+                    "provider_settings.enable": True,
                 },
             },
         },

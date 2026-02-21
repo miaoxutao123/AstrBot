@@ -583,6 +583,9 @@ class ProviderOpenAIOfficial(Provider):
                 for tcr in tool_calls_result:
                     context_query.extend(tcr.to_openai_messages())
 
+        await self._normalize_context_image_urls(context_query)
+        self._sanitize_context_tool_call_arguments(context_query)
+
         model = model or self.get_model()
 
         payloads = {"messages": context_query, "model": model}
@@ -590,6 +593,138 @@ class ProviderOpenAIOfficial(Provider):
         self._finally_convert_payload(payloads)
 
         return payloads, context_query
+
+    async def _normalize_context_image_urls(self, context_query: list[dict]) -> None:
+        """Normalize image_url payloads in historical context for provider compatibility."""
+        for message in context_query:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+
+            normalized_content = []
+            changed = False
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") != "image_url":
+                    normalized_content.append(part)
+                    continue
+
+                image_url_obj = part.get("image_url")
+                raw_url = ""
+                extra: dict = {}
+                if isinstance(image_url_obj, str):
+                    raw_url = image_url_obj
+                elif isinstance(image_url_obj, dict):
+                    raw_url = str(image_url_obj.get("url", "") or "")
+                    extra = {k: v for k, v in image_url_obj.items() if k != "url"}
+                else:
+                    changed = True
+                    continue
+
+                raw_url = raw_url.strip()
+                if not raw_url:
+                    changed = True
+                    continue
+
+                # Keep remote URLs as-is; normalize local/base64/data URLs.
+                if raw_url.startswith("http://") or raw_url.startswith("https://"):
+                    normalized_content.append(part)
+                    continue
+
+                is_local_file = False
+                try:
+                    is_local_file = os.path.exists(raw_url)
+                except Exception:
+                    is_local_file = False
+
+                should_normalize = (
+                    raw_url.startswith("data:")
+                    or raw_url.startswith("base64://")
+                    or raw_url.startswith("file:///")
+                    or is_local_file
+                )
+                if not should_normalize:
+                    normalized_content.append(part)
+                    continue
+
+                normalized_url = await self.encode_image_bs64(raw_url)
+                if not normalized_url:
+                    logger.warning("检测到无效上下文图片数据，已忽略该 image_url 块。")
+                    changed = True
+                    continue
+
+                changed = True
+                normalized_part = dict(part)
+                normalized_image_url = {"url": normalized_url}
+                if extra:
+                    normalized_image_url.update(extra)
+                normalized_part["image_url"] = normalized_image_url
+                normalized_content.append(normalized_part)
+
+            if changed:
+                if not normalized_content:
+                    normalized_content = [{"type": "text", "text": "[图片]"}]
+                message["content"] = normalized_content
+
+    def _sanitize_tool_call_arguments(self, arguments) -> tuple[str, bool]:
+        if isinstance(arguments, str):
+            normalized = arguments.strip()
+            if not normalized:
+                return "{}", True
+            try:
+                json.loads(normalized)
+                return normalized, normalized != arguments
+            except Exception:
+                return (
+                    '{"_astrbot_notice":"invalid tool arguments omitted due to JSON parsing error"}',
+                    True,
+                )
+
+        if arguments is None:
+            return "{}", True
+
+        if isinstance(arguments, (dict, list, int, float, bool)):
+            return json.dumps(arguments, ensure_ascii=False), True
+
+        return (
+            json.dumps(
+                {"_astrbot_notice": f"unsupported arguments type: {type(arguments).__name__}"},
+                ensure_ascii=False,
+            ),
+            True,
+        )
+
+    def _sanitize_context_tool_call_arguments(self, context_query: list[dict]) -> bool:
+        changed = False
+        for message_idx, message in enumerate(context_query):
+            if message.get("role") != "assistant":
+                continue
+            tool_calls = message.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                continue
+
+            for tool_call_idx, tool_call in enumerate(tool_calls):
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function")
+                if not isinstance(function, dict):
+                    continue
+
+                current_arguments = function.get("arguments")
+                normalized_arguments, normalized = self._sanitize_tool_call_arguments(
+                    current_arguments
+                )
+                if not normalized:
+                    continue
+
+                function["arguments"] = normalized_arguments
+                changed = True
+                logger.warning(
+                    "检测到非法或不规范的 tool_call.arguments，已自动修复。message_idx=%s, tool_call_idx=%s, name=%s",
+                    message_idx,
+                    tool_call_idx,
+                    function.get("name", ""),
+                )
+        return changed
 
     def _finally_convert_payload(self, payloads: dict) -> None:
         """Finally convert the payload. Such as think part conversion, tool inject."""
@@ -657,6 +792,25 @@ class ProviderOpenAIOfficial(Provider):
                 func_tool,
                 image_fallback_used,
             )
+        if "arguments" in str(e).lower() and "json" in str(e).lower():
+            fixed = self._sanitize_context_tool_call_arguments(context_query)
+            if fixed:
+                wait_seconds = min(2.5, 0.5 * (retry_cnt + 1))
+                if retry_cnt < max_retries - 1:
+                    await asyncio.sleep(wait_seconds)
+                payloads["messages"] = context_query
+                logger.warning(
+                    "检测到 tool_call.arguments JSON 非法，已修复并延时 %.1fs 后重试。",
+                    wait_seconds,
+                )
+                return (
+                    False,
+                    chosen_key,
+                    available_api_keys,
+                    payloads,
+                    context_query,
+                    func_tool,
+                )
         if "The model is not a VLM" in str(e):  # siliconcloud
             if image_fallback_used or not self._context_contains_image(context_query):
                 raise e
@@ -947,11 +1101,47 @@ class ProviderOpenAIOfficial(Provider):
 
     async def encode_image_bs64(self, image_url: str) -> str:
         """将图片转换为 base64"""
+        if image_url.startswith("data:"):
+            normalized = self._normalize_data_url(image_url)
+            if not normalized:
+                logger.warning("检测到无效 data URL，已忽略。")
+                return ""
+            return normalized
         if image_url.startswith("base64://"):
-            return image_url.replace("base64://", "data:image/jpeg;base64,")
+            raw_base64 = image_url.removeprefix("base64://")
+            normalized = self._normalize_base64_payload(raw_base64)
+            if not normalized:
+                logger.warning("检测到无效 base64:// 图片数据，已忽略。")
+                return ""
+            return f"data:image/jpeg;base64,{normalized}"
         with open(image_url, "rb") as f:
             image_bs64 = base64.b64encode(f.read()).decode("utf-8")
             return "data:image/jpeg;base64," + image_bs64
+
+    @staticmethod
+    def _normalize_base64_payload(raw_base64: str) -> str:
+        normalized = "".join(str(raw_base64 or "").split())
+        if not normalized:
+            return ""
+        normalized = normalized.replace("-", "+").replace("_", "/")
+        normalized += "=" * (-len(normalized) % 4)
+        try:
+            base64.b64decode(normalized, validate=True)
+        except Exception:
+            return ""
+        return normalized
+
+    @staticmethod
+    def _normalize_data_url(data_url: str) -> str:
+        if "," not in data_url:
+            return ""
+        prefix, raw_base64 = data_url.split(",", 1)
+        if ";base64" not in prefix.lower():
+            return ""
+        normalized = ProviderOpenAIOfficial._normalize_base64_payload(raw_base64)
+        if not normalized:
+            return ""
+        return f"{prefix},{normalized}"
 
     async def terminate(self):
         if self.client:

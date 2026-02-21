@@ -63,6 +63,8 @@ dependencies = [
   "shipyard-python-sdk>=0.2.4",
   "python-socks>=2.8.0",
   "packaging>=24.2",
+  "chromadb>=0.5,<1.0",
+  "onnxruntime<=1.23.2",
 ]
 
 [dependency-groups]

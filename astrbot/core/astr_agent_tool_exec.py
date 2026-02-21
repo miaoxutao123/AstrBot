@@ -3,7 +3,6 @@ import inspect
 import json
 import traceback
 import typing as T
-import uuid
 
 import mcp
 
@@ -28,12 +27,23 @@ from astrbot.core.message.message_event_result import (
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.provider.entites import ProviderRequest
 from astrbot.core.provider.register import llm_tools
+from astrbot.core.runtime.background_task_manager import (
+    RetryPolicy,
+    background_task_manager,
+)
 from astrbot.core.utils.history_saver import persist_agent_history
 
 
 class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
     @classmethod
-    async def execute(cls, tool, run_context, **tool_args):
+    async def execute(
+        cls,
+        tool,
+        run_context,
+        *,
+        tool_call_timeout_override: int | None = None,
+        **tool_args,
+    ):
         """执行函数调用。
 
         Args:
@@ -55,34 +65,80 @@ class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
             return
 
         elif tool.is_background_task:
-            task_id = uuid.uuid4().hex
+            task_id = await background_task_manager.create_task(
+                tool_name=tool.name,
+                session_id=run_context.context.event.unified_msg_origin,
+                tool_args=tool_args,
+                note=run_context.context.event.get_extra("background_note") or "",
+                retry_policy=cls._resolve_background_retry_policy(run_context),
+            )
 
             async def _run_in_background() -> None:
                 try:
-                    await cls._execute_background(
+                    snapshot = await background_task_manager.run_with_retry(
+                        task_id=task_id,
+                        attempt_runner=lambda _: cls._execute_background_tool(
+                            tool=tool,
+                            run_context=run_context,
+                            **tool_args,
+                        ),
+                    )
+                    await cls._notify_background_completion(
                         tool=tool,
                         run_context=run_context,
                         task_id=task_id,
-                        **tool_args,
+                        snapshot=snapshot,
+                        tool_args=tool_args,
                     )
+                except asyncio.CancelledError:
+                    pass
                 except Exception as e:  # noqa: BLE001
                     logger.error(
                         f"Background task {task_id} failed: {e!s}",
                         exc_info=True,
                     )
 
-            asyncio.create_task(_run_in_background())
+            runtime_task = asyncio.create_task(_run_in_background())
+            await background_task_manager.attach_runtime_task(task_id, runtime_task)
+
             text_content = mcp.types.TextContent(
                 type="text",
-                text=f"Background task submitted. task_id={task_id}",
+                text=(
+                    "Background task submitted. "
+                    f"task_id={task_id}. You can check status via astrbot_background_task_status."
+                ),
             )
             yield mcp.types.CallToolResult(content=[text_content])
 
             return
         else:
-            async for r in cls._execute_local(tool, run_context, **tool_args):
+            async for r in cls._execute_local(
+                tool,
+                run_context,
+                tool_call_timeout=tool_call_timeout_override,
+                **tool_args,
+            ):
                 yield r
             return
+
+    @classmethod
+    def _resolve_background_retry_policy(
+        cls,
+        run_context: ContextWrapper[AstrAgentContext],
+    ) -> RetryPolicy:
+        cfg = run_context.context.context.get_config(
+            umo=run_context.context.event.unified_msg_origin,
+        )
+        bg_cfg = cfg.get("provider_settings", {}).get("background_task", {})
+        return RetryPolicy(
+            max_attempts=int(bg_cfg.get("default_max_attempts", 3) or 3),
+            base_backoff_seconds=float(
+                bg_cfg.get("default_backoff_seconds", 2.0) or 2.0
+            ),
+            max_backoff_seconds=float(
+                bg_cfg.get("default_max_backoff_seconds", 30.0) or 30.0
+            ),
+        )
 
     @classmethod
     async def _execute_handoff(
@@ -147,12 +203,35 @@ class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
         )
 
     @classmethod
-    async def _execute_background(
+    async def _execute_background_tool(
+        cls,
+        tool: FunctionTool,
+        run_context: ContextWrapper[AstrAgentContext],
+        **tool_args,
+    ) -> str:
+        result_text = ""
+        async for r in cls._execute_local(
+            tool, run_context, tool_call_timeout=3600, **tool_args
+        ):
+            if isinstance(r, mcp.types.CallToolResult):
+                result_text = ""
+                for content in r.content:
+                    if isinstance(content, mcp.types.TextContent):
+                        result_text += content.text + "\n"
+
+        final_text = (result_text or "").strip()
+        if final_text.lower().startswith("error:"):
+            raise RuntimeError(final_text)
+        return final_text
+
+    @classmethod
+    async def _notify_background_completion(
         cls,
         tool: FunctionTool,
         run_context: ContextWrapper[AstrAgentContext],
         task_id: str,
-        **tool_args,
+        snapshot: dict,
+        tool_args: dict,
     ) -> None:
         from astrbot.core.astr_main_agent import (
             MainAgentBuildConfig,
@@ -160,25 +239,13 @@ class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
             build_main_agent,
         )
 
-        # run the tool
-        result_text = ""
-        try:
-            async for r in cls._execute_local(
-                tool, run_context, tool_call_timeout=3600, **tool_args
-            ):
-                # collect results, currently we just collect the text results
-                if isinstance(r, mcp.types.CallToolResult):
-                    result_text = ""
-                    for content in r.content:
-                        if isinstance(content, mcp.types.TextContent):
-                            result_text += content.text + "\n"
-        except Exception as e:
-            result_text = (
-                f"error: Background task execution failed, internal error: {e!s}"
-            )
-
         event = run_context.context.event
         ctx = run_context.context.context
+
+        result_text = str(snapshot.get("result") or "")
+        status = str(snapshot.get("status") or "unknown")
+        if status != "succeeded" and not result_text:
+            result_text = str(snapshot.get("last_error") or "")
 
         note = (
             event.get_extra("background_note")
@@ -188,8 +255,10 @@ class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
             "background_task_result": {
                 "task_id": task_id,
                 "tool_name": tool.name,
-                "result": result_text or "",
+                "result": result_text,
                 "tool_args": tool_args,
+                "status": status,
+                "attempt": snapshot.get("attempt", 1),
             }
         }
         session = MessageSession.from_str(event.unified_msg_origin)
@@ -245,7 +314,7 @@ class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
         summary_note = (
             f"[BackgroundTask] {task_meta.get('tool_name', tool.name)} "
             f"(task_id={task_meta.get('task_id', task_id)}) finished. "
-            f"Result: {task_meta.get('result') or result_text or 'no content'}"
+            f"Result: {task_meta.get('result') or 'no content'}"
         )
         if llm_resp and llm_resp.completion_text:
             summary_note += (

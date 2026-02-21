@@ -1,4 +1,7 @@
+import asyncio
 import copy
+import json
+import re
 import sys
 import time
 import traceback
@@ -16,7 +19,7 @@ from mcp.types import (
 
 from astrbot import logger
 from astrbot.core.agent.message import ImageURLPart, TextPart, ThinkPart
-from astrbot.core.agent.tool import ToolSet
+from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.agent.tool_image_cache import tool_image_cache
 from astrbot.core.message.components import Json
 from astrbot.core.message.message_event_result import (
@@ -29,6 +32,8 @@ from astrbot.core.provider.entities import (
 )
 from astrbot.core.provider.provider import Provider
 
+from ...runtime.resilience_monitor import coding_resilience_monitor
+from ...tool_evolution.manager import tool_evolution_manager
 from ..context.compressor import ContextCompressor
 from ..context.config import ContextConfig
 from ..context.manager import ContextManager
@@ -66,6 +71,39 @@ class _HandleFunctionToolsResult:
     @classmethod
     def from_cached_image(cls, image: T.Any) -> "_HandleFunctionToolsResult":
         return cls(kind="cached_image", cached_image=image)
+
+_TRANSIENT_PROVIDER_ERROR_HINTS = (
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "temporarily unavailable",
+    "service unavailable",
+    "rate limit",
+    "too many requests",
+    "quota",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "api error",
+    "network",
+)
+
+_CONTEXT_OVERFLOW_ERROR_HINTS = (
+    "input token count exceeds",
+    "maximum number of tokens allowed",
+    "maximum context length",
+    "context length exceeded",
+    "context_length_exceeded",
+    "too many tokens",
+)
+
+_LARGE_DATA_URL_RE = re.compile(r"data:[^\s'\"<>)]{80,}", re.IGNORECASE)
+_LARGE_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{200,}={0,2}")
+_LARGE_HEX_RE = re.compile(r"[0-9a-fA-F]{200,}")
 
 
 class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
@@ -148,15 +186,15 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         self.tool_schema_mode = tool_schema_mode
         self._tool_schema_param_set = None
         self._skill_like_raw_tool_set = None
+        self._runtime_force_skills_like = False
         if tool_schema_mode == "skills_like":
             tool_set = self.req.func_tool
-            if not tool_set:
-                return
-            self._skill_like_raw_tool_set = tool_set
-            light_set = tool_set.get_light_tool_set()
-            self._tool_schema_param_set = tool_set.get_param_only_tool_set()
-            # MODIFIE the req.func_tool to use light tool schemas
-            self.req.func_tool = light_set
+            if tool_set:
+                self._skill_like_raw_tool_set = tool_set
+                light_set = tool_set.get_light_tool_set()
+                self._tool_schema_param_set = tool_set.get_param_only_tool_set()
+                # MODIFIE the req.func_tool to use light tool schemas
+                self.req.func_tool = light_set
 
         messages = []
         # append existing messages in the run context
@@ -178,10 +216,594 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         self.stats = AgentStats()
         self.stats.start_time = time.time()
 
+    def _get_tool_evolution_cfg(self) -> dict[str, T.Any]:
+        astr_context = getattr(self.run_context, "context", None)
+        if astr_context is None:
+            return {}
+
+        plugin_context = getattr(astr_context, "context", None)
+        if plugin_context is None or not hasattr(plugin_context, "get_config"):
+            return {}
+
+        event = getattr(astr_context, "event", None)
+        try:
+            if event is not None and hasattr(event, "unified_msg_origin"):
+                cfg = plugin_context.get_config(umo=event.unified_msg_origin)
+            else:
+                cfg = plugin_context.get_config()
+        except Exception:
+            return {}
+
+        if not isinstance(cfg, dict):
+            return {}
+        provider_settings = cfg.get("provider_settings")
+        if not isinstance(provider_settings, dict):
+            return {}
+        evo_cfg = provider_settings.get("tool_evolution", {})
+        return evo_cfg if isinstance(evo_cfg, dict) else {}
+
+    def _get_runtime_resilience_cfg(self) -> dict[str, T.Any]:
+        astr_context = getattr(self.run_context, "context", None)
+        if astr_context is None:
+            return {}
+
+        plugin_context = getattr(astr_context, "context", None)
+        if plugin_context is None or not hasattr(plugin_context, "get_config"):
+            return {}
+
+        event = getattr(astr_context, "event", None)
+        try:
+            if event is not None and hasattr(event, "unified_msg_origin"):
+                cfg = plugin_context.get_config(umo=event.unified_msg_origin)
+            else:
+                cfg = plugin_context.get_config()
+        except Exception:
+            return {}
+
+        if not isinstance(cfg, dict):
+            return {}
+        provider_settings = cfg.get("provider_settings")
+        if not isinstance(provider_settings, dict):
+            return {}
+        resilience_cfg = provider_settings.get("coding_resilience", {})
+        return resilience_cfg if isinstance(resilience_cfg, dict) else {}
+
+    def _is_transient_provider_error(self, err: Exception | str) -> bool:
+        text = str(err).lower().strip()
+        if not text:
+            return False
+        return any(hint in text for hint in _TRANSIENT_PROVIDER_ERROR_HINTS)
+
+    def _is_context_overflow_error(self, err: Exception | str) -> bool:
+        text = str(err).lower().strip()
+        if not text:
+            return False
+        return any(hint in text for hint in _CONTEXT_OVERFLOW_ERROR_HINTS)
+
+    def _cfg_int(self, cfg: dict[str, T.Any], key: str, default: int) -> int:
+        try:
+            value = int(cfg.get(key, default) or default)
+        except Exception:
+            value = default
+        return value
+
+    def _clip_text_for_context(self, text: str, *, max_chars: int) -> str:
+        if max_chars <= 0:
+            return ""
+        value = str(text or "")
+        if len(value) <= max_chars:
+            return value
+
+        head = max(80, int(max_chars * 0.66))
+        tail = max(40, max_chars - head - 80)
+        if head + tail >= len(value):
+            return value[:max_chars]
+        omitted = len(value) - head - tail
+        return f"{value[:head]}\n...[truncated {omitted} chars]...\n{value[-tail:]}"
+
+    def _sanitize_tool_result_for_context(
+        self,
+        text: str,
+        *,
+        max_chars: int | None = None,
+    ) -> str:
+        resilience_cfg = self._get_runtime_resilience_cfg()
+        limit = (
+            self._cfg_int(resilience_cfg, "max_tool_result_chars", 12000)
+            if max_chars is None
+            else int(max_chars)
+        )
+        limit = max(800, min(limit, 50000))
+
+        value = str(text or "")
+        lowered = value.lower()
+        if "<!doctype html" in lowered and (
+            "请求携带恶意参数" in value
+            or "malicious" in lowered
+            or "1panel" in lowered
+            or "cloudflare" in lowered
+        ):
+            value = (
+                "error: upstream gateway blocked this payload as suspicious; "
+                "raw HTML error page omitted to keep context compact. "
+                "Try narrowing scope/path_prefix or reducing payload size."
+            )
+
+        value = _LARGE_DATA_URL_RE.sub("[[data_url_omitted]]", value)
+        value = _LARGE_BASE64_RE.sub("[[base64_blob_omitted]]", value)
+        value = _LARGE_HEX_RE.sub("[[hex_blob_omitted]]", value)
+        value = value.replace("\r\n", "\n")
+        value = re.sub(r"\n{4,}", "\n\n\n", value)
+
+        return self._clip_text_for_context(value, max_chars=limit)
+
+    def _approx_message_chars(self, msg: Message) -> int:
+        total = 0
+
+        content = msg.content
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, TextPart):
+                    total += len(part.text)
+                elif isinstance(part, ThinkPart):
+                    total += len(part.think)
+                else:
+                    try:
+                        total += len(str(part.model_dump()))
+                    except Exception:
+                        total += len(str(part))
+
+        if msg.tool_calls:
+            for tool_call in msg.tool_calls:
+                try:
+                    if hasattr(tool_call, "function"):
+                        total += len(str(tool_call.function.arguments or ""))
+                        total += len(str(tool_call.function.name or ""))
+                    elif isinstance(tool_call, dict):
+                        func = tool_call.get("function", {})
+                        total += len(str(func.get("arguments", "") or ""))
+                        total += len(str(func.get("name", "") or ""))
+                except Exception:
+                    total += len(str(tool_call))
+
+        return total
+
+    def _trim_message_for_context(
+        self, msg: Message, *, max_message_chars: int
+    ) -> bool:
+        changed = False
+
+        if isinstance(msg.content, str):
+            trimmed = self._sanitize_tool_result_for_context(
+                msg.content,
+                max_chars=max_message_chars,
+            )
+            if trimmed != msg.content:
+                msg.content = trimmed
+                changed = True
+        elif isinstance(msg.content, list):
+            for idx, part in enumerate(msg.content):
+                if isinstance(part, TextPart):
+                    trimmed = self._sanitize_tool_result_for_context(
+                        part.text,
+                        max_chars=max_message_chars,
+                    )
+                    if trimmed != part.text:
+                        part.text = trimmed
+                        changed = True
+                elif isinstance(part, ThinkPart):
+                    trimmed = self._clip_text_for_context(
+                        part.think,
+                        max_chars=max(600, max_message_chars // 2),
+                    )
+                    if trimmed != part.think:
+                        part.think = trimmed
+                        changed = True
+                elif hasattr(part, "image_url") and hasattr(part.image_url, "url"):
+                    url = str(part.image_url.url or "")
+                    # Do not truncate data URLs: truncation breaks base64 and can trigger provider 400.
+                    if url.startswith("data:") and (
+                        "[truncated " in url or "\n" in url or "\r" in url
+                    ):
+                        msg.content[idx] = TextPart(text="[图片内容已省略]")
+                        changed = True
+
+        if msg.tool_calls:
+            for tool_call in msg.tool_calls:
+                if hasattr(tool_call, "function") and hasattr(
+                    tool_call.function, "arguments"
+                ):
+                    args = tool_call.function.arguments
+                    # tool_call.arguments must remain valid JSON for OpenAI-compatible APIs.
+                    # Do not inject truncation markers into arguments.
+                    if isinstance(args, str) and len(args) > max_message_chars:
+                        continue
+                elif isinstance(tool_call, dict):
+                    func = tool_call.get("function")
+                    if isinstance(func, dict) and isinstance(
+                        func.get("arguments"), str
+                    ):
+                        args = func["arguments"]
+                        if len(args) > max_message_chars:
+                            continue
+
+        return changed
+
+    def _apply_hard_context_size_guard(
+        self,
+        *,
+        max_total_chars: int | None = None,
+        max_message_chars: int | None = None,
+        keep_recent_messages: int | None = None,
+    ) -> bool:
+        resilience_cfg = self._get_runtime_resilience_cfg()
+        total_limit = (
+            self._cfg_int(resilience_cfg, "max_total_context_chars", 250000)
+            if max_total_chars is None
+            else int(max_total_chars)
+        )
+        message_limit = (
+            self._cfg_int(resilience_cfg, "max_message_chars", 12000)
+            if max_message_chars is None
+            else int(max_message_chars)
+        )
+        keep_recent = (
+            self._cfg_int(resilience_cfg, "hard_keep_recent_messages", 14)
+            if keep_recent_messages is None
+            else int(keep_recent_messages)
+        )
+
+        total_limit = max(20000, min(total_limit, 2_000_000))
+        message_limit = max(600, min(message_limit, 100000))
+        keep_recent = max(4, min(keep_recent, 120))
+
+        messages = self.run_context.messages or []
+        if not messages:
+            return False
+
+        changed = False
+        for msg in messages:
+            changed = (
+                self._trim_message_for_context(
+                    msg,
+                    max_message_chars=message_limit,
+                )
+                or changed
+            )
+
+        before_total = sum(self._approx_message_chars(msg) for msg in messages)
+        if before_total <= total_limit:
+            return changed
+
+        start = max(0, len(messages) - keep_recent)
+        keep_indices = set(range(start, len(messages)))
+        keep_indices.update(
+            idx for idx, msg in enumerate(messages) if msg.role == "system"
+        )
+        trimmed = [messages[idx] for idx in sorted(keep_indices)]
+
+        while (
+            sum(self._approx_message_chars(msg) for msg in trimmed) > total_limit
+            and len(trimmed) > 3
+        ):
+            drop_idx = next(
+                (idx for idx, msg in enumerate(trimmed) if msg.role != "system"),
+                None,
+            )
+            if drop_idx is None:
+                break
+            trimmed.pop(drop_idx)
+
+        self.run_context.messages = trimmed
+        after_total = sum(self._approx_message_chars(msg) for msg in trimmed)
+        if len(trimmed) != len(messages) or after_total != before_total:
+            changed = True
+            logger.warning(
+                "Applied hard context guard: messages %s -> %s, approx chars %s -> %s",
+                len(messages),
+                len(trimmed),
+                before_total,
+                after_total,
+            )
+
+        return changed
+
+    def _force_reduce_context_after_overflow(self) -> bool:
+        return self._apply_hard_context_size_guard(
+            max_total_chars=120000,
+            max_message_chars=5000,
+            keep_recent_messages=10,
+        )
+
+    def _using_skills_like_mode(self) -> bool:
+        return self.tool_schema_mode == "skills_like" or self._runtime_force_skills_like
+
+    def _estimate_tool_schema_chars(self, tool_set: ToolSet | None) -> int:
+        if not isinstance(tool_set, ToolSet):
+            return 0
+
+        try:
+            schema = tool_set.openai_schema()
+            return len(json.dumps(schema, ensure_ascii=False))
+        except Exception:
+            return len(str(tool_set))
+
+    def _build_compact_selector_tool_set(
+        self,
+        raw_tool_set: ToolSet,
+        *,
+        max_desc_chars: int,
+    ) -> ToolSet:
+        compact = ToolSet()
+        desc_limit = max(0, min(int(max_desc_chars), 600))
+
+        for tool in raw_tool_set:
+            if hasattr(tool, "active") and not tool.active:
+                continue
+
+            description = str(getattr(tool, "description", "") or "").strip()
+            if desc_limit <= 0:
+                description = ""
+            elif len(description) > desc_limit:
+                keep = max(40, desc_limit - 16)
+                description = f"{description[:keep]} ..."
+
+            compact.add_tool(
+                FunctionTool(
+                    name=tool.name,
+                    description=description,
+                    parameters={"type": "object", "properties": {}},
+                    handler=None,
+                )
+            )
+
+        return compact
+
+    async def _maybe_compact_tool_schema_in_payload(
+        self,
+        payload: dict[str, T.Any],
+        *,
+        force: bool,
+        reason: str,
+    ) -> bool:
+        if self._using_skills_like_mode():
+            if payload.get("func_tool") is not None:
+                payload["func_tool"] = self.req.func_tool
+            return False
+
+        tool_set = payload.get("func_tool")
+        if not isinstance(tool_set, ToolSet) or tool_set.empty():
+            return False
+
+        resilience_cfg = self._get_runtime_resilience_cfg()
+        if not force and not bool(resilience_cfg.get("auto_compact_tool_schema", True)):
+            return False
+
+        schema_chars = self._estimate_tool_schema_chars(tool_set)
+        threshold = self._cfg_int(
+            resilience_cfg,
+            "tool_schema_compact_threshold_chars",
+            90000,
+        )
+        threshold = max(2000, min(threshold, 2_000_000))
+        if not force and schema_chars <= threshold:
+            return False
+
+        desc_chars = self._cfg_int(
+            resilience_cfg,
+            "compact_tool_description_chars",
+            160,
+        )
+        compact_set = self._build_compact_selector_tool_set(
+            tool_set,
+            max_desc_chars=desc_chars,
+        )
+
+        self._skill_like_raw_tool_set = tool_set
+        self._tool_schema_param_set = tool_set.get_param_only_tool_set()
+        self.req.func_tool = compact_set
+        self._runtime_force_skills_like = True
+        payload["func_tool"] = compact_set
+
+        compact_schema_chars = self._estimate_tool_schema_chars(compact_set)
+        logger.warning(
+            "Enabled runtime compact tool schema (%s): approx chars %s -> %s",
+            reason,
+            schema_chars,
+            compact_schema_chars,
+        )
+        await self._record_resilience_event(
+            "llm_retry",
+            (
+                "enabled runtime compact tool schema "
+                f"({reason}), chars {schema_chars} -> {compact_schema_chars}"
+            ),
+        )
+        return True
+
+    def _estimate_extra_user_content_parts_chars(
+        self,
+        parts: list[T.Any] | None,
+    ) -> int:
+        if not parts:
+            return 0
+
+        total = 0
+        for part in parts:
+            try:
+                if hasattr(part, "model_dump"):
+                    total += len(json.dumps(part.model_dump(), ensure_ascii=False))
+                elif isinstance(part, dict):
+                    total += len(json.dumps(part, ensure_ascii=False))
+                else:
+                    total += len(str(part))
+            except Exception:
+                total += len(str(part))
+        return total
+
+    def _estimate_payload_chars(self, payload: dict[str, T.Any]) -> int:
+        contexts = payload.get("contexts") or []
+        total = 0
+        for msg in contexts:
+            if isinstance(msg, Message):
+                total += self._approx_message_chars(msg)
+            elif isinstance(msg, dict):
+                total += len(json.dumps(msg, ensure_ascii=False))
+            else:
+                total += len(str(msg))
+
+        total += self._estimate_tool_schema_chars(payload.get("func_tool"))
+        total += self._estimate_extra_user_content_parts_chars(
+            payload.get("extra_user_content_parts")
+        )
+        return total
+
+    async def _apply_payload_size_guard(self, payload: dict[str, T.Any]) -> bool:
+        resilience_cfg = self._get_runtime_resilience_cfg()
+        total_limit = self._cfg_int(
+            resilience_cfg,
+            "max_total_payload_chars",
+            360000,
+        )
+        total_limit = max(30000, min(total_limit, 3_000_000))
+
+        changed = False
+        total_chars = self._estimate_payload_chars(payload)
+
+        if total_chars <= total_limit:
+            if await self._maybe_compact_tool_schema_in_payload(
+                payload,
+                force=False,
+                reason="tool schema threshold",
+            ):
+                changed = True
+            return changed
+
+        if self._apply_hard_context_size_guard(
+            max_total_chars=max(20000, int(total_limit * 0.55)),
+            max_message_chars=min(
+                self._cfg_int(resilience_cfg, "max_message_chars", 12000),
+                8000,
+            ),
+            keep_recent_messages=min(
+                self._cfg_int(resilience_cfg, "hard_keep_recent_messages", 14),
+                10,
+            ),
+        ):
+            payload["contexts"] = self.run_context.messages
+            changed = True
+
+        if await self._maybe_compact_tool_schema_in_payload(
+            payload,
+            force=True,
+            reason="payload budget overflow",
+        ):
+            changed = True
+
+        total_chars = self._estimate_payload_chars(payload)
+
+        if (
+            bool(resilience_cfg.get("drop_extra_user_content_parts_on_overflow", True))
+            and payload.get("extra_user_content_parts")
+            and total_chars > total_limit
+        ):
+            payload["extra_user_content_parts"] = []
+            changed = True
+            total_chars = self._estimate_payload_chars(payload)
+
+        if (
+            bool(resilience_cfg.get("overflow_disable_tools_last_resort", True))
+            and payload.get("func_tool") is not None
+            and total_chars > total_limit
+        ):
+            payload["func_tool"] = None
+            changed = True
+            await self._record_resilience_event(
+                "llm_retry",
+                (
+                    "payload budget exceeded; temporarily disabled tools "
+                    f"(approx chars {total_chars} > {total_limit})"
+                ),
+            )
+            total_chars = self._estimate_payload_chars(payload)
+
+        if changed:
+            logger.warning(
+                "Applied payload guard: approx chars -> %s (limit=%s)",
+                total_chars,
+                total_limit,
+            )
+
+        return changed
+
+    def _build_stream_recovery_prompt(self, partial_text: str) -> str:
+        tail = partial_text[-800:]
+        return (
+            "The previous response was interrupted because of temporary API/network instability. "
+            "Continue from the interruption point without repeating existing content. "
+            "Keep the same language and format.\n\n"
+            f"Existing partial response tail:\n{tail}"
+        )
+
+    def _resilience_session_id(self) -> str:
+        if self.req and getattr(self.req, "session_id", None):
+            return str(self.req.session_id)
+
+        astr_context = getattr(self.run_context, "context", None)
+        event = getattr(astr_context, "event", None)
+        if event is not None and getattr(event, "unified_msg_origin", None):
+            return str(event.unified_msg_origin)
+        return ""
+
+    async def _record_resilience_event(self, event: str, detail: str) -> None:
+        try:
+            await coding_resilience_monitor.record_event(
+                event=event,
+                detail=detail,
+                session_id=self._resilience_session_id(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to record resilience event %s: %s", event, exc)
+
+    async def _maybe_auto_apply_tool_policy(self, tool_name: str) -> None:
+        evo_cfg = self._get_tool_evolution_cfg()
+        if not evo_cfg.get("enable", True) or not evo_cfg.get("auto_apply", False):
+            return
+
+        try:
+            result = await tool_evolution_manager.maybe_auto_apply(
+                tool_name=tool_name,
+                min_samples=int(evo_cfg.get("min_samples", 12) or 12),
+                dry_run=bool(evo_cfg.get("dry_run_default", True)),
+                every_n_calls=int(evo_cfg.get("auto_apply_every_calls", 10) or 10),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Tool evolution auto-apply failed for %s: %s", tool_name, exc)
+            return
+
+        if not result:
+            return
+
+        if result.get("ok") and not result.get("dry_run", True):
+            logger.info(
+                "Tool %s auto policy action: %s",
+                tool_name,
+                result.get("action", "applied"),
+            )
+        elif not result.get("ok"):
+            logger.debug(
+                "Tool %s auto policy skipped: %s",
+                tool_name,
+                result.get("reason", "unknown"),
+            )
+
     async def _iter_llm_responses(
         self, *, include_model: bool = True
     ) -> T.AsyncGenerator[LLMResponse, None]:
-        """Yields chunks *and* a final LLMResponse."""
+        """Yields chunks and a final LLMResponse with resilient retries."""
+        self._apply_hard_context_size_guard()
         payload = {
             "contexts": self.run_context.messages,  # list[Message]
             "func_tool": self.req.func_tool,
@@ -191,12 +813,209 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         if include_model:
             # For primary provider we keep explicit model selection if provided.
             payload["model"] = self.req.model
-        if self.streaming:
-            stream = self.provider.text_chat_stream(**payload)
-            async for resp in stream:  # type: ignore
+        await self._apply_payload_size_guard(payload)
+
+        resilience_cfg = self._get_runtime_resilience_cfg()
+        enabled = bool(resilience_cfg.get("enable", True))
+        max_retries = (
+            int(resilience_cfg.get("llm_max_retries", 2) or 2) if enabled else 0
+        )
+        base_backoff = (
+            float(resilience_cfg.get("llm_base_backoff_seconds", 1.5) or 1.5)
+            if enabled
+            else 0.0
+        )
+        max_backoff = (
+            float(resilience_cfg.get("llm_max_backoff_seconds", 12.0) or 12.0)
+            if enabled
+            else 0.0
+        )
+        stream_fallback = bool(
+            resilience_cfg.get("stream_fallback_to_non_stream", True)
+        )
+        overflow_max_retries = max(
+            1,
+            self._cfg_int(resilience_cfg, "overflow_max_retries", 4),
+        )
+
+        attempt = 0
+        overflow_retry_count = 0
+        while True:
+            attempt += 1
+            await self._apply_payload_size_guard(payload)
+            partial_chunks: list[str] = []
+            try:
+                if self.streaming:
+                    stream = self.provider.text_chat_stream(**payload)
+                    got_final = False
+                    async for resp in stream:  # type: ignore
+                        if resp.is_chunk:
+                            if resp.completion_text:
+                                partial_chunks.append(resp.completion_text)
+                            yield resp
+                            continue
+
+                        got_final = True
+                        if resp.role == "err" and self._is_transient_provider_error(
+                            resp.completion_text or ""
+                        ):
+                            raise RuntimeError(
+                                resp.completion_text
+                                or "Transient provider error in final stream response."
+                            )
+                        if attempt > 1:
+                            await self._record_resilience_event(
+                                "recovered",
+                                f"streaming request recovered on attempt {attempt}",
+                            )
+                        yield resp
+                        return
+
+                    if got_final:
+                        return
+                    raise RuntimeError("LLM stream ended without final response.")
+
+                resp = await self.provider.text_chat(**payload)
+                if resp.role == "err" and self._is_transient_provider_error(
+                    resp.completion_text or ""
+                ):
+                    raise RuntimeError(
+                        resp.completion_text or "Transient provider error response."
+                    )
+                if attempt > 1:
+                    await self._record_resilience_event(
+                        "recovered",
+                        f"request recovered on attempt {attempt}",
+                    )
                 yield resp
-        else:
-            yield await self.provider.text_chat(**payload)
+                return
+
+            except Exception as exc:  # noqa: BLE001
+                if self._is_context_overflow_error(exc):
+                    overflow_retry_count += 1
+                    actions: list[str] = []
+
+                    reduced = self._force_reduce_context_after_overflow()
+                    if reduced:
+                        payload["contexts"] = self.run_context.messages
+                        actions.append("trim_context")
+                    elif overflow_retry_count == 1:
+                        actions.append("retry_once")
+
+                    if await self._maybe_compact_tool_schema_in_payload(
+                        payload,
+                        force=True,
+                        reason=f"context overflow attempt {attempt}",
+                    ):
+                        actions.append("compact_tool_schema")
+
+                    if bool(
+                        resilience_cfg.get(
+                            "drop_extra_user_content_parts_on_overflow",
+                            True,
+                        )
+                    ) and payload.get("extra_user_content_parts"):
+                        payload["extra_user_content_parts"] = []
+                        actions.append("drop_extra_parts")
+
+                    if (
+                        overflow_retry_count >= overflow_max_retries - 1
+                        and bool(
+                            resilience_cfg.get(
+                                "overflow_disable_tools_last_resort",
+                                True,
+                            )
+                        )
+                        and payload.get("func_tool") is not None
+                    ):
+                        payload["func_tool"] = None
+                        actions.append("disable_tools")
+
+                    if actions and overflow_retry_count <= overflow_max_retries:
+                        action = ",".join(actions)
+                        await self._record_resilience_event(
+                            "llm_retry",
+                            (
+                                "context overflow retry "
+                                f"[{action}] attempt {attempt}: {exc}"
+                            ),
+                        )
+                        logger.warning(
+                            "LLM context overflow detected; actions=%s, attempt=%s: %s",
+                            action,
+                            attempt,
+                            exc,
+                        )
+                        continue
+
+                transient = self._is_transient_provider_error(exc)
+
+                if (
+                    self.streaming
+                    and stream_fallback
+                    and partial_chunks
+                    and transient
+                    and attempt <= max_retries + 1
+                ):
+                    try:
+                        partial_text = "".join(partial_chunks)
+                        fallback_payload = dict(payload)
+                        fallback_payload["contexts"] = [
+                            *self.run_context.messages,
+                            Message(role="assistant", content=partial_text),
+                            Message(
+                                role="user",
+                                content=self._build_stream_recovery_prompt(
+                                    partial_text
+                                ),
+                            ),
+                        ]
+                        fallback_resp = await self.provider.text_chat(
+                            **fallback_payload
+                        )
+                        if (
+                            fallback_resp.role == "err"
+                            and self._is_transient_provider_error(
+                                fallback_resp.completion_text or ""
+                            )
+                        ):
+                            raise RuntimeError(
+                                fallback_resp.completion_text
+                                or "Transient provider fallback error."
+                            )
+                        await self._record_resilience_event(
+                            "stream_fallback",
+                            "stream interrupted and recovered by non-stream continuation",
+                        )
+                        await self._record_resilience_event(
+                            "recovered",
+                            f"stream fallback recovered on attempt {attempt}",
+                        )
+                        yield fallback_resp
+                        return
+                    except Exception as fallback_exc:  # noqa: BLE001
+                        exc = fallback_exc
+                        transient = self._is_transient_provider_error(fallback_exc)
+
+                if not transient or attempt > max_retries + 1:
+                    await self._record_resilience_event(
+                        "failed",
+                        f"llm request failed at attempt {attempt}: {exc}",
+                    )
+                    raise
+
+                await self._record_resilience_event(
+                    "llm_retry",
+                    f"llm transient failure attempt {attempt}/{max_retries + 1}: {exc}",
+                )
+                backoff = min(max_backoff, base_backoff * (2 ** (attempt - 1)))
+                logger.warning(
+                    "LLM request transient failure (attempt %s/%s): %s",
+                    attempt,
+                    max_retries + 1,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
 
     async def _iter_llm_responses_with_fallback(
         self,
@@ -300,6 +1119,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
             self.run_context.messages, trusted_token_usage=token_usage
         )
         self._simple_print_message_role("[AftCompact]")
+        self._apply_hard_context_size_guard()
 
         async for llm_response in self._iter_llm_responses_with_fallback():
             if llm_response.is_chunk:
@@ -404,7 +1224,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
 
         # 如果有工具调用，还需处理工具调用
         if llm_resp.tools_call_name:
-            if self.tool_schema_mode == "skills_like":
+            if self._using_skills_like_mode():
                 llm_resp, _ = await self._resolve_tool_exec(llm_resp)
 
             tool_call_result_blocks = []
@@ -498,10 +1318,58 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
     ) -> T.AsyncGenerator[AgentResponse, None]:
         """Process steps until the agent is done."""
         step_count = 0
+        step_retry_count = 0
+        resilience_cfg = self._get_runtime_resilience_cfg()
+        retry_enabled = bool(resilience_cfg.get("enable", True))
+        step_max_retries = int(resilience_cfg.get("step_max_retries", 2) or 2)
+        base_backoff = float(resilience_cfg.get("llm_base_backoff_seconds", 1.5) or 1.5)
+        max_backoff = float(resilience_cfg.get("llm_max_backoff_seconds", 12.0) or 12.0)
+
         while not self.done() and step_count < max_step:
             step_count += 1
-            async for resp in self.step():
-                yield resp
+            try:
+                async for resp in self.step():
+                    yield resp
+                if step_retry_count > 0:
+                    await self._record_resilience_event(
+                        "recovered",
+                        f"step recovered after {step_retry_count} retries",
+                    )
+                step_retry_count = 0
+            except Exception as exc:  # noqa: BLE001
+                if (
+                    retry_enabled
+                    and self._is_transient_provider_error(exc)
+                    and step_retry_count < step_max_retries
+                ):
+                    step_retry_count += 1
+                    delay = min(
+                        max_backoff, base_backoff * (2 ** (step_retry_count - 1))
+                    )
+                    await self._record_resilience_event(
+                        "step_retry",
+                        (
+                            "transient step failure auto-resume "
+                            f"{step_retry_count}/{step_max_retries}: {exc}"
+                        ),
+                    )
+                    logger.warning(
+                        "Transient step failure, auto resume attempt %s/%s after %.2fs: %s",
+                        step_retry_count,
+                        step_max_retries,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+                    step_count -= 1
+                    continue
+
+                if retry_enabled and self._is_transient_provider_error(exc):
+                    await self._record_resilience_event(
+                        "failed",
+                        f"step failed after retries: {exc}",
+                    )
+                raise
 
         #  如果循环结束了但是 agent 还没有完成，说明是达到了 max_step
         if not self.done():
@@ -556,10 +1424,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                 if not req.func_tool:
                     return
 
-                if (
-                    self.tool_schema_mode == "skills_like"
-                    and self._skill_like_raw_tool_set
-                ):
+                if self._using_skills_like_mode() and self._skill_like_raw_tool_set:
                     # in 'skills_like' mode, raw.func_tool is light schema, does not have handler
                     # so we need to get the tool from the raw tool set
                     func_tool = self._skill_like_raw_tool_set.get_tool(func_tool_name)
@@ -570,6 +1435,15 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
 
                 if not func_tool:
                     logger.warning(f"未找到指定的工具: {func_tool_name}，将跳过。")
+                    await tool_evolution_manager.record_tool_call(
+                        tool_name=func_tool_name,
+                        success=False,
+                        args=func_tool_args,
+                        error=f"error: Tool {func_tool_name} not found.",
+                        duration_s=0.0,
+                        policy_applied={},
+                    )
+                    await self._maybe_auto_apply_tool_policy(func_tool_name)
                     tool_call_result_blocks.append(
                         ToolCallMessageSegment(
                             role="tool",
@@ -580,6 +1454,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                     continue
 
                 valid_params = {}  # 参数过滤：只传递函数实际需要的参数
+                expected_param_names: list[str] | None = None
 
                 # 获取实际的 handler 函数
                 if func_tool.handler:
@@ -588,6 +1463,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                     )
                     if func_tool.parameters and func_tool.parameters.get("properties"):
                         expected_params = set(func_tool.parameters["properties"].keys())
+                        expected_param_names = list(expected_params)
 
                         valid_params = {
                             k: v
@@ -607,6 +1483,25 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                     # 如果没有 handler（如 MCP 工具），使用所有参数
                     valid_params = func_tool_args
 
+                adapt = await tool_evolution_manager.adapt_tool_call(
+                    tool_name=func_tool_name,
+                    args=valid_params,
+                    default_timeout=self.run_context.tool_call_timeout,
+                    expected_params=expected_param_names,
+                )
+                valid_params = adapt.get("args", valid_params)
+                tool_call_timeout_override = int(
+                    adapt.get("tool_call_timeout", self.run_context.tool_call_timeout)
+                )
+                applied_policy = adapt.get("applied", {})
+
+                if applied_policy:
+                    logger.info(
+                        "Tool %s applied evolution policy: %s",
+                        func_tool_name,
+                        applied_policy,
+                    )
+
                 try:
                     await self.agent_hooks.on_tool_start(
                         self.run_context,
@@ -619,20 +1514,31 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                 executor = self.tool_executor.execute(
                     tool=func_tool,
                     run_context=self.run_context,
+                    tool_call_timeout_override=tool_call_timeout_override,
                     **valid_params,  # 只传递有效的参数
                 )
 
                 _final_resp: CallToolResult | None = None
+                _tool_exec_start = time.time()
+                _tool_error = ""
+                _tool_success = False
                 async for resp in executor:  # type: ignore
                     if isinstance(resp, CallToolResult):
                         res = resp
                         _final_resp = resp
+                        _tool_success = True
                         if isinstance(res.content[0], TextContent):
+                            text_content = self._sanitize_tool_result_for_context(
+                                res.content[0].text,
+                            )
+                            if text_content.strip().lower().startswith("error:"):
+                                _tool_success = False
+                                _tool_error = text_content[:300]
                             tool_call_result_blocks.append(
                                 ToolCallMessageSegment(
                                     role="tool",
                                     tool_call_id=func_tool_id,
-                                    content=res.content[0].text,
+                                    content=text_content,
                                 ),
                             )
                         elif isinstance(res.content[0], ImageContent):
@@ -666,7 +1572,9 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                                     ToolCallMessageSegment(
                                         role="tool",
                                         tool_call_id=func_tool_id,
-                                        content=resource.text,
+                                        content=self._sanitize_tool_result_for_context(
+                                            resource.text,
+                                        ),
                                     ),
                                 )
                             elif (
@@ -715,6 +1623,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                         )
                         self._transition_state(AgentState.DONE)
                         self.stats.end_time = time.time()
+                        _tool_success = True
                         tool_call_result_blocks.append(
                             ToolCallMessageSegment(
                                 role="tool",
@@ -727,6 +1636,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                         logger.warning(
                             f"Tool 返回了不支持的类型: {type(resp)}。",
                         )
+                        _tool_error = f"unsupported response type: {type(resp)}"
                         tool_call_result_blocks.append(
                             ToolCallMessageSegment(
                                 role="tool",
@@ -734,6 +1644,16 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                                 content="*The tool has returned an unsupported type. Please tell the user to check the definition and implementation of this tool.*",
                             ),
                         )
+
+                await tool_evolution_manager.record_tool_call(
+                    tool_name=func_tool_name,
+                    success=_tool_success,
+                    args=valid_params,
+                    error=_tool_error,
+                    duration_s=time.time() - _tool_exec_start,
+                    policy_applied=applied_policy,
+                )
+                await self._maybe_auto_apply_tool_policy(func_tool_name)
 
                 try:
                     await self.agent_hooks.on_tool_end(
@@ -746,17 +1666,32 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                     logger.error(f"Error in on_tool_end hook: {e}", exc_info=True)
             except Exception as e:
                 logger.warning(traceback.format_exc())
+                await tool_evolution_manager.record_tool_call(
+                    tool_name=func_tool_name,
+                    success=False,
+                    args=locals().get("valid_params", func_tool_args),
+                    error=str(e),
+                    duration_s=0.0,
+                    policy_applied=locals().get("applied_policy", {}),
+                )
+                await self._maybe_auto_apply_tool_policy(func_tool_name)
                 tool_call_result_blocks.append(
                     ToolCallMessageSegment(
                         role="tool",
                         tool_call_id=func_tool_id,
-                        content=f"error: {e!s}",
+                        content=self._sanitize_tool_result_for_context(
+                            f"error: {e!s}",
+                            max_chars=4000,
+                        ),
                     ),
                 )
 
         # yield the last tool call result
         if tool_call_result_blocks:
-            last_tcr_content = str(tool_call_result_blocks[-1].content)
+            last_tcr_content = self._sanitize_tool_result_for_context(
+                str(tool_call_result_blocks[-1].content),
+                max_chars=1800,
+            )
             yield _HandleFunctionToolsResult.from_message_chain(
                 MessageChain(
                     type="tool_call_result",
@@ -771,7 +1706,11 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
                     ],
                 )
             )
-            logger.info(f"Tool `{func_tool_name}` Result: {last_tcr_content}")
+            logger.info(
+                "Tool `%s` Result: %s",
+                func_tool_name,
+                self._sanitize_tool_result_for_context(last_tcr_content, max_chars=600),
+            )
 
         # 处理函数调用响应
         if tool_call_result_blocks:

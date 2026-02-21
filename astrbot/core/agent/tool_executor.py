@@ -13,5 +13,7 @@ class BaseFunctionToolExecutor(Generic[TContext]):
         cls,
         tool: FunctionTool,
         run_context: ContextWrapper[TContext],
+        *,
+        tool_call_timeout_override: int | None = None,
         **tool_args,
     ) -> AsyncGenerator[Any | mcp.types.CallToolResult, None]: ...
