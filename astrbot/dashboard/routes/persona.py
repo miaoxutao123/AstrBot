@@ -144,8 +144,11 @@ class PersonaRoute(Route):
                 persona_id=persona_id,
                 system_prompt=system_prompt,
                 begin_dialogs=begin_dialogs if begin_dialogs else None,
-                tools=tools if tools else None,
-                skills=skills if skills else None,
+                # Preserve semantics:
+                # - None means use ALL tools/skills
+                # - [] means use NO tools/skills
+                tools=tools,
+                skills=skills,
                 folder_id=folder_id,
                 sort_order=sort_order,
             )

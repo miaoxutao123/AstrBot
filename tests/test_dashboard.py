@@ -94,6 +94,47 @@ async def test_get_stat(app: Quart, authenticated_header: dict):
 
 
 @pytest.mark.asyncio
+async def test_engineering_ops_routes(app: Quart, authenticated_header: dict):
+    test_client = app.test_client()
+
+    response = await test_client.get(
+        "/api/project_context/summary",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    summary_data = await response.get_json()
+    assert summary_data["status"] == "ok"
+    assert "heavy_files" in summary_data["data"]
+
+    response = await test_client.get(
+        "/api/project_context/semantic/providers",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    providers_data = await response.get_json()
+    assert providers_data["status"] == "ok"
+    assert "providers" in providers_data["data"]
+
+    response = await test_client.get(
+        "/api/tool_evolution/resilience",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    resilience_data = await response.get_json()
+    assert resilience_data["status"] == "ok"
+    assert "stats" in resilience_data["data"]
+
+    response = await test_client.post(
+        "/api/tool_evolution/resilience/reset",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    reset_data = await response.get_json()
+    assert reset_data["status"] == "ok"
+    assert reset_data["data"]["stats"]["llm_retry_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_plugins(app: Quart, authenticated_header: dict):
     test_client = app.test_client()
     # 已经安装的插件

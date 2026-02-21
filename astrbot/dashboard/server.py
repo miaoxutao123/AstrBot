@@ -31,6 +31,7 @@ from .routes.session_management import SessionManagementRoute
 from .routes.subagent import SubAgentRoute
 from .routes.t2i import T2iRoute
 from .routes.workflow import WorkflowRoute
+from .routes.long_term_memory import LongTermMemoryRoute
 
 
 class _AddrWithPort(Protocol):
@@ -113,12 +114,16 @@ class AstrBotDashboard:
         )
         self.persona_route = PersonaRoute(self.context, db, core_lifecycle)
         self.cron_route = CronRoute(self.context, core_lifecycle)
+        self.background_task_route = BackgroundTaskRoute(self.context)
         self.t2i_route = T2iRoute(self.context, core_lifecycle)
         self.kb_route = KnowledgeBaseRoute(self.context, core_lifecycle)
+        self.project_context_route = ProjectContextRoute(self.context, core_lifecycle)
         self.platform_route = PlatformRoute(self.context, core_lifecycle)
         self.backup_route = BackupRoute(self.context, db, core_lifecycle)
         self.live_chat_route = LiveChatRoute(self.context, db, core_lifecycle)
+        self.tool_evolution_route = ToolEvolutionRoute(self.context)
         self.workflow_route = WorkflowRoute(core_lifecycle, db)
+        self.ltm_route = LongTermMemoryRoute(self.context, db)
 
         self.app.add_url_rule(
             "/api/plug/<path:subpath>",
@@ -133,8 +138,7 @@ class AstrBotDashboard:
             # `get_available_tools` handler), causing:
             #   AssertionError: View function mapping is overwriting an existing endpoint function
             endpoint = (
-                f"workflow_{method.lower()}_{route.lstrip('/')}"
-                .replace("/", "_")
+                f"workflow_{method.lower()}_{route.lstrip('/')}".replace("/", "_")
                 .replace("-", "_")
                 .replace("<", "")
                 .replace(">", "")

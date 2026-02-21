@@ -126,6 +126,7 @@ class WorkflowRoute:
             from astrbot.core.agent.runners.workflow_agent_runner import (
                 WorkflowAgentRunner,
             )
+
             from astrbot.core.message.components import Image, Plain
 
             runner = WorkflowAgentRunner(

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import time
@@ -28,8 +29,12 @@ class LiveChatSession:
         self.is_processing = False
         self.should_interrupt = False
         self.audio_frames: list[bytes] = []
+        self.screen_frames: list[dict[str, Any]] = []
         self.current_stamp: str | None = None
         self.temp_audio_path: str | None = None
+        self.last_screen_analyze_ts: int = 0
+        self.last_hint_ts: int = 0
+        self.last_hint_signature: str = ""
 
     def start_speaking(self, stamp: str) -> None:
         """开始说话"""
@@ -92,6 +97,21 @@ class LiveChatSession:
                 logger.warning(f"[Live Chat] 删除临时文件失败: {e}")
         self.temp_audio_path = None
 
+    def add_screen_frame(
+        self, data_b64: str, width: int | None = None, height: int | None = None
+    ):
+        """缓存最近的屏幕帧（Base64）用于实时辅助分析。"""
+        self.screen_frames.append(
+            {
+                "ts": int(time.time() * 1000),
+                "data_b64": data_b64,
+                "width": width,
+                "height": height,
+            }
+        )
+        if len(self.screen_frames) > 8:
+            self.screen_frames = self.screen_frames[-8:]
+
 
 class LiveChatRoute(Route):
     """Live Chat WebSocket 路由"""
@@ -107,6 +127,29 @@ class LiveChatRoute(Route):
         self.db = db
         self.plugin_manager = core_lifecycle.plugin_manager
         self.sessions: dict[str, LiveChatSession] = {}
+        live_cfg = self.config.get("provider_settings", {}).get(
+            "multimodal_copilot", {}
+        )
+        self.enable_video_stream_analysis = bool(
+            live_cfg.get("enable_video_stream_analysis", False)
+        )
+        self.frame_sample_interval_ms = int(
+            live_cfg.get("frame_sample_interval_ms", 500) or 500
+        )
+        self.max_frame_bytes = int(live_cfg.get("max_frame_bytes", 900000) or 900000)
+
+        hint_keywords = live_cfg.get(
+            "ocr_hint_keywords",
+            ["error", "traceback", "exception", "failed"],
+        )
+        if isinstance(hint_keywords, list):
+            self.ocr_hint_keywords = [
+                str(keyword).strip().lower()
+                for keyword in hint_keywords
+                if str(keyword).strip()
+            ]
+        else:
+            self.ocr_hint_keywords = ["error", "traceback", "exception", "failed"]
 
         # 注册 WebSocket 路由
         self.app.websocket("/api/live_chat/ws")(self.live_chat_ws)
@@ -171,8 +214,6 @@ class LiveChatRoute(Route):
                 return
 
             # 解码 base64
-            import base64
-
             try:
                 audio_data = base64.b64decode(audio_data_b64)
                 session.add_audio_frame(audio_data)
@@ -198,6 +239,94 @@ class LiveChatRoute(Route):
             # 用户打断
             session.should_interrupt = True
             logger.info(f"[Live Chat] 用户打断: {session.username}")
+
+        elif msg_type == "start_screen_stream":
+            # 重置当前帧缓存
+            session.screen_frames = []
+            session.last_screen_analyze_ts = 0
+            session.last_hint_ts = 0
+            session.last_hint_signature = ""
+            logger.debug(f"[Live Chat] start_screen_stream: {session.username}")
+
+        elif msg_type == "screen_frame":
+            if not self.enable_video_stream_analysis:
+                return
+
+            data_b64 = message.get("data")
+            if not data_b64 or not isinstance(data_b64, str):
+                return
+
+            now_ms = int(time.time() * 1000)
+            if (
+                session.last_screen_analyze_ts
+                and now_ms - session.last_screen_analyze_ts
+                < self.frame_sample_interval_ms
+            ):
+                return
+
+            encoded_limit = int(self.max_frame_bytes * 1.5) + 256
+            if len(data_b64) > encoded_limit:
+                return
+
+            width = message.get("width")
+            height = message.get("height")
+            session.add_screen_frame(data_b64, width=width, height=height)
+            session.last_screen_analyze_ts = now_ms
+
+            hint = self._analyze_screen_frame_hint(
+                data_b64,
+                max_frame_bytes=self.max_frame_bytes,
+            )
+            if hint:
+                signature = hint.strip()
+                if (
+                    signature == session.last_hint_signature
+                    and now_ms - session.last_hint_ts < 2500
+                ):
+                    return
+
+                session.last_hint_signature = signature
+                session.last_hint_ts = now_ms
+                await websocket.send_json(
+                    {
+                        "t": "copilot_hint",
+                        "data": {"hint": hint, "ts": now_ms},
+                    }
+                )
+
+        elif msg_type == "end_screen_stream":
+            logger.debug(f"[Live Chat] end_screen_stream: {session.username}")
+
+    def _analyze_screen_frame_hint(self, data_b64: str, *, max_frame_bytes: int) -> str:
+        """Heuristic placeholder for real-time screen copilot hints.
+
+        This keeps CPU overhead low and avoids hard dependencies (OCR/model).
+        """
+        if not data_b64:
+            return ""
+
+        try:
+            decoded = base64.b64decode(data_b64, validate=False)
+        except Exception:
+            decoded = b""
+
+        if decoded and len(decoded) > max_frame_bytes:
+            return ""
+
+        payload_samples = [data_b64[:2048].lower()]
+        if decoded:
+            try:
+                text_sample = decoded.decode("utf-8", errors="ignore").lower()
+            except Exception:
+                text_sample = ""
+            if text_sample:
+                payload_samples.append(text_sample[:4096])
+
+        sample = "\n".join(payload_samples)
+        keywords = self.ocr_hint_keywords or ["traceback", "exception", "error"]
+        if any(keyword in sample for keyword in keywords):
+            return "检测到疑似报错关键词，请优先检查最近改动的代码行和变量命名。"
+        return ""
 
     async def _process_audio(
         self, session: LiveChatSession, audio_path: str, assemble_duration: float
