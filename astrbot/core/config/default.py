@@ -5,7 +5,7 @@ from typing import Any, TypedDict
 
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-VERSION = "4.14.4"
+VERSION = "4.17.6"
 DB_PATH = os.path.join(get_astrbot_data_path(), "data_v4.db")
 
 WEBHOOK_SUPPORTED_PLATFORMS = [
@@ -15,6 +15,7 @@ WEBHOOK_SUPPORTED_PLATFORMS = [
     "wecom_ai_bot",
     "slack",
     "lark",
+    "line",
 ]
 
 # 默认配置
@@ -67,6 +68,7 @@ DEFAULT_CONFIG = {
     "provider_settings": {
         "enable": True,
         "default_provider_id": "",
+        "fallback_chat_models": [],
         "default_image_caption_provider_id": "",
         "image_caption_prompt": "Please describe the image using Chinese.",
         "provider_pool": ["*"],  # "*" 表示使用所有可用的提供者
@@ -74,6 +76,7 @@ DEFAULT_CONFIG = {
         "web_search": False,
         "websearch_provider": "default",
         "websearch_tavily_key": [],
+        "websearch_bocha_key": [],
         "websearch_baidu_app_builder_key": "",
         "web_search_link": False,
         "display_reasoning_text": False,
@@ -98,6 +101,13 @@ DEFAULT_CONFIG = {
         "streaming_response": False,
         "show_tool_use_status": False,
         "sanitize_context_by_modalities": False,
+        "max_quoted_fallback_images": 20,
+        "quoted_message_parser": {
+            "max_component_chain_depth": 4,
+            "max_forward_node_depth": 6,
+            "max_forward_fetch": 32,
+            "warn_on_action_failure": False,
+        },
         "agent_runner_type": "local",
         "dify_agent_runner_provider_id": "",
         "coze_agent_runner_provider_id": "",
@@ -118,6 +128,7 @@ DEFAULT_CONFIG = {
             "add_cron_tools": True,
         },
         "computer_use_runtime": "local",
+        "computer_use_require_admin": True,
         "sandbox": {
             "booter": "shipyard",
             "shipyard_endpoint": "",
@@ -128,8 +139,9 @@ DEFAULT_CONFIG = {
     },
     # SubAgent orchestrator mode:
     # - main_enable = False: disabled; main LLM mounts tools normally (persona selection).
-    # - main_enable = True: enabled; main LLM will include handoff tools and can optionally
-    #   remove tools that are duplicated on subagents via remove_main_duplicate_tools.
+    # - main_enable = True: enabled; main LLM keeps its own tools and includes handoff
+    #   tools (transfer_to_*). remove_main_duplicate_tools can remove tools that are
+    #   duplicated on subagents from the main LLM toolset.
     "subagent_orchestrator": {
         "main_enable": False,
         "remove_main_duplicate_tools": False,
@@ -176,7 +188,7 @@ DEFAULT_CONFIG = {
     "t2i_use_file_service": False,
     "t2i_active_template": "base",
     "http_proxy": "",
-    "no_proxy": ["localhost", "127.0.0.1", "::1"],
+    "no_proxy": ["localhost", "127.0.0.1", "::1", "10.*", "192.168.*"],
     "dashboard": {
         "enable": True,
         "username": "astrbot",
@@ -185,6 +197,12 @@ DEFAULT_CONFIG = {
         "host": "0.0.0.0",
         "port": 6185,
         "disable_access_log": True,
+        "ssl": {
+            "enable": False,
+            "cert_file": "",
+            "key_file": "",
+            "ca_certs": "",
+        },
     },
     "platform": [],
     "platform_specific": {
@@ -201,6 +219,7 @@ DEFAULT_CONFIG = {
     "log_file_enable": False,
     "log_file_path": "logs/astrbot.log",
     "log_file_max_mb": 20,
+    "temp_dir_max_size": 1024,
     "trace_enable": False,
     "trace_log_enable": False,
     "trace_log_path": "logs/astrbot.trace.log",
@@ -318,9 +337,11 @@ CONFIG_METADATA_2 = {
                         "id": "wecom_ai_bot",
                         "type": "wecom_ai_bot",
                         "enable": True,
-                        "wecomaibot_init_respond_text": "💭 思考中...",
+                        "wecomaibot_init_respond_text": "",
                         "wecomaibot_friend_message_welcome_text": "",
                         "wecom_ai_bot_name": "",
+                        "msg_push_webhook_url": "",
+                        "only_use_webhook_url_to_send": False,
                         "token": "",
                         "encoding_aes_key": "",
                         "unified_webhook_mode": True,
@@ -403,6 +424,7 @@ CONFIG_METADATA_2 = {
                         "slack_webhook_port": 6197,
                         "slack_webhook_path": "/astrbot-slack-webhook/callback",
                     },
+                    # LINE's config is located in line_adapter.py
                     "Satori": {
                         "id": "satori",
                         "type": "satori",
@@ -686,12 +708,22 @@ CONFIG_METADATA_2 = {
                     "wecomaibot_init_respond_text": {
                         "description": "企业微信智能机器人初始响应文本",
                         "type": "string",
-                        "hint": "当机器人收到消息时，首先回复的文本内容。留空则使用默认值。",
+                        "hint": "当机器人收到消息时，首先回复的文本内容。留空则不设置。",
                     },
                     "wecomaibot_friend_message_welcome_text": {
                         "description": "企业微信智能机器人私聊欢迎语",
                         "type": "string",
                         "hint": "当用户当天进入智能机器人单聊会话，回复欢迎语，留空则不回复。",
+                    },
+                    "msg_push_webhook_url": {
+                        "description": "企业微信消息推送 Webhook URL",
+                        "type": "string",
+                        "hint": "用于 send_by_session 主动消息推送。格式示例: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx",
+                    },
+                    "only_use_webhook_url_to_send": {
+                        "description": "仅使用 Webhook 发送消息",
+                        "type": "bool",
+                        "hint": "启用后，企业微信智能机器人的所有回复都改为通过消息推送 Webhook 发送。消息推送 Webhook 支持更多的消息类型（如图片、文件等）。",
                     },
                     "lark_bot_name": {
                         "description": "飞书机器人的名字",
@@ -912,6 +944,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.openai.com/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Google Gemini": {
@@ -934,6 +967,7 @@ CONFIG_METADATA_2 = {
                             "dangerous_content": "BLOCK_MEDIUM_AND_ABOVE",
                         },
                         "gm_thinking_config": {"budget": 0, "level": "HIGH"},
+                        "proxy": "",
                     },
                     "Anthropic": {
                         "id": "anthropic",
@@ -944,6 +978,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.anthropic.com/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "anth_thinking_config": {"budget": 0},
                     },
                     "Moonshot": {
@@ -955,6 +990,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "timeout": 120,
                         "api_base": "https://api.moonshot.cn/v1",
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "xAI": {
@@ -966,6 +1002,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.x.ai/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                         "xai_native_search": False,
                     },
@@ -978,6 +1015,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.deepseek.com/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Zhipu": {
@@ -989,6 +1027,43 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "timeout": 120,
                         "api_base": "https://open.bigmodel.cn/api/paas/v4/",
+                        "proxy": "",
+                        "custom_headers": {},
+                    },
+                    "AIHubMix": {
+                        "id": "aihubmix",
+                        "provider": "aihubmix",
+                        "type": "aihubmix_chat_completion",
+                        "provider_type": "chat_completion",
+                        "enable": True,
+                        "key": [],
+                        "timeout": 120,
+                        "api_base": "https://aihubmix.com/v1",
+                        "proxy": "",
+                        "custom_headers": {},
+                    },
+                    "OpenRouter": {
+                        "id": "openrouter",
+                        "provider": "openrouter",
+                        "type": "openrouter_chat_completion",
+                        "provider_type": "chat_completion",
+                        "enable": True,
+                        "key": [],
+                        "timeout": 120,
+                        "api_base": "https://openrouter.ai/v1",
+                        "proxy": "",
+                        "custom_headers": {},
+                    },
+                    "NVIDIA": {
+                        "id": "nvidia",
+                        "provider": "nvidia",
+                        "type": "openai_chat_completion",
+                        "provider_type": "chat_completion",
+                        "enable": True,
+                        "key": [],
+                        "api_base": "https://integrate.api.nvidia.com/v1",
+                        "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Azure OpenAI": {
@@ -1001,6 +1076,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Ollama": {
@@ -1011,6 +1087,7 @@ CONFIG_METADATA_2 = {
                         "enable": True,
                         "key": ["ollama"],  # ollama 的 key 默认是 ollama
                         "api_base": "http://127.0.0.1:11434/v1",
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "LM Studio": {
@@ -1021,6 +1098,7 @@ CONFIG_METADATA_2 = {
                         "enable": True,
                         "key": ["lmstudio"],
                         "api_base": "http://127.0.0.1:1234/v1",
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Gemini_OpenAI_API": {
@@ -1032,6 +1110,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Groq": {
@@ -1043,6 +1122,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.groq.com/openai/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "302.AI": {
@@ -1054,6 +1134,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.302.ai/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "SiliconFlow": {
@@ -1065,6 +1146,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "timeout": 120,
                         "api_base": "https://api.siliconflow.cn/v1",
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "PPIO": {
@@ -1076,6 +1158,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.ppinfra.com/v3/openai",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "TokenPony": {
@@ -1087,6 +1170,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.tokenpony.cn/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Compshare": {
@@ -1098,6 +1182,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.modelverse.cn/v1",
                         "timeout": 120,
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "ModelScope": {
@@ -1109,6 +1194,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "timeout": 120,
                         "api_base": "https://api-inference.modelscope.cn/v1",
+                        "proxy": "",
                         "custom_headers": {},
                     },
                     "Dify": {
@@ -1124,6 +1210,7 @@ CONFIG_METADATA_2 = {
                         "dify_query_input_key": "astrbot_text_query",
                         "variables": {},
                         "timeout": 60,
+                        "proxy": "",
                     },
                     "Coze": {
                         "id": "coze",
@@ -1135,6 +1222,7 @@ CONFIG_METADATA_2 = {
                         "bot_id": "",
                         "coze_api_base": "https://api.coze.cn",
                         "timeout": 60,
+                        "proxy": "",
                         # "auto_save_history": True,
                     },
                     "阿里云百炼应用": {
@@ -1153,6 +1241,7 @@ CONFIG_METADATA_2 = {
                         },
                         "variables": {},
                         "timeout": 60,
+                        "proxy": "",
                     },
                     "FastGPT": {
                         "id": "fastgpt",
@@ -1163,6 +1252,7 @@ CONFIG_METADATA_2 = {
                         "key": [],
                         "api_base": "https://api.fastgpt.in/api/v1",
                         "timeout": 60,
+                        "proxy": "",
                         "custom_headers": {},
                         "custom_extra_body": {},
                     },
@@ -1175,6 +1265,7 @@ CONFIG_METADATA_2 = {
                         "api_key": "",
                         "api_base": "",
                         "model": "whisper-1",
+                        "proxy": "",
                     },
                     "Whisper(Local)": {
                         "provider": "openai",
@@ -1204,6 +1295,7 @@ CONFIG_METADATA_2 = {
                         "model": "tts-1",
                         "openai-tts-voice": "alloy",
                         "timeout": "20",
+                        "proxy": "",
                     },
                     "Genie TTS": {
                         "id": "genie_tts",
@@ -1284,6 +1376,7 @@ CONFIG_METADATA_2 = {
                         "fishaudio-tts-character": "可莉",
                         "fishaudio-tts-reference-id": "",
                         "timeout": "20",
+                        "proxy": "",
                     },
                     "阿里云百炼 TTS(API)": {
                         "hint": "API Key 从 https://bailian.console.aliyun.com/?tab=model#/api-key 获取。模型和音色的选择文档请参考: 阿里云百炼语音合成音色名称。具体可参考 https://help.aliyun.com/zh/model-studio/speech-synthesis-and-speech-recognition",
@@ -1310,6 +1403,7 @@ CONFIG_METADATA_2 = {
                         "azure_tts_volume": "100",
                         "azure_tts_subscription_key": "",
                         "azure_tts_region": "eastus",
+                        "proxy": "",
                     },
                     "MiniMax TTS(API)": {
                         "id": "minimax_tts",
@@ -1332,6 +1426,7 @@ CONFIG_METADATA_2 = {
                         "minimax-voice-latex": False,
                         "minimax-voice-english-normalization": False,
                         "timeout": 20,
+                        "proxy": "",
                     },
                     "火山引擎_TTS(API)": {
                         "id": "volcengine_tts",
@@ -1346,6 +1441,7 @@ CONFIG_METADATA_2 = {
                         "volcengine_speed_ratio": 1.0,
                         "api_base": "https://openspeech.bytedance.com/api/v1/tts",
                         "timeout": 20,
+                        "proxy": "",
                     },
                     "Gemini TTS": {
                         "id": "gemini_tts",
@@ -1359,6 +1455,7 @@ CONFIG_METADATA_2 = {
                         "gemini_tts_model": "gemini-2.5-flash-preview-tts",
                         "gemini_tts_prefix": "",
                         "gemini_tts_voice_name": "Leda",
+                        "proxy": "",
                     },
                     "OpenAI Embedding": {
                         "id": "openai_embedding",
@@ -1371,6 +1468,7 @@ CONFIG_METADATA_2 = {
                         "embedding_model": "",
                         "embedding_dimensions": 1024,
                         "timeout": 20,
+                        "proxy": "",
                     },
                     "Gemini Embedding": {
                         "id": "gemini_embedding",
@@ -1383,6 +1481,7 @@ CONFIG_METADATA_2 = {
                         "embedding_model": "gemini-embedding-exp-03-07",
                         "embedding_dimensions": 768,
                         "timeout": 20,
+                        "proxy": "",
                     },
                     "vLLM Rerank": {
                         "id": "vllm_rerank",
@@ -2079,6 +2178,11 @@ CONFIG_METADATA_2 = {
                         "description": "API Base URL",
                         "type": "string",
                     },
+                    "proxy": {
+                        "description": "代理地址",
+                        "type": "string",
+                        "hint": "HTTP/HTTPS 代理地址，格式如 http://127.0.0.1:7890。仅对该提供商的 API 请求生效，不影响 Docker 内网通信。",
+                    },
                     "model": {
                         "description": "模型 ID",
                         "type": "string",
@@ -2146,6 +2250,10 @@ CONFIG_METADATA_2 = {
                     },
                     "default_provider_id": {
                         "type": "string",
+                    },
+                    "fallback_chat_models": {
+                        "type": "list",
+                        "items": {"type": "string"},
                     },
                     "wake_prefix": {
                         "type": "string",
@@ -2341,9 +2449,23 @@ CONFIG_METADATA_2 = {
                 "type": "string",
                 "options": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
             },
+            "dashboard.ssl.enable": {"type": "bool"},
+            "dashboard.ssl.cert_file": {
+                "type": "string",
+                "condition": {"dashboard.ssl.enable": True},
+            },
+            "dashboard.ssl.key_file": {
+                "type": "string",
+                "condition": {"dashboard.ssl.enable": True},
+            },
+            "dashboard.ssl.ca_certs": {
+                "type": "string",
+                "condition": {"dashboard.ssl.enable": True},
+            },
             "log_file_enable": {"type": "bool"},
             "log_file_path": {"type": "string", "condition": {"log_file_enable": True}},
             "log_file_max_mb": {"type": "int", "condition": {"log_file_enable": True}},
+            "temp_dir_max_size": {"type": "int"},
             "trace_log_enable": {"type": "bool"},
             "trace_log_path": {
                 "type": "string",
@@ -2443,14 +2565,21 @@ CONFIG_METADATA_3 = {
             },
             "ai": {
                 "description": "模型",
-                "hint": "当使用非内置 Agent 执行器时，默认聊天模型和默认图片转述模型可能会无效，但某些插件会依赖此配置项来调用 AI 能力。",
+                "hint": "当使用非内置 Agent 执行器时，默认对话模型和默认图片转述模型可能会无效，但某些插件会依赖此配置项来调用 AI 能力。",
                 "type": "object",
                 "items": {
                     "provider_settings.default_provider_id": {
-                        "description": "默认聊天模型",
+                        "description": "默认对话模型",
                         "type": "string",
                         "_special": "select_provider",
                         "hint": "留空时使用第一个模型",
+                    },
+                    "provider_settings.fallback_chat_models": {
+                        "description": "回退对话模型列表",
+                        "type": "list",
+                        "items": {"type": "string"},
+                        "_special": "select_providers",
+                        "hint": "主聊天模型请求失败时，按顺序切换到这些模型。",
                     },
                     "provider_settings.default_image_caption_provider_id": {
                         "description": "默认图片转述模型",
@@ -2563,7 +2692,7 @@ CONFIG_METADATA_3 = {
                     "provider_settings.websearch_provider": {
                         "description": "网页搜索提供商",
                         "type": "string",
-                        "options": ["default", "tavily", "baidu_ai_search"],
+                        "options": ["default", "tavily", "baidu_ai_search", "bocha"],
                         "condition": {
                             "provider_settings.web_search": True,
                         },
@@ -2575,6 +2704,16 @@ CONFIG_METADATA_3 = {
                         "hint": "可添加多个 Key 进行轮询。",
                         "condition": {
                             "provider_settings.websearch_provider": "tavily",
+                            "provider_settings.web_search": True,
+                        },
+                    },
+                    "provider_settings.websearch_bocha_key": {
+                        "description": "BoCha API Key",
+                        "type": "list",
+                        "items": {"type": "string"},
+                        "hint": "可添加多个 Key 进行轮询。",
+                        "condition": {
+                            "provider_settings.websearch_provider": "bocha",
                             "provider_settings.web_search": True,
                         },
                     },
@@ -2610,6 +2749,11 @@ CONFIG_METADATA_3 = {
                         "options": ["none", "local", "sandbox"],
                         "labels": ["无", "本地", "沙箱"],
                         "hint": "选择 Computer Use 运行环境。",
+                    },
+                    "provider_settings.computer_use_require_admin": {
+                        "description": "需要 AstrBot 管理员权限",
+                        "type": "bool",
+                        "hint": "开启后，需要 AstrBot 管理员权限才能调用使用电脑能力。在平台配置->管理员中可添加管理员。使用 /sid 指令查看管理员 ID。",
                     },
                     "provider_settings.sandbox.booter": {
                         "description": "沙箱环境驱动器",
@@ -2842,6 +2986,46 @@ CONFIG_METADATA_3 = {
                         "description": "按模型能力清理历史上下文",
                         "type": "bool",
                         "hint": "开启后，在每次请求 LLM 前会按当前模型提供商中所选择的模型能力删除对话中不支持的图片/工具调用结构（会改变模型看到的历史）",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.max_quoted_fallback_images": {
+                        "description": "引用图片回退解析上限",
+                        "type": "int",
+                        "hint": "引用/转发消息回退解析图片时的最大注入数量，超出会截断。",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.quoted_message_parser.max_component_chain_depth": {
+                        "description": "引用解析组件链深度",
+                        "type": "int",
+                        "hint": "解析 Reply 组件链时允许的最大递归深度。",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.quoted_message_parser.max_forward_node_depth": {
+                        "description": "引用解析转发节点深度",
+                        "type": "int",
+                        "hint": "解析合并转发节点时允许的最大递归深度。",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.quoted_message_parser.max_forward_fetch": {
+                        "description": "引用解析转发拉取上限",
+                        "type": "int",
+                        "hint": "递归拉取 get_forward_msg 的最大次数。",
+                        "condition": {
+                            "provider_settings.agent_runner_type": "local",
+                        },
+                    },
+                    "provider_settings.quoted_message_parser.warn_on_action_failure": {
+                        "description": "引用解析 action 失败告警",
+                        "type": "bool",
+                        "hint": "开启后，get_msg/get_forward_msg 全部尝试失败时输出 warning 日志。",
                         "condition": {
                             "provider_settings.agent_runner_type": "local",
                         },
@@ -3297,6 +3481,29 @@ CONFIG_METADATA_3_SYSTEM = {
                         "hint": "控制台输出日志的级别。",
                         "options": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                     },
+                    "dashboard.ssl.enable": {
+                        "description": "启用 WebUI HTTPS",
+                        "type": "bool",
+                        "hint": "启用后，WebUI 将直接使用 HTTPS 提供服务。",
+                    },
+                    "dashboard.ssl.cert_file": {
+                        "description": "SSL 证书文件路径",
+                        "type": "string",
+                        "hint": "证书文件路径（PEM）。支持绝对路径和相对路径（相对于当前工作目录）。",
+                        "condition": {"dashboard.ssl.enable": True},
+                    },
+                    "dashboard.ssl.key_file": {
+                        "description": "SSL 私钥文件路径",
+                        "type": "string",
+                        "hint": "私钥文件路径（PEM）。支持绝对路径和相对路径（相对于当前工作目录）。",
+                        "condition": {"dashboard.ssl.enable": True},
+                    },
+                    "dashboard.ssl.ca_certs": {
+                        "description": "SSL CA 证书文件路径",
+                        "type": "string",
+                        "hint": "可选。用于指定 CA 证书文件路径。",
+                        "condition": {"dashboard.ssl.enable": True},
+                    },
                     "log_file_enable": {
                         "description": "启用文件日志",
                         "type": "bool",
@@ -3311,6 +3518,11 @@ CONFIG_METADATA_3_SYSTEM = {
                         "description": "日志文件大小上限 (MB)",
                         "type": "int",
                         "hint": "超过大小后自动轮转，默认 20MB。",
+                    },
+                    "temp_dir_max_size": {
+                        "description": "临时目录大小上限 (MB)",
+                        "type": "int",
+                        "hint": "用于限制 data/temp 目录总大小，单位为 MB。系统每 10 分钟检查一次，超限时按文件修改时间从旧到新删除，释放约 30% 当前体积。",
                     },
                     "trace_log_enable": {
                         "description": "启用 Trace 文件日志",

@@ -26,46 +26,23 @@ from .webchat_queue_mgr import WebChatQueueMgr, webchat_queue_mgr
 
 
 class QueueListener:
-    def __init__(self, webchat_queue_mgr: WebChatQueueMgr, callback: Callable) -> None:
+    def __init__(
+        self,
+        webchat_queue_mgr: WebChatQueueMgr,
+        callback: Callable,
+        stop_event: asyncio.Event,
+    ) -> None:
         self.webchat_queue_mgr = webchat_queue_mgr
         self.callback = callback
-        self.running_tasks = set()
+        self.stop_event = stop_event
 
-    async def listen_to_queue(self, conversation_id: str):
-        """Listen to a specific conversation queue"""
-        queue = self.webchat_queue_mgr.get_or_create_queue(conversation_id)
-        while True:
-            try:
-                data = await queue.get()
-                await self.callback(data)
-            except Exception as e:
-                logger.error(
-                    f"Error processing message from conversation {conversation_id}: {e}",
-                )
-                break
-
-    async def run(self):
-        """Monitor for new conversation queues and start listeners"""
-        monitored_conversations = set()
-
-        while True:
-            # Check for new conversations
-            current_conversations = set(self.webchat_queue_mgr.queues.keys())
-            new_conversations = current_conversations - monitored_conversations
-
-            # Start listeners for new conversations
-            for conversation_id in new_conversations:
-                task = asyncio.create_task(self.listen_to_queue(conversation_id))
-                self.running_tasks.add(task)
-                task.add_done_callback(self.running_tasks.discard)
-                monitored_conversations.add(conversation_id)
-                logger.debug(f"Started listener for conversation: {conversation_id}")
-
-            # Clean up monitored conversations that no longer exist
-            removed_conversations = monitored_conversations - current_conversations
-            monitored_conversations -= removed_conversations
-
-            await asyncio.sleep(1)  # Check for new conversations every second
+    async def run(self) -> None:
+        """Register callback and keep adapter task alive."""
+        self.webchat_queue_mgr.set_listener(self.callback)
+        try:
+            await self.stop_event.wait()
+        finally:
+            await self.webchat_queue_mgr.clear_listener()
 
 
 @register_platform_adapter("webchat", "webchat")
@@ -88,12 +65,14 @@ class WebChatAdapter(Platform):
             id="webchat",
             support_proactive_message=False,
         )
+        self._shutdown_event = asyncio.Event()
+        self._webchat_queue_mgr = webchat_queue_mgr
 
     async def send_by_session(
         self,
         session: MessageSesion,
         message_chain: MessageChain,
-    ):
+    ) -> None:
         message_id = f"active_{str(uuid.uuid4())}"
         await WebChatMessageEvent._send(message_id, message_chain, session.session_id)
         await super().send_by_session(session, message_chain)
@@ -212,17 +191,17 @@ class WebChatAdapter(Platform):
         return abm
 
     def run(self) -> Coroutine[Any, Any, None]:
-        async def callback(data: tuple):
+        async def callback(data: tuple) -> None:
             abm = await self.convert_message(data)
             await self.handle_msg(abm)
 
-        bot = QueueListener(webchat_queue_mgr, callback)
+        bot = QueueListener(self._webchat_queue_mgr, callback, self._shutdown_event)
         return bot.run()
 
     def meta(self) -> PlatformMetadata:
         return self.metadata
 
-    async def handle_msg(self, message: AstrBotMessage):
+    async def handle_msg(self, message: AstrBotMessage) -> None:
         message_event = WebChatMessageEvent(
             message_str=message.message_str,
             message_obj=message,
@@ -240,6 +219,5 @@ class WebChatAdapter(Platform):
 
         self.commit_event(message_event)
 
-    async def terminate(self):
-        # Do nothing
-        pass
+    async def terminate(self) -> None:
+        self._shutdown_event.set()

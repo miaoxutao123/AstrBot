@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useCustomizerStore, type ViewMode } from '@/stores/customizer';
 import axios from 'axios';
 import Logo from '@/components/shared/Logo.vue';
@@ -18,6 +18,7 @@ import StyledMenu from '@/components/shared/StyledMenu.vue';
 import { useLanguageSwitcher } from '@/i18n/composables';
 import type { Locale } from '@/i18n/types';
 import AboutPage from '@/views/AboutPage.vue';
+import { getDesktopRuntimeInfo } from '@/utils/desktopRuntime';
 
 enableKatex();
 enableMermaid();
@@ -33,6 +34,7 @@ let aboutDialog = ref(false);
 const username = localStorage.getItem('user');
 let password = ref('');
 let newPassword = ref('');
+let confirmPassword = ref('');
 let newUsername = ref('');
 let status = ref('');
 let updateStatus = ref('')
@@ -45,6 +47,14 @@ let version = ref('');
 let releases = ref([]);
 let updatingDashboardLoading = ref(false);
 let installLoading = ref(false);
+const isDesktopReleaseMode = ref(
+  typeof window !== 'undefined' && !!window.astrbotDesktop?.isDesktop
+);
+const redirectConfirmDialog = ref(false);
+const pendingRedirectUrl = ref('');
+const resolvingReleaseTarget = ref(false);
+const desktopReleaseBaseUrl = 'https://github.com/AstrBotDevs/AstrBot-desktop/releases';
+const fallbackReleaseUrl = desktopReleaseBaseUrl;
 
 const getSelectedGitHubProxy = () => {
   if (typeof window === "undefined" || !window.localStorage) return "";
@@ -65,12 +75,25 @@ const releasesHeader = computed(() => [
   { title: t('core.header.updateDialog.table.sourceUrl'), key: 'zipball_url' },
   { title: t('core.header.updateDialog.table.actions'), key: 'switch' }
 ]);
+const latestReleaseTag = computed(() => {
+  const firstRelease = (releases.value as any[])?.[0];
+  if (firstRelease?.tag_name) {
+    return firstRelease.tag_name as string;
+  }
+  return hasNewVersion.value
+    ? t('core.header.updateDialog.redirectConfirm.latestLabel')
+    : (botCurrVersion.value || '-');
+});
 
 // Form validation
 const formValid = ref(true);
 const passwordRules = computed(() => [
   (v: string) => !!v || t('core.header.accountDialog.validation.passwordRequired'),
   (v: string) => v.length >= 8 || t('core.header.accountDialog.validation.passwordMinLength')
+]);
+const confirmPasswordRules = computed(() => [
+  (v: string) => !newPassword.value || !!v || t('core.header.accountDialog.validation.passwordRequired'),
+  (v: string) => !newPassword.value || v === newPassword.value || t('core.header.accountDialog.validation.passwordMatch')
 ]);
 const usernameRules = computed(() => [
   (v: string) => !v || v.length >= 3 || t('core.header.accountDialog.validation.usernameMinLength')
@@ -79,6 +102,7 @@ const usernameRules = computed(() => [
 // 显示密码相关
 const showPassword = ref(false);
 const showNewPassword = ref(false);
+const showConfirmPassword = ref(false);
 
 // 账户修改状态
 const accountEditStatus = ref({
@@ -91,6 +115,53 @@ const accountEditStatus = ref({
 const open = (link: string) => {
   window.open(link, '_blank');
 };
+
+function requestExternalRedirect(link: string) {
+  pendingRedirectUrl.value = link;
+  redirectConfirmDialog.value = true;
+}
+
+function cancelExternalRedirect() {
+  redirectConfirmDialog.value = false;
+  pendingRedirectUrl.value = '';
+}
+
+function confirmExternalRedirect() {
+  const targetUrl = pendingRedirectUrl.value;
+  cancelExternalRedirect();
+  if (targetUrl) {
+    open(targetUrl);
+  }
+}
+
+const getReleaseUrlForDesktop = () => {
+  const firstRelease = (releases.value as any[])?.[0];
+  if (firstRelease?.tag_name) {
+    const tag = firstRelease.tag_name as string;
+    return `${desktopReleaseBaseUrl}/tag/${tag}`;
+  }
+  if (hasNewVersion.value) return fallbackReleaseUrl;
+  const tag = botCurrVersion.value?.startsWith('v') ? botCurrVersion.value : 'latest';
+  return tag === 'latest'
+    ? fallbackReleaseUrl
+    : `${desktopReleaseBaseUrl}/tag/${tag}`;
+};
+
+function handleUpdateClick() {
+  if (isDesktopReleaseMode.value) {
+    requestExternalRedirect('');
+    resolvingReleaseTarget.value = true;
+    checkUpdate();
+    void getReleases().finally(() => {
+      pendingRedirectUrl.value = getReleaseUrlForDesktop() || fallbackReleaseUrl;
+      resolvingReleaseTarget.value = false;
+    });
+    return;
+  }
+  checkUpdate();
+  getReleases();
+  updateStatusDialog.value = true;
+}
 
 // 检测是否为预发布版本
 const isPreRelease = (version: string) => {
@@ -105,17 +176,14 @@ function accountEdit() {
   accountEditStatus.value.error = false;
   accountEditStatus.value.success = false;
 
-  // md5加密
-  // @ts-ignore
-  if (password.value != '') {
-    password.value = md5(password.value);
-  }
-  if (newPassword.value != '') {
-    newPassword.value = md5(newPassword.value);
-  }
+  const passwordHash = password.value ? md5(password.value) : '';
+  const newPasswordHash = newPassword.value ? md5(newPassword.value) : '';
+  const confirmPasswordHash = confirmPassword.value ? md5(confirmPassword.value) : '';
+
   axios.post('/api/auth/account/edit', {
-    password: password.value,
-    new_password: newPassword.value,
+    password: passwordHash,
+    new_password: newPasswordHash,
+    confirm_password: confirmPasswordHash,
     new_username: newUsername.value ? newUsername.value : username
   })
     .then((res) => {
@@ -124,6 +192,7 @@ function accountEdit() {
         accountEditStatus.value.message = res.data.message;
         password.value = '';
         newPassword.value = '';
+        confirmPassword.value = '';
         return;
       }
       accountEditStatus.value.success = true;
@@ -140,6 +209,7 @@ function accountEdit() {
       accountEditStatus.value.message = typeof err === 'string' ? err : t('core.header.accountDialog.messages.updateFailed');
       password.value = '';
       newPassword.value = '';
+      confirmPassword.value = '';
     })
     .finally(() => {
       accountEditStatus.value.loading = false;
@@ -177,7 +247,9 @@ function checkUpdate() {
       } else {
         updateStatus.value = res.data.message;
       }
-      dashboardHasNewVersion.value = res.data.data.dashboard_has_new_version;
+      dashboardHasNewVersion.value = isDesktopReleaseMode.value
+        ? false
+        : res.data.data.dashboard_has_new_version;
     })
     .catch((err) => {
       if (err.response && err.response.status == 401) {
@@ -192,7 +264,7 @@ function checkUpdate() {
 }
 
 function getReleases() {
-  axios.get('/api/update/releases')
+  return axios.get('/api/update/releases')
     .then((res) => {
       releases.value = res.data.data.map((item: any) => {
         item.published_at = new Date(item.published_at).toLocaleString();
@@ -318,6 +390,14 @@ const changeLanguage = async (langCode: string) => {
   await switchLanguage(langCode as Locale);
 };
 
+onMounted(async () => {
+  const runtimeInfo = await getDesktopRuntimeInfo();
+  isDesktopReleaseMode.value = runtimeInfo.isDesktopRuntime;
+  if (isDesktopReleaseMode.value) {
+    dashboardHasNewVersion.value = false;
+  }
+});
+
 </script>
 
 <template>
@@ -360,7 +440,7 @@ const changeLanguage = async (langCode: string) => {
       <small v-if="hasNewVersion">
         {{ t('core.header.version.hasNewVersion') }}
       </small>
-      <small v-else-if="dashboardHasNewVersion">
+      <small v-else-if="dashboardHasNewVersion && !isDesktopReleaseMode">
         {{ t('core.header.version.dashboardHasNewVersion') }}
       </small>
     </div>
@@ -439,7 +519,7 @@ const changeLanguage = async (langCode: string) => {
 
       <!-- 更新按钮 -->
       <v-list-item
-        @click="checkUpdate(); getReleases(); updateStatusDialog = true"
+        @click="handleUpdateClick"
         class="styled-menu-item"
         rounded="md"
       >
@@ -447,7 +527,7 @@ const changeLanguage = async (langCode: string) => {
           <v-icon>mdi-arrow-up-circle</v-icon>
         </template>
         <v-list-item-title>{{ t('core.header.updateDialog.title') }}</v-list-item-title>
-        <template v-slot:append v-if="hasNewVersion || dashboardHasNewVersion">
+        <template v-slot:append v-if="hasNewVersion || (dashboardHasNewVersion && !isDesktopReleaseMode)">
           <v-chip size="x-small" color="primary" variant="tonal" class="ml-2">!</v-chip>
         </template>
       </v-list-item>
@@ -595,6 +675,46 @@ const changeLanguage = async (langCode: string) => {
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="redirectConfirmDialog" max-width="460">
+      <v-card>
+        <v-card-title class="text-h3 pa-4 pl-6 pb-0">
+          {{ t('core.header.updateDialog.redirectConfirm.title') }}
+        </v-card-title>
+        <v-card-text>
+          <div class="mb-3">
+            {{ t('core.header.updateDialog.redirectConfirm.message') }}
+          </div>
+          <v-alert type="info" variant="tonal" density="compact">
+            <div>
+              {{ t('core.header.updateDialog.redirectConfirm.targetVersion') }}
+              <strong v-if="!resolvingReleaseTarget">{{ latestReleaseTag }}</strong>
+              <v-progress-circular v-else indeterminate size="16" width="2" class="ml-1" />
+            </div>
+            <div class="text-caption">
+              {{ t('core.header.updateDialog.redirectConfirm.currentVersion') }}
+              {{ botCurrVersion || '-' }}
+            </div>
+          </v-alert>
+          <div class="text-caption mt-3">
+            <div>{{ t('core.header.updateDialog.redirectConfirm.guideTitle') }}</div>
+            <div>1. {{ t('core.header.updateDialog.redirectConfirm.guideStep1') }}</div>
+            <div>2. {{ t('core.header.updateDialog.redirectConfirm.guideStep2') }}</div>
+            <div>3. {{ t('core.header.updateDialog.redirectConfirm.guideStep3') }}</div>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn color="grey" variant="text" @click="cancelExternalRedirect">
+            {{ t('core.common.dialog.cancelButton') }}
+          </v-btn>
+          <v-btn color="primary" variant="flat" @click="confirmExternalRedirect"
+            :loading="resolvingReleaseTarget" :disabled="resolvingReleaseTarget || !pendingRedirectUrl">
+            {{ t('core.common.dialog.confirmButton') }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- 账户对话框 -->
     <v-dialog v-model="dialog" persistent :max-width="$vuetify.display.xs ? '90%' : '500'">
       <v-card class="account-dialog">
@@ -622,9 +742,15 @@ const changeLanguage = async (langCode: string) => {
 
             <v-text-field v-model="newPassword" :append-inner-icon="showNewPassword ? 'mdi-eye-off' : 'mdi-eye'"
               :type="showNewPassword ? 'text' : 'password'" :rules="passwordRules"
-              :label="t('core.header.accountDialog.form.newPassword')" variant="outlined" required clearable
+              :label="t('core.header.accountDialog.form.newPassword')" variant="outlined" clearable
               @click:append-inner="showNewPassword = !showNewPassword" prepend-inner-icon="mdi-lock-plus-outline"
               :hint="t('core.header.accountDialog.form.passwordHint')" persistent-hint class="mb-4"></v-text-field>
+
+            <v-text-field v-model="confirmPassword" :append-inner-icon="showConfirmPassword ? 'mdi-eye-off' : 'mdi-eye'"
+              :type="showConfirmPassword ? 'text' : 'password'" :rules="confirmPasswordRules"
+              :label="t('core.header.accountDialog.form.confirmPassword')" variant="outlined" clearable
+              @click:append-inner="showConfirmPassword = !showConfirmPassword" prepend-inner-icon="mdi-lock-check-outline"
+              :hint="t('core.header.accountDialog.form.confirmPasswordHint')" persistent-hint class="mb-4"></v-text-field>
 
             <v-text-field v-model="newUsername" :rules="usernameRules"
               :label="t('core.header.accountDialog.form.newUsername')" variant="outlined" clearable

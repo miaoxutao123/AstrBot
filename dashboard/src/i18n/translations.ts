@@ -37,6 +37,7 @@ import zhCNMigration from './locales/zh-CN/features/migration.json';
 import zhCNCommand from './locales/zh-CN/features/command.json';
 import zhCNSubagent from './locales/zh-CN/features/subagent.json';
 import zhCNWorkflow from './locales/zh-CN/features/workflow.json';
+import zhCNWelcome from './locales/zh-CN/features/welcome.json';
 
 import zhCNErrors from './locales/zh-CN/messages/errors.json';
 import zhCNSuccess from './locales/zh-CN/messages/success.json';
@@ -78,6 +79,7 @@ import enUSMigration from './locales/en-US/features/migration.json';
 import enUSCommand from './locales/en-US/features/command.json';
 import enUSSubagent from './locales/en-US/features/subagent.json';
 import enUSWorkflow from './locales/en-US/features/workflow.json';
+import enUSWelcome from './locales/en-US/features/welcome.json';
 
 import enUSErrors from './locales/en-US/messages/errors.json';
 import enUSSuccess from './locales/en-US/messages/success.json';
@@ -126,7 +128,8 @@ export const translations = {
       migration: zhCNMigration,
       command: zhCNCommand,
       subagent: zhCNSubagent,
-      workflow: zhCNWorkflow
+      workflow: zhCNWorkflow,
+      welcome: zhCNWelcome
     },
     messages: {
       errors: zhCNErrors,
@@ -175,7 +178,8 @@ export const translations = {
       migration: enUSMigration,
       command: enUSCommand,
       subagent: enUSSubagent,
-      workflow: enUSWorkflow
+      workflow: enUSWorkflow,
+      welcome: enUSWelcome
     },
     messages: {
       errors: enUSErrors,

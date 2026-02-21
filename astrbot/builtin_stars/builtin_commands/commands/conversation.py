@@ -4,6 +4,7 @@ from astrbot.api import sp, star
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.core.platform.astr_message_event import MessageSession
 from astrbot.core.platform.message_type import MessageType
+from astrbot.core.utils.active_event_registry import active_event_registry
 
 from .utils.rst_scene import RstScene
 
@@ -16,7 +17,7 @@ THIRD_PARTY_AGENT_RUNNER_STR = ", ".join(THIRD_PARTY_AGENT_RUNNER_KEY.keys())
 
 
 class ConversationCommands:
-    def __init__(self, context: star.Context):
+    def __init__(self, context: star.Context) -> None:
         self.context = context
 
     async def _get_current_persona_id(self, session_id):
@@ -33,7 +34,7 @@ class ConversationCommands:
             return None
         return conv.persona_id
 
-    async def reset(self, message: AstrMessageEvent):
+    async def reset(self, message: AstrMessageEvent) -> None:
         """重置 LLM 会话"""
         umo = message.unified_msg_origin
         cfg = self.context.get_config(umo=message.unified_msg_origin)
@@ -62,6 +63,7 @@ class ConversationCommands:
 
         agent_runner_type = cfg["provider_settings"]["agent_runner_type"]
         if agent_runner_type in THIRD_PARTY_AGENT_RUNNER_KEY:
+            active_event_registry.stop_all(umo, exclude=message)
             await sp.remove_async(
                 scope="umo",
                 scope_id=umo,
@@ -86,6 +88,8 @@ class ConversationCommands:
             )
             return
 
+        active_event_registry.stop_all(umo, exclude=message)
+
         await self.context.conversation_manager.update_conversation(
             umo,
             cid,
@@ -98,7 +102,7 @@ class ConversationCommands:
 
         message.set_result(MessageEventResult().message(ret))
 
-    async def his(self, message: AstrMessageEvent, page: int = 1):
+    async def his(self, message: AstrMessageEvent, page: int = 1) -> None:
         """查看对话记录"""
         if not self.context.get_using_provider(message.unified_msg_origin):
             message.set_result(
@@ -141,7 +145,7 @@ class ConversationCommands:
 
         message.set_result(MessageEventResult().message(ret).use_t2i(False))
 
-    async def convs(self, message: AstrMessageEvent, page: int = 1):
+    async def convs(self, message: AstrMessageEvent, page: int = 1) -> None:
         """查看对话列表"""
         cfg = self.context.get_config(umo=message.unified_msg_origin)
         agent_runner_type = cfg["provider_settings"]["agent_runner_type"]
@@ -216,11 +220,12 @@ class ConversationCommands:
         message.set_result(MessageEventResult().message(ret).use_t2i(False))
         return
 
-    async def new_conv(self, message: AstrMessageEvent):
+    async def new_conv(self, message: AstrMessageEvent) -> None:
         """创建新对话"""
         cfg = self.context.get_config(umo=message.unified_msg_origin)
         agent_runner_type = cfg["provider_settings"]["agent_runner_type"]
         if agent_runner_type in THIRD_PARTY_AGENT_RUNNER_KEY:
+            active_event_registry.stop_all(message.unified_msg_origin, exclude=message)
             await sp.remove_async(
                 scope="umo",
                 scope_id=message.unified_msg_origin,
@@ -229,6 +234,7 @@ class ConversationCommands:
             message.set_result(MessageEventResult().message("已创建新对话。"))
             return
 
+        active_event_registry.stop_all(message.unified_msg_origin, exclude=message)
         cpersona = await self._get_current_persona_id(message.unified_msg_origin)
         cid = await self.context.conversation_manager.new_conversation(
             message.unified_msg_origin,
@@ -242,7 +248,7 @@ class ConversationCommands:
             MessageEventResult().message(f"切换到新对话: 新对话({cid[:4]})。"),
         )
 
-    async def groupnew_conv(self, message: AstrMessageEvent, sid: str = ""):
+    async def groupnew_conv(self, message: AstrMessageEvent, sid: str = "") -> None:
         """创建新群聊对话"""
         if sid:
             session = str(
@@ -273,7 +279,7 @@ class ConversationCommands:
         self,
         message: AstrMessageEvent,
         index: int | None = None,
-    ):
+    ) -> None:
         """通过 /ls 前面的序号切换对话"""
         if not isinstance(index, int):
             message.set_result(
@@ -308,7 +314,7 @@ class ConversationCommands:
                 ),
             )
 
-    async def rename_conv(self, message: AstrMessageEvent, new_name: str = ""):
+    async def rename_conv(self, message: AstrMessageEvent, new_name: str = "") -> None:
         """重命名对话"""
         if not new_name:
             message.set_result(MessageEventResult().message("请输入新的对话名称。"))
@@ -319,9 +325,10 @@ class ConversationCommands:
         )
         message.set_result(MessageEventResult().message("重命名对话成功。"))
 
-    async def del_conv(self, message: AstrMessageEvent):
+    async def del_conv(self, message: AstrMessageEvent) -> None:
         """删除当前对话"""
-        cfg = self.context.get_config(umo=message.unified_msg_origin)
+        umo = message.unified_msg_origin
+        cfg = self.context.get_config(umo=umo)
         is_unique_session = cfg["platform_settings"]["unique_session"]
         if message.get_group_id() and not is_unique_session and message.role != "admin":
             # 群聊，没开独立会话，发送人不是管理员
@@ -334,18 +341,17 @@ class ConversationCommands:
 
         agent_runner_type = cfg["provider_settings"]["agent_runner_type"]
         if agent_runner_type in THIRD_PARTY_AGENT_RUNNER_KEY:
+            active_event_registry.stop_all(umo, exclude=message)
             await sp.remove_async(
                 scope="umo",
-                scope_id=message.unified_msg_origin,
+                scope_id=umo,
                 key=THIRD_PARTY_AGENT_RUNNER_KEY[agent_runner_type],
             )
             message.set_result(MessageEventResult().message("重置对话成功。"))
             return
 
         session_curr_cid = (
-            await self.context.conversation_manager.get_curr_conversation_id(
-                message.unified_msg_origin,
-            )
+            await self.context.conversation_manager.get_curr_conversation_id(umo)
         )
 
         if not session_curr_cid:
@@ -356,8 +362,10 @@ class ConversationCommands:
             )
             return
 
+        active_event_registry.stop_all(umo, exclude=message)
+
         await self.context.conversation_manager.delete_conversation(
-            message.unified_msg_origin,
+            umo,
             session_curr_cid,
         )
 

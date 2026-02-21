@@ -2,7 +2,6 @@
 
 <div align="center">
 
-
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_en.md">English</a> ｜
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_ja.md">日本語</a> ｜
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_zh-TW.md">繁體中文</a> ｜
@@ -41,14 +40,14 @@ AstrBot 是一个开源的一站式 Agentic 个人和群聊助手，可在 QQ、
 ## 主要功能
 
 1. 💯 免费 & 开源。
-1. ✨ AI 大模型对话，多模态，Agent，MCP，Skills，知识库，人格设定，自动压缩对话。
-2. 🤖 支持接入 Dify、阿里云百炼、Coze 等智能体平台。
-2. 🌐 多平台，支持 QQ、企业微信、飞书、钉钉、微信公众号、Telegram、Slack 以及[更多](#支持的消息平台)。
-3. 📦 插件扩展，已有近 800 个插件可一键安装。
-5. 🛡️ [Agent Sandbox](https://docs.astrbot.app/use/astrbot-agent-sandbox.html) 隔离化环境，安全地执行任何代码、调用 Shell、会话级资源复用。
-6. 💻 WebUI 支持。
-7. 🌈 Web ChatUI 支持，ChatUI 内置代理沙盒、网页搜索等。
-8. 🌐 国际化（i18n）支持。
+2. ✨ AI 大模型对话，多模态，Agent，MCP，Skills，知识库，人格设定，自动压缩对话。
+3. 🤖 支持接入 Dify、阿里云百炼、Coze 等智能体平台。
+4. 🌐 多平台，支持 QQ、企业微信、飞书、钉钉、微信公众号、Telegram、Slack 以及[更多](#支持的消息平台)。
+5. 📦 插件扩展，已有近 800 个插件可一键安装。
+6. 🛡️ [Agent Sandbox](https://docs.astrbot.app/use/astrbot-agent-sandbox.html) 隔离化环境，安全地执行任何代码、调用 Shell、会话级资源复用。
+7. 💻 WebUI 支持。
+8. 🌈 Web ChatUI 支持，ChatUI 内置代理沙盒、网页搜索等。
+9. 🌐 国际化（i18n）支持。
 
 <br>
 
@@ -78,8 +77,13 @@ AstrBot 是一个开源的一站式 Agentic 个人和群聊助手，可在 QQ、
 #### uv 部署
 
 ```bash
-uvx astrbot
+uv tool install astrbot
+astrbot
 ```
+
+#### 启动器一键部署（AstrBot Launcher）
+
+进入 [AstrBot Launcher](https://github.com/Raven95676/astrbot-launcher) 仓库，在 Releases 页最新版本下找到对应的系统安装包安装即可。
 
 #### 宝塔面板部署
 
@@ -132,11 +136,26 @@ uv run main.py
 
 或者请参阅官方文档 [通过源码部署 AstrBot](https://astrbot.app/deploy/astrbot/cli.html) 。
 
+#### 系统包管理器安装
+
+##### Arch Linux
+
+```bash
+yay -S astrbot-git
+# 或者使用 paru
+paru -S astrbot-git
+```
+
+#### 桌面端（Tauri）
+
+桌面端已迁移为独立仓库（Tauri）：[https://github.com/AstrBotDevs/AstrBot-desktop](https://github.com/AstrBotDevs/AstrBot-desktop)。
+
 ## 支持的消息平台
 
 **官方维护**
 
-- QQ (官方平台 & OneBot)
+- QQ
+- OneBot v11 协议实现
 - Telegram
 - 企微应用 & 企微智能机器人
 - 微信客服 & 微信公众号
@@ -144,10 +163,10 @@ uv run main.py
 - 钉钉
 - Slack
 - Discord
+- LINE
 - Satori
 - Misskey
 - Whatsapp (将支持)
-- LINE (将支持)
 
 **社区维护**
 
@@ -167,6 +186,7 @@ uv run main.py
 - DeepSeek
 - Ollama (本地部署)
 - LM Studio (本地部署)
+- [AIHubMix](https://aihubmix.com/?aff=4bfH)
 - [优云智算](https://www.compshare.cn/?ytag=GPU_YY-gh_astrbot&referral_code=FV7DcGowN4hB5UuXKgpE74)
 - [302.AI](https://share.302.ai/rr1M3l)
 - [小马算力](https://www.tokenpony.cn/3YPyf)
@@ -242,12 +262,22 @@ pre-commit install
 特别感谢所有 Contributors 和插件开发者对 AstrBot 的贡献 ❤️
 
 <a href="https://github.com/AstrBotDevs/AstrBot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=AstrBotDevs/AstrBot" />
+  <img src="https://contrib.rocks/image?repo=AstrBotDevs/AstrBot&max=200&columns=14" />
 </a>
 
 此外，本项目的诞生离不开以下开源项目的帮助：
 
 - [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) - 伟大的猫猫框架
+
+开源项目友情链接：
+
+- [NoneBot2](https://github.com/nonebot/nonebot2) - 优秀的 Python 异步 ChatBot 框架
+- [Koishi](https://github.com/koishijs/koishi) - 优秀的 Node.js ChatBot 框架
+- [MaiBot](https://github.com/Mai-with-u/MaiBot) - 优秀的拟人化 AI ChatBot
+- [nekro-agent](https://github.com/KroMiose/nekro-agent) - 优秀的 Agent ChatBot
+- [LangBot](https://github.com/langbot-app/LangBot) - 优秀的多平台 AI ChatBot
+- [ChatLuna](https://github.com/ChatLunaLab/chatluna) - 优秀的多平台 AI ChatBot Koishi 插件
+- [Operit AI](https://github.com/AAswordman/Operit) - 优秀的 AI 智能助手 Android APP
 
 ## ⭐ Star History
 
@@ -260,8 +290,6 @@ pre-commit install
 
 </div>
 
-</details>
-
 <div align="center">
 
 _陪伴与能力从来不应该是对立面。我们希望创造的是一个既能理解情绪、给予陪伴，也能可靠完成工作的机器人。_
@@ -270,3 +298,4 @@ _私は、高性能ですから!_
 
 <img src="https://files.astrbot.app/watashiwa-koseino-desukara.gif" width="100"/>
 
+</div>

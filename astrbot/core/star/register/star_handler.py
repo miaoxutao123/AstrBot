@@ -250,7 +250,7 @@ class RegisteringCommandable:
     command: Callable[..., Callable[..., None]] = register_command
     custom_filter: Callable[..., Callable[..., Any]] = register_custom_filter
 
-    def __init__(self, parent_group: CommandGroupFilter):
+    def __init__(self, parent_group: CommandGroupFilter) -> None:
         self.parent_group = parent_group
 
 
@@ -334,6 +334,24 @@ def register_on_platform_loaded(**kwargs):
 
     def decorator(awaitable):
         _ = get_handler_or_create(awaitable, EventType.OnPlatformLoadedEvent, **kwargs)
+        return awaitable
+
+    return decorator
+
+
+def register_on_plugin_error(**kwargs):
+    """当插件处理消息异常时触发。
+
+    Hook 参数:
+        event, plugin_name, handler_name, error, traceback_text
+
+    说明:
+        在 hook 中调用 `event.stop_event()` 可屏蔽默认报错回显，
+        并由插件自行决定是否转发到其他会话。
+    """
+
+    def decorator(awaitable):
+        _ = get_handler_or_create(awaitable, EventType.OnPluginErrorEvent, **kwargs)
         return awaitable
 
     return decorator
@@ -565,7 +583,7 @@ class RegisteringAgent:
         kwargs["registering_agent"] = self
         return register_llm_tool(*args, **kwargs)
 
-    def __init__(self, agent: Agent[AstrAgentContext]):
+    def __init__(self, agent: Agent[AstrAgentContext]) -> None:
         self._agent = agent
 
 
