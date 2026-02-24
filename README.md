@@ -21,6 +21,20 @@
 
 > 差异基线：`git diff upstream/master..master`（当前分支对 `AstrBotDevs/AstrBot` 官方主线）。
 
+### 长期记忆图谱可视化更新（Dashboard）
+
+本仓库新增了长期记忆关系图谱视图，便于从“关系结构”而不是“表格记录”视角审查记忆状态。
+
+- 入口：`Dashboard -> Long-term Memory -> 记忆图谱`
+- 交互能力：
+  - 支持按 `scope / scope_id / status / predicate / min_confidence / max_relations` 筛选
+  - 支持节点与边点击联动，查看关系详情（subject/predicate/object、置信度、状态、关联 memory_id 等）
+  - 支持谓词图例与关系密度概览，快速定位热点关系
+- 数据来源：`/api/ltm/relations`（图谱展示的是关系层 `memory_relations`，不是 `memory_items` 表格本身）
+- 使用说明：
+  - 图谱默认主要观察 `active` 关系；若当前只有 `shadow` 记忆，图谱可能为空
+  - 关系写入依赖候选事实被激活并同步为 relation；因此历史数据可能需要后续补聊或回填流程才能完全可视化
+
 <div align="center">
 
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_en.md">English</a> ｜
