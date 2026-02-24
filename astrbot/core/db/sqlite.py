@@ -31,6 +31,7 @@ from astrbot.core.long_term_memory.models import (  # noqa: F401
     MemoryEvent,
     MemoryEvidence,
     MemoryItem,
+    MemoryRelation,
 )
 from astrbot.core.db.po import (
     Platform as DeprecatedPlatformStat,
@@ -65,6 +66,10 @@ class SQLiteDatabase(BaseDatabase):
             await self._ensure_persona_folder_columns(conn)
             await self._ensure_persona_skills_column(conn)
             await self._ensure_memory_item_consolidation_column(conn)
+            await self._ensure_memory_item_temporal_columns(conn)
+            await self._ensure_memory_event_retry_columns(conn)
+            await self._ensure_memory_relation_columns(conn)
+            await self._ensure_ltm_indexes(conn)
             await conn.commit()
 
     async def _ensure_persona_folder_columns(self, conn) -> None:
@@ -113,6 +118,209 @@ class SQLiteDatabase(BaseDatabase):
         except Exception:
             # Table may not exist yet — create_all will handle it
             pass
+
+    async def _ensure_memory_item_temporal_columns(self, conn) -> None:
+        """Ensure memory_items temporal/conflict columns exist (forward compat)."""
+        try:
+            result = await conn.execute(text("PRAGMA table_info(memory_items)"))
+            columns = {row[1] for row in result.fetchall()}
+            if "subject_key" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_items "
+                        "ADD COLUMN subject_key VARCHAR(255) DEFAULT NULL"
+                    )
+                )
+            if "valid_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_items "
+                        "ADD COLUMN valid_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "invalid_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_items "
+                        "ADD COLUMN invalid_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "superseded_by" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_items "
+                        "ADD COLUMN superseded_by VARCHAR(36) DEFAULT NULL"
+                    )
+                )
+        except Exception:
+            # Table may not exist yet — create_all will handle it
+            pass
+
+    async def _ensure_memory_event_retry_columns(self, conn) -> None:
+        """Ensure memory_events retry/backoff columns exist (forward compat)."""
+        try:
+            result = await conn.execute(text("PRAGMA table_info(memory_events)"))
+            columns = {row[1] for row in result.fetchall()}
+            if "attempt_count" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_events "
+                        "ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            if "next_retry_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_events "
+                        "ADD COLUMN next_retry_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "last_error" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_events "
+                        "ADD COLUMN last_error TEXT DEFAULT NULL"
+                    )
+                )
+            if "dead_letter" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_events "
+                        "ADD COLUMN dead_letter INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+        except Exception:
+            # Table may not exist yet — create_all will handle it
+            pass
+
+    async def _ensure_memory_relation_columns(self, conn) -> None:
+        """Ensure memory_relations schema is forward-compatible and lossless.
+
+        Existing rows are preserved in-place; missing columns are appended
+        with safe defaults and backfilled where needed.
+        """
+        try:
+            result = await conn.execute(text("PRAGMA table_info(memory_relations)"))
+            columns = {row[1] for row in result.fetchall()}
+            if not columns:
+                return
+
+            if "evidence_count" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN evidence_count INTEGER NOT NULL DEFAULT 1"
+                    )
+                )
+            if "created_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN created_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "updated_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN updated_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "valid_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN valid_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "invalid_at" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN invalid_at DATETIME DEFAULT NULL"
+                    )
+                )
+            if "superseded_by" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN superseded_by VARCHAR(36) DEFAULT NULL"
+                    )
+                )
+            if "memory_id" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN memory_id VARCHAR(36) DEFAULT NULL"
+                    )
+                )
+            if "memory_type" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memory_relations "
+                        "ADD COLUMN memory_type VARCHAR(32) DEFAULT NULL"
+                    )
+                )
+
+            # Keep old rows usable for ordering/score fields in queries.
+            await conn.execute(
+                text(
+                    "UPDATE memory_relations "
+                    "SET evidence_count = COALESCE(evidence_count, 1), "
+                    "updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP), "
+                    "created_at = COALESCE(created_at, CURRENT_TIMESTAMP)"
+                )
+            )
+        except Exception:
+            # Table may not exist yet — create_all will handle it
+            pass
+
+    async def _ensure_ltm_indexes(self, conn) -> None:
+        """Ensure LTM performance indexes exist for old databases."""
+        stmts = [
+            # memory_events
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_events_scope_scope_id_created_at
+            ON memory_events(scope, scope_id, created_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_events_retry_window
+            ON memory_events(processed, dead_letter, next_retry_at, created_at)
+            """,
+            # memory_items
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_items_scope_scope_id_status_conf_updated
+            ON memory_items(scope, scope_id, status, confidence, updated_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_items_scope_scope_id_type_status_updated
+            ON memory_items(scope, scope_id, type, status, updated_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_items_status_updated
+            ON memory_items(status, updated_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_items_scope_scope_id_type_subject_validity
+            ON memory_items(scope, scope_id, type, subject_key, status, invalid_at, updated_at)
+            """,
+            # memory_evidence
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_evidence_event_id
+            ON memory_evidence(event_id)
+            """,
+            # memory_relations
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_relations_scope_scope_id_status_conf_updated
+            ON memory_relations(scope, scope_id, status, confidence, updated_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_relations_scope_scope_id_subject_pred_status_validity
+            ON memory_relations(scope, scope_id, subject_key, predicate, status, invalid_at, updated_at)
+            """,
+        ]
+        for stmt in stmts:
+            await conn.execute(text(stmt))
 
     # ====
     # Platform Statistics

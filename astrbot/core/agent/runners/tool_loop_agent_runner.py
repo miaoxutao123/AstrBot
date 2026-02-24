@@ -101,6 +101,88 @@ _CONTEXT_OVERFLOW_ERROR_HINTS = (
     "too many tokens",
 )
 
+_UNCERTAIN_ANSWER_HINTS = (
+    "不确定",
+    "不知道",
+    "不清楚",
+    "无法确认",
+    "记不清",
+    "不能确定",
+    "无法判断",
+    "not sure",
+    "don't know",
+    "do not know",
+    "unclear",
+    "cannot determine",
+    "can't recall",
+    "cannot recall",
+)
+
+_MEMORY_RECALL_QUERY_HINTS = (
+    "生日",
+    "年龄",
+    "几岁",
+    "名字",
+    "叫什么",
+    "昵称",
+    "偏好",
+    "喜欢",
+    "住在",
+    "城市",
+    "地址",
+    "电话",
+    "邮箱",
+    "职业",
+    "工作",
+    "学校",
+    "爱好",
+    "记得",
+    "回忆",
+    "birthday",
+    "age",
+    "name",
+    "nickname",
+    "preference",
+    "prefer",
+    "city",
+    "address",
+    "phone",
+    "email",
+    "occupation",
+    "job",
+    "remember",
+    "recall",
+)
+
+_INFO_REQUEST_HINTS = (
+    "请提供",
+    "请告诉",
+    "告诉我更多",
+    "提供更多",
+    "补充信息",
+    "需要更多信息",
+    "please provide",
+    "provide more",
+    "share more details",
+    "need more information",
+)
+
+_LACK_OF_INFO_HINTS = (
+    "没有记录",
+    "没有相关",
+    "未找到",
+    "无法找到",
+    "查不到",
+    "没有足够信息",
+    "信息不足",
+    "can't find",
+    "cannot find",
+    "not found",
+    "no record",
+    "no relevant memory",
+    "insufficient info",
+)
+
 _LARGE_DATA_URL_RE = re.compile(r"data:[^\s'\"<>)]{80,}", re.IGNORECASE)
 _LARGE_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{200,}={0,2}")
 _LARGE_HEX_RE = re.compile(r"[0-9a-fA-F]{200,}")
@@ -268,6 +350,33 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         resilience_cfg = provider_settings.get("coding_resilience", {})
         return resilience_cfg if isinstance(resilience_cfg, dict) else {}
 
+    def _get_ltm_cfg(self) -> dict[str, T.Any]:
+        astr_context = getattr(self.run_context, "context", None)
+        if astr_context is None:
+            return {}
+
+        plugin_context = getattr(astr_context, "context", None)
+        if plugin_context is None or not hasattr(plugin_context, "get_config"):
+            return {}
+
+        event = getattr(astr_context, "event", None)
+        try:
+            if event is not None and hasattr(event, "unified_msg_origin"):
+                cfg = plugin_context.get_config(umo=event.unified_msg_origin)
+            else:
+                cfg = plugin_context.get_config()
+        except Exception:
+            return {}
+
+        if not isinstance(cfg, dict):
+            return {}
+
+        ltm_settings = cfg.get("provider_ltm_settings", {})
+        if not isinstance(ltm_settings, dict):
+            return {}
+        ltm_cfg = ltm_settings.get("long_term_memory", {})
+        return ltm_cfg if isinstance(ltm_cfg, dict) else {}
+
     def _is_transient_provider_error(self, err: Exception | str) -> bool:
         text = str(err).lower().strip()
         if not text:
@@ -300,6 +409,262 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
             return value[:max_chars]
         omitted = len(value) - head - tail
         return f"{value[:head]}\n...[truncated {omitted} chars]...\n{value[-tail:]}"
+
+    def _is_uncertain_answer(self, text: str | None) -> bool:
+        value = str(text or "").strip().lower()
+        if not value:
+            return False
+        return any(hint in value for hint in _UNCERTAIN_ANSWER_HINTS)
+
+    @staticmethod
+    def _contains_any_fragment(text: str, fragments: tuple[str, ...]) -> bool:
+        value = str(text or "")
+        if not value:
+            return False
+        return any(fragment in value for fragment in fragments if fragment)
+
+    def _is_memory_recall_query(self, query_text: str | None) -> bool:
+        query = str(query_text or "").strip().lower()
+        if not query:
+            return False
+        return self._contains_any_fragment(query, _MEMORY_RECALL_QUERY_HINTS)
+
+    def _looks_like_fact_answer(self, answer_text: str | None) -> bool:
+        answer = str(answer_text or "").strip()
+        if not answer:
+            return False
+
+        # Date/time-like explicit values.
+        if re.search(r"\d{4}\s*[年/-]\s*\d{1,2}\s*[月/-]\s*\d{1,2}", answer):
+            return True
+        # Basic contact-like values.
+        if re.search(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", answer):
+            return True
+        if re.search(r"\b\d{3,4}[-\s]?\d{3,4}[-\s]?\d{3,4}\b", answer):
+            return True
+        # Declarative fact patterns.
+        if re.search(
+            r"(生日|名字|昵称|偏好|住在|城市|地址|电话|邮箱|职业|年龄).{0,16}(是|为|：|:)",
+            answer,
+        ):
+            return True
+        if re.search(r"\b(your|you)\s+\w{2,24}\s+(is|are)\b", answer.lower()):
+            return True
+        return False
+
+    def _post_think_uncertainty_score(
+        self,
+        *,
+        query_text: str | None,
+        answer_text: str | None,
+        reasoning_text: str | None,
+    ) -> int:
+        answer = str(answer_text or "").strip().lower()
+        reasoning = str(reasoning_text or "").strip().lower()
+        query = str(query_text or "").strip().lower()
+
+        if not answer:
+            return 10
+
+        score = 0
+        if self._is_uncertain_answer(answer):
+            score += 3
+        if reasoning and self._is_uncertain_answer(reasoning):
+            score += 2
+        if self._contains_any_fragment(answer, _INFO_REQUEST_HINTS):
+            score += 2
+        if self._contains_any_fragment(answer, _LACK_OF_INFO_HINTS):
+            score += 2
+
+        memory_query = self._is_memory_recall_query(query)
+        if memory_query:
+            score += 1
+            if len(answer) <= 64:
+                score += 1
+            if not self._looks_like_fact_answer(answer):
+                score += 1
+
+        if self._looks_like_fact_answer(answer):
+            score -= 2
+        elif len(answer) >= 240:
+            score -= 1
+
+        return max(0, score)
+
+    def _extract_user_query_text(self) -> str:
+        astr_context = getattr(self.run_context, "context", None)
+        event = getattr(astr_context, "event", None) if astr_context is not None else None
+        message_text = getattr(event, "message_str", None)
+        if isinstance(message_text, str) and message_text.strip():
+            return message_text.strip()
+
+        for msg in reversed(self.run_context.messages or []):
+            if msg.role != "user":
+                continue
+            content = msg.content
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if isinstance(content, list):
+                parts: list[str] = []
+                for part in content:
+                    if isinstance(part, TextPart) and part.text:
+                        parts.append(part.text)
+                joined = " ".join(parts).strip()
+                if joined:
+                    return joined
+        return ""
+
+    async def _maybe_post_think_recall(
+        self,
+        llm_resp: LLMResponse,
+    ) -> LLMResponse:
+        """Second-pass memory recall after draft answer for uncertainty cases."""
+        if self.streaming:
+            return llm_resp
+        if llm_resp.role != "assistant":
+            return llm_resp
+        if llm_resp.tools_call_name:
+            return llm_resp
+
+        ltm_cfg = self._get_ltm_cfg()
+        if not ltm_cfg or not bool(ltm_cfg.get("enable", False)):
+            return llm_resp
+
+        read_cfg = ltm_cfg.get("read_policy", {})
+        if not isinstance(read_cfg, dict) or not bool(read_cfg.get("enable", True)):
+            return llm_resp
+        if not bool(read_cfg.get("post_think_recall_enable", False)):
+            return llm_resp
+
+        user_query_text = self._extract_user_query_text()
+        only_on_uncertain = bool(read_cfg.get("post_think_recall_only_on_uncertain", True))
+        if only_on_uncertain:
+            score = self._post_think_uncertainty_score(
+                query_text=user_query_text,
+                answer_text=llm_resp.completion_text,
+                reasoning_text=llm_resp.reasoning_content,
+            )
+            threshold = max(
+                1,
+                self._cfg_int(read_cfg, "post_think_recall_uncertainty_threshold", 3),
+            )
+            if score < threshold:
+                return llm_resp
+
+        try:
+            from astrbot.core.long_term_memory.manager import get_ltm_manager
+            from astrbot.core.long_term_memory.policy import MemoryReadPolicy
+            from astrbot.core.long_term_memory.scope import resolve_ltm_read_targets
+        except Exception:
+            return llm_resp
+
+        ltm = get_ltm_manager()
+        if ltm is None:
+            return llm_resp
+
+        astr_context = getattr(self.run_context, "context", None)
+        event = getattr(astr_context, "event", None) if astr_context is not None else None
+        plugin_context = getattr(astr_context, "context", None) if astr_context is not None else None
+        if event is None:
+            return llm_resp
+
+        try:
+            scope, scope_id, additional_scopes = resolve_ltm_read_targets(event, ltm_cfg=ltm_cfg)
+        except Exception:
+            return llm_resp
+
+        recall_policy = MemoryReadPolicy.from_dict(read_cfg)
+        recall_policy.max_items = min(
+            recall_policy.max_items,
+            max(1, self._cfg_int(read_cfg, "post_think_recall_max_items", 8)),
+        )
+        recall_policy.max_tokens = min(
+            recall_policy.max_tokens,
+            max(120, self._cfg_int(read_cfg, "post_think_recall_max_tokens", 400)),
+        )
+        recall_policy.include_relations = bool(
+            read_cfg.get("post_think_recall_include_relations", recall_policy.include_relations)
+        )
+        if read_cfg.get("post_think_recall_relation_only_mode") is not None:
+            recall_policy.relation_only_mode = bool(
+                read_cfg.get("post_think_recall_relation_only_mode")
+            )
+
+        embedding_provider = None
+        embedding_provider_id = str(ltm_cfg.get("embedding_provider_id", "") or "").strip()
+        if (
+            embedding_provider_id
+            and plugin_context is not None
+            and hasattr(plugin_context, "get_provider_by_id")
+        ):
+            provider = plugin_context.get_provider_by_id(embedding_provider_id)
+            if provider is not None and hasattr(provider, "get_embedding"):
+                embedding_provider = provider
+
+        max_query_chars = max(
+            120,
+            self._cfg_int(read_cfg, "post_think_recall_max_query_chars", 600),
+        )
+        query_parts = [
+            user_query_text,
+            str(llm_resp.completion_text or ""),
+            str(llm_resp.reasoning_content or ""),
+        ]
+        recall_query = self._clip_text_for_context(
+            "\n".join(part for part in query_parts if part),
+            max_chars=max_query_chars,
+        )
+        if not recall_query.strip():
+            return llm_resp
+
+        try:
+            memory_context = await ltm.retrieve_memory_context(
+                scope=scope,
+                scope_id=scope_id,
+                read_policy=recall_policy,
+                query_text=recall_query,
+                additional_scopes=additional_scopes,
+                embedding_provider=embedding_provider,
+            )
+        except Exception:
+            return llm_resp
+
+        if not memory_context:
+            return llm_resp
+
+        draft_limit = max(200, self._cfg_int(read_cfg, "post_think_recall_max_draft_chars", 1200))
+        draft_answer = self._clip_text_for_context(
+            str(llm_resp.completion_text or ""),
+            max_chars=draft_limit,
+        )
+        refine_prompt = (
+            "你已经给出了第一版回答。请仅在相关时使用下面补充的长期记忆修正答案。\n"
+            f"<draft_answer>\n{draft_answer}\n</draft_answer>\n"
+            f"{memory_context}\n"
+            "输出要求：仅输出最终回答；若补充记忆不相关，保持原答案核心。"
+        )
+
+        try:
+            refined = await self.provider.text_chat(
+                contexts=self.run_context.messages,
+                prompt=refine_prompt,
+                func_tool=None,
+                model=self.req.model,
+                session_id=self.req.session_id,
+            )
+        except Exception:
+            return llm_resp
+
+        if refined is None or refined.role == "err" or refined.tools_call_name:
+            return llm_resp
+        if not str(refined.completion_text or "").strip():
+            return llm_resp
+
+        if refined.usage:
+            self.stats.token_usage += refined.usage
+            if self.req.conversation:
+                self.req.conversation.token_usage = refined.usage.total
+        return refined
 
     def _sanitize_tool_result_for_context(
         self,
@@ -1180,6 +1545,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
             return
 
         if not llm_resp.tools_call_name:
+            llm_resp = await self._maybe_post_think_recall(llm_resp)
             # 如果没有工具调用，转换到完成状态
             self.final_llm_resp = llm_resp
             self._transition_state(AgentState.DONE)

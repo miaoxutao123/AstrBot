@@ -107,6 +107,16 @@ async def test_engineering_ops_routes(app: Quart, authenticated_header: dict):
     assert "heavy_files" in summary_data["data"]
 
     response = await test_client.get(
+        "/api/project_context/scope",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    scope_data = await response.get_json()
+    assert scope_data["status"] == "ok"
+    assert "supported_text_extensions" in scope_data["data"]
+    assert "dependency_graph_extensions" in scope_data["data"]
+
+    response = await test_client.get(
         "/api/project_context/semantic/providers",
         headers=authenticated_header,
     )

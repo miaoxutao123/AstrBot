@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    import chardet
+except Exception:  # pragma: no cover - optional dependency import guard
+    chardet = None
+
 from astrbot import logger
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path, get_astrbot_root
 
@@ -104,6 +109,51 @@ _DEFAULT_EXCLUDE_GLOBS = (
     "*.otf",
 )
 
+_SYMBOL_PARSE_EXTS = {
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".md",
+    ".rst",
+}
+
+_JS_TS_SOURCE_EXTS = {
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".vue",
+}
+
+_JS_TS_RESOLVE_EXTS = (
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".d.ts",
+    ".vue",
+    ".json",
+)
+
+_JS_TS_INDEX_BASENAMES = (
+    "index.ts",
+    "index.tsx",
+    "index.js",
+    "index.jsx",
+    "index.mjs",
+    "index.cjs",
+    "index.vue",
+    "index.json",
+)
+
 
 _DATA_URL_RE = re.compile(r"data:[^\s'\"<>)]{80,}", re.IGNORECASE)
 _LONG_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{200,}={0,2}")
@@ -137,6 +187,37 @@ class ProjectIndexManager:
             raise NotADirectoryError(f"Path is not a directory: {target}")
         return target
 
+    def _coerce_int(
+        self,
+        value: Any,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(parsed, maximum))
+
+    def _normalize_path_key(self, value: str | None) -> str:
+        normalized = str(value or "").strip().replace("\\", "/")
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        normalized = re.sub(r"/{2,}", "/", normalized)
+        parts: list[str] = []
+        for part in normalized.split("/"):
+            clean = part.strip()
+            if not clean or clean == ".":
+                continue
+            if clean == "..":
+                if parts:
+                    parts.pop()
+                continue
+            parts.append(clean)
+        return "/".join(parts).strip("/")
+
     def _should_skip_file(
         self, file_path: Path, max_file_bytes: int
     ) -> tuple[bool, str]:
@@ -161,10 +242,61 @@ class ProjectIndexManager:
         return False, ""
 
     def _to_rel(self, abs_path: Path, root: Path) -> str:
-        return abs_path.resolve().relative_to(root).as_posix()
+        resolved_root = root.resolve()
+        resolved_file = abs_path.resolve()
+        try:
+            return resolved_file.relative_to(resolved_root).as_posix()
+        except ValueError as exc:
+            raise ValueError(
+                f"Path escaped scan root: {resolved_file.as_posix()}"
+            ) from exc
+
+    def _is_likely_text(self, text: str) -> bool:
+        sample = text[:2000]
+        if not sample:
+            return True
+        printable = sum(
+            1 for char in sample if char.isprintable() or char in {"\n", "\r", "\t"}
+        )
+        return (printable / len(sample)) >= 0.78
 
     def _read_text(self, path: Path) -> str:
-        return path.read_text(encoding="utf-8", errors="replace")
+        raw = path.read_bytes()
+        if not raw:
+            return ""
+
+        for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                decoded = raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            if self._is_likely_text(decoded):
+                return decoded
+
+        if b"\x00" in raw[:4096]:
+            raise ValueError("binary_or_non_text_payload")
+
+        if chardet is not None:
+            detected = chardet.detect(raw[:200_000])
+            detected_encoding = str((detected or {}).get("encoding") or "").strip()
+            confidence = float((detected or {}).get("confidence") or 0.0)
+            if detected_encoding and confidence >= 0.55:
+                try:
+                    decoded = raw.decode(detected_encoding)
+                except (LookupError, UnicodeDecodeError):
+                    decoded = ""
+                if decoded and self._is_likely_text(decoded):
+                    return decoded
+
+        for encoding in ("gb18030", "cp1252", "latin-1"):
+            try:
+                decoded = raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            if self._is_likely_text(decoded):
+                return decoded
+
+        return raw.decode("utf-8", errors="replace")
 
     def _sha1(self, text: str) -> str:
         return hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()
@@ -188,6 +320,14 @@ class ProjectIndexManager:
                 module = node.module or ""
                 dots = "." * node.level
                 imports.append(f"{dots}{module}" if module else dots)
+                for alias in node.names:
+                    alias_name = str(alias.name or "").strip()
+                    if not alias_name or alias_name == "*":
+                        continue
+                    if module:
+                        imports.append(f"{dots}{module}.{alias_name}")
+                    else:
+                        imports.append(f"{dots}{alias_name}")
             elif isinstance(node, ast.ClassDef):
                 symbols.append(
                     {
@@ -212,41 +352,65 @@ class ProjectIndexManager:
 
         import_patterns = [
             r"import\s+.+?\s+from\s+['\"]([^'\"]+)['\"]",
+            r"import\s+['\"]([^'\"]+)['\"]",
+            r"import\(\s*['\"]([^'\"]+)['\"]\s*\)",
             r"require\(\s*['\"]([^'\"]+)['\"]\s*\)",
             r"export\s+\*\s+from\s+['\"]([^'\"]+)['\"]",
+            r"export\s+\{[^}]*\}\s+from\s+['\"]([^'\"]+)['\"]",
         ]
         symbol_patterns = [
-            ("class", r"class\s+([A-Za-z_][A-Za-z0-9_]*)"),
             (
-                "function",
-                r"(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                "class",
+                r"(?:export\s+default\s+|export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)",
             ),
             (
                 "function",
-                r"(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\(",
+                r"(?:export\s+default\s+|export\s+)?(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
             ),
+            (
+                "function",
+                r"(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>",
+            ),
+            (
+                "function",
+                r"(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?[A-Za-z_$][A-Za-z0-9_$]*\s*=>",
+            ),
+            (
+                "function",
+                r"(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?function\s*\(",
+            ),
+            ("interface", r"(?:export\s+)?interface\s+([A-Za-z_][A-Za-z0-9_]*)"),
+            ("type", r"(?:export\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)\s*="),
+            ("enum", r"(?:export\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)"),
         ]
 
         for pattern in import_patterns:
             for hit in re.findall(pattern, content):
                 imports.append(hit)
 
+        seen_symbols: set[tuple[str, str, int]] = set()
         for kind, pattern in symbol_patterns:
             for match in re.finditer(pattern, content):
                 line = content[: match.start()].count("\n") + 1
-                symbols.append({"name": match.group(1), "kind": kind, "line": line})
+                name = match.group(1)
+                key = (name, kind, line)
+                if key in seen_symbols:
+                    continue
+                seen_symbols.add(key)
+                symbols.append({"name": name, "kind": kind, "line": line})
 
         return symbols, imports
 
     def _parse_markdown(self, content: str) -> list[dict]:
         symbols: list[dict] = []
         for line_no, line in enumerate(content.splitlines(), start=1):
-            if not line.startswith("#"):
+            heading_match = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
+            if not heading_match:
                 continue
-            title = line.lstrip("#").strip()
+            title = heading_match.group(2).strip()
             if not title:
                 continue
-            level = len(line) - len(line.lstrip("#"))
+            level = len(heading_match.group(1))
             symbols.append(
                 {
                     "name": title,
@@ -286,9 +450,10 @@ class ProjectIndexManager:
 
             level = len(import_str) - len(import_str.lstrip("."))
             module_part = import_str[level:]
-            if level > len(package_parts):
+            up_levels = max(level - 1, 0)
+            if up_levels > len(package_parts):
                 return None
-            prefix = package_parts[: len(package_parts) - level]
+            prefix = package_parts[: len(package_parts) - up_levels]
             if module_part:
                 prefix.extend(module_part.split("."))
             module_name = ".".join([p for p in prefix if p])
@@ -302,6 +467,86 @@ class ProjectIndexManager:
             module_name = module_name.rsplit(".", 1)[0]
             if module_name in module_to_file:
                 return module_to_file[module_name]
+        return None
+
+    def _resolve_local_js_import(
+        self,
+        import_str: str,
+        current_file: str,
+        file_map: dict[str, dict[str, Any]],
+    ) -> str | None:
+        raw = str(import_str or "").strip()
+        if not raw:
+            return None
+        cleaned = raw.split("?", 1)[0].split("#", 1)[0].strip()
+        if not cleaned:
+            return None
+
+        base_candidates: list[str] = []
+        if cleaned.startswith("."):
+            current_dir = self._normalize_path_key(str(Path(current_file).parent))
+            if current_dir:
+                base_candidates.append(f"{current_dir}/{cleaned}")
+            else:
+                base_candidates.append(cleaned)
+        elif cleaned.startswith("@/"):
+            base_candidates.append(cleaned[2:])
+        elif cleaned.startswith("~/"):
+            base_candidates.append(cleaned[2:])
+        elif cleaned.startswith("/"):
+            base_candidates.append(cleaned)
+        else:
+            return None
+
+        for base in base_candidates:
+            normalized_base = self._normalize_path_key(base)
+            if not normalized_base:
+                continue
+            resolved = self._resolve_local_js_candidate(
+                normalized_base=normalized_base,
+                file_map=file_map,
+            )
+            if resolved:
+                return resolved
+        return None
+
+    def _resolve_local_js_candidate(
+        self,
+        *,
+        normalized_base: str,
+        file_map: dict[str, dict[str, Any]],
+    ) -> str | None:
+        if normalized_base in file_map:
+            return normalized_base
+
+        base_path = Path(normalized_base)
+        base_suffix = base_path.suffix.lower()
+        if base_suffix:
+            if normalized_base in file_map:
+                return normalized_base
+
+            stem = normalized_base[: -len(base_suffix)]
+            if base_suffix in {".js", ".jsx", ".mjs", ".cjs"}:
+                for ext in (".ts", ".tsx", ".vue"):
+                    alt = f"{stem}{ext}"
+                    if alt in file_map:
+                        return alt
+            elif base_suffix in {".ts", ".tsx"}:
+                for ext in (".js", ".jsx", ".mjs", ".cjs", ".vue"):
+                    alt = f"{stem}{ext}"
+                    if alt in file_map:
+                        return alt
+        else:
+            for ext in _JS_TS_RESOLVE_EXTS:
+                candidate = f"{normalized_base}{ext}"
+                if candidate in file_map:
+                    return candidate
+
+        base_no_tail = normalized_base.rstrip("/")
+        for index_name in _JS_TS_INDEX_BASENAMES:
+            candidate = f"{base_no_tail}/{index_name}"
+            if candidate in file_map:
+                return candidate
         return None
 
     def build_index(
@@ -319,21 +564,34 @@ class ProjectIndexManager:
         """
 
         scan_root = self._safe_resolve_root(root)
+        max_files = self._coerce_int(
+            max_files, default=12000, minimum=1, maximum=200000
+        )
+        max_file_bytes = self._coerce_int(
+            max_file_bytes,
+            default=1_500_000,
+            minimum=1024,
+            maximum=20_000_000,
+        )
         stats = BuildStats()
 
         files: list[dict[str, Any]] = []
         module_to_file: dict[str, str] = {}
         line_total = 0
+        seen_paths: set[str] = set()
 
         for curr_root, dir_names, file_names in os.walk(scan_root):
             curr_path = Path(curr_root)
-            dir_names[:] = [
-                d
-                for d in dir_names
-                if d not in _DEFAULT_EXCLUDE_DIRS and not d.startswith(".")
-            ]
+            dir_names[:] = sorted(
+                (
+                    d
+                    for d in dir_names
+                    if d not in _DEFAULT_EXCLUDE_DIRS and not d.startswith(".")
+                ),
+                key=str.lower,
+            )
 
-            for file_name in file_names:
+            for file_name in sorted(file_names, key=str.lower):
                 if stats.indexed_files >= max_files:
                     logger.warning(
                         "Project index reached max_files=%s, stop scanning.",
@@ -354,10 +612,20 @@ class ProjectIndexManager:
 
                 try:
                     content = self._read_text(abs_file)
+                except ValueError as exc:
+                    if "binary_or_non_text_payload" in str(exc):
+                        stats.skipped_binary_files += 1
+                    continue
                 except Exception:
                     continue
 
-                rel = self._to_rel(abs_file, scan_root)
+                try:
+                    rel = self._normalize_path_key(self._to_rel(abs_file, scan_root))
+                except ValueError:
+                    continue
+                if not rel or rel in seen_paths:
+                    continue
+                seen_paths.add(rel)
                 suffix = abs_file.suffix.lower()
                 line_count = content.count("\n") + 1 if content else 0
                 line_total += line_count
@@ -414,6 +682,15 @@ class ProjectIndexManager:
                         import_str,
                         rel_path,
                         module_to_file,
+                    )
+                    if target and target in file_map:
+                        local_imports.add(target)
+            elif item["ext"] in _JS_TS_SOURCE_EXTS:
+                for import_str in item["imports"]:
+                    target = self._resolve_local_js_import(
+                        import_str,
+                        rel_path,
+                        file_map,
                     )
                     if target and target in file_map:
                         local_imports.add(target)
@@ -501,7 +778,17 @@ class ProjectIndexManager:
             raise FileNotFoundError(
                 "Project index not found. Build index with astrbot_project_index_build first."
             )
-        return json.loads(self.index_file.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self.index_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "Project index file is corrupted. Rebuild with astrbot_project_index_build."
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(
+                "Project index format is invalid. Rebuild with astrbot_project_index_build."
+            )
+        return data
 
     def get_index_info(self) -> dict[str, Any]:
         index_data = self._load_index()
@@ -519,6 +806,57 @@ class ProjectIndexManager:
             "entry_candidates": (index_data.get("entry_candidates") or [])[:12],
         }
 
+    def get_analysis_scope(self) -> dict[str, Any]:
+        scope: dict[str, Any] = {
+            "workspace_root": self.workspace_root.as_posix(),
+            "default_scan_root": self.workspace_root.as_posix(),
+            "supported_text_extensions": sorted(_TEXT_FILE_EXTS),
+            "symbol_parse_extensions": sorted(_SYMBOL_PARSE_EXTS),
+            "dependency_graph_extensions": sorted({".py", ".pyi", *_JS_TS_SOURCE_EXTS}),
+            "exclude_dirs": sorted(_DEFAULT_EXCLUDE_DIRS),
+            "exclude_globs": list(_DEFAULT_EXCLUDE_GLOBS),
+            "direct_file_allowlist": sorted(_DIRECT_FILE_ALLOWLIST),
+            "index_available": False,
+            "current_scan_root": "",
+            "indexed_file_count": 0,
+            "indexed_top_dirs": [],
+            "indexed_path_samples": [],
+        }
+
+        try:
+            index_data = self._load_index()
+        except FileNotFoundError:
+            return scope
+        except Exception as exc:
+            scope["index_error"] = str(exc)
+            return scope
+
+        files = index_data.get("files", [])
+        top_dirs_raw = index_data.get("top_dirs", [])
+        top_dirs: list[str] = []
+        for item in top_dirs_raw:
+            if isinstance(item, (list, tuple)) and item:
+                top_dirs.append(str(item[0]))
+                continue
+            if isinstance(item, dict) and item.get("path"):
+                top_dirs.append(str(item.get("path")))
+
+        sample_paths: list[str] = []
+        for file_item in files:
+            path = self._normalize_path_key(str(file_item.get("path", "")))
+            if not path:
+                continue
+            sample_paths.append(path)
+            if len(sample_paths) >= 30:
+                break
+
+        scope["index_available"] = True
+        scope["current_scan_root"] = str(index_data.get("scan_root") or "")
+        scope["indexed_file_count"] = len(files)
+        scope["indexed_top_dirs"] = top_dirs[:20]
+        scope["indexed_path_samples"] = sample_paths
+        return scope
+
     def search_symbols(
         self,
         *,
@@ -534,11 +872,15 @@ class ProjectIndexManager:
         if not query_norm:
             return []
 
-        prefix = path_prefix.strip("/") if path_prefix else ""
+        limit = self._coerce_int(limit, default=20, minimum=1, maximum=200)
+        prefix = self._normalize_path_key(path_prefix) if path_prefix else ""
+        query_tokens = [token for token in re.findall(r"\w+", query_norm) if token]
         results: list[dict[str, Any]] = []
 
         for item in files:
-            file_path = item.get("path", "")
+            file_path = self._normalize_path_key(str(item.get("path", "")))
+            if not file_path:
+                continue
             if prefix and not file_path.startswith(prefix):
                 continue
 
@@ -549,7 +891,12 @@ class ProjectIndexManager:
                     continue
 
                 name_norm = name.lower()
-                if query_norm not in name_norm:
+                token_hits = (
+                    sum(1 for token in query_tokens if token in name_norm)
+                    if query_tokens
+                    else 0
+                )
+                if query_norm not in name_norm and token_hits == 0:
                     continue
 
                 score = 100
@@ -557,8 +904,12 @@ class ProjectIndexManager:
                     score += 100
                 elif name_norm.startswith(query_norm):
                     score += 40
+                if name_norm.endswith(query_norm):
+                    score += 12
                 if query_norm in file_path.lower():
                     score += 10
+                if token_hits:
+                    score += min(60, token_hits * 12)
 
                 results.append(
                     {
@@ -571,7 +922,46 @@ class ProjectIndexManager:
                 )
 
         results.sort(key=lambda item: (-int(item["score"]), item["path"], item["name"]))
-        return results[: max(1, min(limit, 200))]
+        return results[:limit]
+
+    def _resolve_indexed_file_path(
+        self,
+        *,
+        file_path: str,
+        index_data: dict[str, Any],
+    ) -> str:
+        graph = index_data.get("graph", {}) or {}
+        reverse_graph = index_data.get("reverse_graph", {}) or {}
+        all_paths = set(graph.keys()) | set(reverse_graph.keys())
+
+        raw = str(file_path or "").strip()
+        if not raw:
+            raise ValueError("file_path is required")
+
+        candidate = Path(raw).expanduser()
+        if candidate.is_absolute():
+            scan_root_raw = str(index_data.get("scan_root") or "")
+            if scan_root_raw:
+                try:
+                    scan_root = Path(scan_root_raw).resolve()
+                    raw = candidate.resolve().relative_to(scan_root).as_posix()
+                except Exception:
+                    raw = candidate.name
+
+        normalized = self._normalize_path_key(raw)
+        if normalized in all_paths:
+            return normalized
+
+        suffix = f"/{normalized}"
+        matched = sorted(
+            path for path in all_paths if path == normalized or path.endswith(suffix)
+        )
+        if len(matched) == 1:
+            return matched[0]
+        if len(matched) > 1:
+            preview = ", ".join(matched[:8])
+            raise ValueError(f"File path is ambiguous: {normalized}. Candidates: {preview}")
+        raise ValueError(f"File not found in index: {normalized}")
 
     def trace_dependency(
         self,
@@ -589,11 +979,14 @@ class ProjectIndexManager:
         if direction not in {"outbound", "inbound"}:
             raise ValueError("direction must be outbound or inbound")
 
-        max_depth = max(1, min(depth, 6))
-
-        source = file_path.strip().strip("/")
-        if source not in graph and source not in reverse_graph:
-            raise ValueError(f"File not found in index: {source}")
+        max_depth = self._coerce_int(depth, default=2, minimum=1, maximum=6)
+        limit_nodes = self._coerce_int(
+            limit_nodes, default=200, minimum=20, maximum=2000
+        )
+        source = self._resolve_indexed_file_path(
+            file_path=file_path,
+            index_data=index_data,
+        )
 
         adjacency = graph if direction == "outbound" else reverse_graph
 
@@ -606,6 +999,8 @@ class ProjectIndexManager:
             if curr_depth >= max_depth:
                 continue
             neighbors = adjacency.get(current, [])
+            if not isinstance(neighbors, list):
+                continue
             for neighbor in neighbors:
                 if len(nodes_seen) >= limit_nodes:
                     break
@@ -702,11 +1097,15 @@ class ProjectIndexManager:
         path_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
         files = index_data.get("files", [])
-        prefix = path_prefix.strip("/") if path_prefix else ""
+        max_docs = self._coerce_int(max_docs, default=1800, minimum=1, maximum=5000)
+        max_doc_chars = self._coerce_int(
+            max_doc_chars, default=1200, minimum=80, maximum=3000
+        )
+        prefix = self._normalize_path_key(path_prefix) if path_prefix else ""
         docs: list[dict[str, Any]] = []
 
         for item in files:
-            path = str(item.get("path", "")).strip()
+            path = self._normalize_path_key(str(item.get("path", "")).strip())
             if not path:
                 continue
             if prefix and not path.startswith(prefix):
@@ -758,10 +1157,17 @@ class ProjectIndexManager:
     def _normalize_vector(self, vec: list[float]) -> list[float] | None:
         if not vec:
             return None
-        norm = math.sqrt(sum(float(v) * float(v) for v in vec))
-        if norm <= 1e-12:
+        values: list[float] = []
+        for value in vec:
+            fv = float(value)
+            if not math.isfinite(fv):
+                return None
+            values.append(fv)
+
+        norm = math.sqrt(sum(v * v for v in values))
+        if not math.isfinite(norm) or norm <= 1e-12:
             return None
-        return [float(v) / norm for v in vec]
+        return [v / norm for v in values]
 
     def _sanitize_semantic_text(self, text: str, *, max_chars: int = 3000) -> str:
         if not text:
@@ -820,6 +1226,8 @@ class ProjectIndexManager:
                         f"{start // chunk_size}: docs={len(chunk_docs)}, vectors={len(chunk_vectors)}"
                     )
                 for doc, vec in zip(chunk_docs, chunk_vectors):
+                    if not isinstance(vec, (list, tuple)):
+                        raise ValueError("Embedding vector should be a list of numbers.")
                     selected_docs.append(doc)
                     vectors.append([float(v) for v in vec])
                 continue
@@ -836,6 +1244,8 @@ class ProjectIndexManager:
             for doc in chunk_docs:
                 try:
                     vec = await embed_one(str(doc.get("text", "")))
+                    if not isinstance(vec, (list, tuple)):
+                        raise ValueError("Embedding vector should be a list of numbers.")
                     selected_docs.append(doc)
                     vectors.append([float(v) for v in vec])
                 except Exception as item_exc:
@@ -853,7 +1263,17 @@ class ProjectIndexManager:
             raise FileNotFoundError(
                 "Semantic index not found. Build with astrbot_project_semantic_index_build first."
             )
-        return json.loads(self.semantic_index_file.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self.semantic_index_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "Semantic index file is corrupted. Rebuild with astrbot_project_semantic_index_build."
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(
+                "Semantic index format is invalid. Rebuild with astrbot_project_semantic_index_build."
+            )
+        return data
 
     def get_semantic_index_info(self) -> dict[str, Any]:
         data = self._load_semantic_index()
@@ -888,12 +1308,19 @@ class ProjectIndexManager:
         embed_one: Callable[[str], Awaitable[list[float]]] | None = None,
         batch_size: int = 16,
     ) -> dict[str, Any]:
+        max_docs = self._coerce_int(max_docs, default=1800, minimum=20, maximum=5000)
+        max_doc_chars = self._coerce_int(
+            max_doc_chars, default=1200, minimum=200, maximum=3000
+        )
+        batch_size = self._coerce_int(batch_size, default=16, minimum=1, maximum=64)
+        path_prefix_norm = self._normalize_path_key(path_prefix) if path_prefix else None
+
         index_data = self._load_index()
         docs = self._build_semantic_documents(
             index_data=index_data,
-            max_docs=max(20, min(max_docs, 5000)),
-            max_doc_chars=max(200, min(max_doc_chars, 3000)),
-            path_prefix=path_prefix,
+            max_docs=max_docs,
+            max_doc_chars=max_doc_chars,
+            path_prefix=path_prefix_norm,
         )
         if not docs:
             raise ValueError("No files available for semantic indexing.")
@@ -908,14 +1335,32 @@ class ProjectIndexManager:
             raise ValueError("No valid vectors generated for semantic index.")
 
         stored_docs: list[dict[str, Any]] = []
+        vector_skip_samples: list[dict[str, str]] = []
+        vector_skipped = 0
         dim = 0
         for doc, vec in zip(selected_docs, vectors):
             normed = self._normalize_vector(vec)
             if not normed:
+                vector_skipped += 1
+                if len(vector_skip_samples) < 20:
+                    vector_skip_samples.append(
+                        {
+                            "path": str(doc.get("path", "")),
+                            "reason": "invalid_or_zero_norm_vector",
+                        }
+                    )
                 continue
             if dim == 0:
                 dim = len(normed)
             if len(normed) != dim:
+                vector_skipped += 1
+                if len(vector_skip_samples) < 20:
+                    vector_skip_samples.append(
+                        {
+                            "path": str(doc.get("path", "")),
+                            "reason": "dimension_mismatch_vector",
+                        }
+                    )
                 continue
 
             stored_docs.append(
@@ -932,10 +1377,12 @@ class ProjectIndexManager:
         if not stored_docs:
             raise ValueError("No valid vectors generated for semantic index.")
 
-        if skipped_docs:
+        total_skipped = len(skipped_docs) + vector_skipped
+        skip_reason_samples = (skipped_docs + vector_skip_samples)[:20]
+        if total_skipped:
             logger.warning(
                 "Semantic index build skipped %s documents due provider rejection/errors.",
-                len(skipped_docs),
+                total_skipped,
             )
 
         payload = {
@@ -950,9 +1397,9 @@ class ProjectIndexManager:
                 "requested_docs": len(docs),
                 "max_docs": max_docs,
                 "max_doc_chars": max_doc_chars,
-                "path_prefix": path_prefix or "",
-                "skipped_docs": len(skipped_docs),
-                "skip_reason_samples": skipped_docs[:20],
+                "path_prefix": path_prefix_norm or "",
+                "skipped_docs": total_skipped,
+                "skip_reason_samples": skip_reason_samples,
             },
             "docs": stored_docs,
         }
@@ -965,14 +1412,97 @@ class ProjectIndexManager:
         return {
             "doc_count": len(stored_docs),
             "requested_docs": len(docs),
-            "skipped_docs": len(skipped_docs),
-            "skip_reason_samples": skipped_docs[:20],
+            "skipped_docs": total_skipped,
+            "skip_reason_samples": skip_reason_samples,
             "dimension": dim,
             "provider_id": provider_id,
             "provider_model": provider_model,
-            "path_prefix": path_prefix or "",
+            "path_prefix": path_prefix_norm or "",
             "built_at": payload["built_at"],
         }
+
+    def _semantic_query_tokens(self, query: str) -> list[str]:
+        seen: set[str] = set()
+        tokens: list[str] = []
+        for token in re.findall(r"\w+", query.lower()):
+            normalized = token.strip()
+            if not normalized:
+                continue
+            if len(normalized) == 1 and normalized.isascii():
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            tokens.append(normalized)
+            if len(tokens) >= 12:
+                break
+        return tokens
+
+    def _semantic_lexical_bonus(
+        self,
+        *,
+        query_lower: str,
+        query_tokens: list[str],
+        path: str,
+        excerpt: str,
+    ) -> float:
+        path_lower = path.lower()
+        excerpt_lower = excerpt.lower()
+        bonus = 0.0
+        if query_lower and query_lower in path_lower:
+            bonus += 0.06
+        if query_lower and query_lower in excerpt_lower:
+            bonus += 0.04
+        if query_tokens:
+            token_hits = sum(
+                1 for token in query_tokens if token in path_lower or token in excerpt_lower
+            )
+            coverage = token_hits / len(query_tokens)
+            bonus += min(0.08, coverage * 0.08)
+        return bonus
+
+    def _semantic_lexical_search(
+        self,
+        *,
+        docs: list[dict[str, Any]],
+        query: str,
+        top_k: int,
+        path_prefix: str | None,
+    ) -> list[dict[str, Any]]:
+        top_k = self._coerce_int(top_k, default=8, minimum=1, maximum=50)
+        prefix = self._normalize_path_key(path_prefix) if path_prefix else ""
+        query_lower = query.lower()
+        query_tokens = self._semantic_query_tokens(query)
+
+        scored: list[dict[str, Any]] = []
+        for doc in docs:
+            path = self._normalize_path_key(str(doc.get("path", "")))
+            if not path:
+                continue
+            if prefix and not path.startswith(prefix):
+                continue
+            excerpt = str(doc.get("excerpt", "") or "")[:320]
+            lexical_bonus = self._semantic_lexical_bonus(
+                query_lower=query_lower,
+                query_tokens=query_tokens,
+                path=path,
+                excerpt=excerpt,
+            )
+            if lexical_bonus <= 0:
+                continue
+            scored.append(
+                {
+                    "score": round(lexical_bonus, 6),
+                    "semantic_score": 0.0,
+                    "path": path,
+                    "line_count": int(doc.get("line_count", 0) or 0),
+                    "symbol_count": int(doc.get("symbol_count", 0) or 0),
+                    "excerpt": excerpt,
+                }
+            )
+
+        scored.sort(key=lambda item: (-float(item["score"]), item["path"]))
+        return scored[:top_k]
 
     async def semantic_search(
         self,
@@ -985,29 +1515,51 @@ class ProjectIndexManager:
         query = query.strip()
         if not query:
             return []
+        top_k = self._coerce_int(top_k, default=8, minimum=1, maximum=50)
 
         index_data = self._load_semantic_index()
         docs = index_data.get("docs", [])
         if not docs:
             return []
 
-        query_vec = await embed_one(query)
-        normed_query = self._normalize_vector([float(v) for v in query_vec])
+        try:
+            query_vec = await embed_one(query)
+            normed_query = self._normalize_vector([float(v) for v in query_vec])
+        except Exception as exc:
+            logger.warning(
+                "Semantic query embedding failed, fallback to lexical ranking: %s",
+                str(exc)[:220],
+            )
+            return self._semantic_lexical_search(
+                docs=docs,
+                query=query,
+                top_k=top_k,
+                path_prefix=path_prefix,
+            )
         if not normed_query:
             return []
 
         dim = int(index_data.get("dimension", 0) or 0)
         if dim and dim != len(normed_query):
-            raise ValueError(
-                f"Embedding dimension mismatch, query={len(normed_query)} semantic_index={dim}"
+            logger.warning(
+                "Semantic search dimension mismatch query=%s index=%s, fallback lexical.",
+                len(normed_query),
+                dim,
+            )
+            return self._semantic_lexical_search(
+                docs=docs,
+                query=query,
+                top_k=top_k,
+                path_prefix=path_prefix,
             )
 
-        prefix = path_prefix.strip("/") if path_prefix else ""
+        prefix = self._normalize_path_key(path_prefix) if path_prefix else ""
         query_lower = query.lower()
+        query_tokens = self._semantic_query_tokens(query)
 
         scored: list[dict[str, Any]] = []
         for doc in docs:
-            path = str(doc.get("path", ""))
+            path = self._normalize_path_key(str(doc.get("path", "")))
             if not path:
                 continue
             if prefix and not path.startswith(prefix):
@@ -1016,15 +1568,25 @@ class ProjectIndexManager:
             vec = doc.get("vector")
             if not isinstance(vec, list):
                 continue
-            if len(vec) != len(normed_query):
+            try:
+                vector = [float(value) for value in vec]
+            except (TypeError, ValueError):
+                continue
+            if len(vector) != len(normed_query):
+                continue
+            if not all(math.isfinite(value) for value in vector):
                 continue
 
-            score = sum(float(v) * q for v, q in zip(vec, normed_query))
-            lexical_bonus = 0.0
-            if query_lower in path.lower():
-                lexical_bonus += 0.04
-            if query_lower in str(doc.get("excerpt", "")).lower():
-                lexical_bonus += 0.02
+            score = sum(value * q for value, q in zip(vector, normed_query))
+            if not math.isfinite(score):
+                continue
+            excerpt = str(doc.get("excerpt", "") or "")[:320]
+            lexical_bonus = self._semantic_lexical_bonus(
+                query_lower=query_lower,
+                query_tokens=query_tokens,
+                path=path,
+                excerpt=excerpt,
+            )
 
             scored.append(
                 {
@@ -1033,12 +1595,19 @@ class ProjectIndexManager:
                     "path": path,
                     "line_count": int(doc.get("line_count", 0) or 0),
                     "symbol_count": int(doc.get("symbol_count", 0) or 0),
-                    "excerpt": str(doc.get("excerpt", "") or "")[:320],
+                    "excerpt": excerpt,
                 }
             )
 
+        if not scored:
+            return self._semantic_lexical_search(
+                docs=docs,
+                query=query,
+                top_k=top_k,
+                path_prefix=path_prefix,
+            )
         scored.sort(key=lambda item: (-float(item["score"]), item["path"]))
-        return scored[: max(1, min(top_k, 50))]
+        return scored[:top_k]
 
 
 project_index_manager = ProjectIndexManager()

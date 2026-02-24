@@ -195,6 +195,31 @@ class ProjectSemanticIndexInfoTool(FunctionTool[AstrAgentContext]):
 
 
 @dataclass
+class ProjectScopeInfoTool(FunctionTool[AstrAgentContext]):
+    name: str = "astrbot_project_scope_info"
+    description: str = "Show project-context analysis scope: supported file types, excluded paths, and current indexed path samples."
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+        }
+    )
+
+    async def call(
+        self,
+        context: ContextWrapper[AstrAgentContext],
+    ) -> ToolExecResult:
+        if context.context.event.role != "admin":
+            return "error: Permission denied. Scope info is only allowed for admin users."
+
+        try:
+            data = project_index_manager.get_analysis_scope()
+            return json.dumps(data, ensure_ascii=False)
+        except Exception as exc:
+            return f"error: {exc}"
+
+
+@dataclass
 class ProjectSemanticSearchTool(FunctionTool[AstrAgentContext]):
     name: str = "astrbot_project_semantic_search"
     description: str = "Semantic search over project files using embedding vectors. Best for architecture- and intent-level retrieval."
@@ -395,6 +420,7 @@ class ProjectArchitectureSummaryTool(FunctionTool[AstrAgentContext]):
 PROJECT_INDEX_BUILD_TOOL = ProjectIndexBuildTool()
 PROJECT_SEMANTIC_INDEX_BUILD_TOOL = ProjectSemanticIndexBuildTool()
 PROJECT_SEMANTIC_INDEX_INFO_TOOL = ProjectSemanticIndexInfoTool()
+PROJECT_SCOPE_INFO_TOOL = ProjectScopeInfoTool()
 PROJECT_SEMANTIC_SEARCH_TOOL = ProjectSemanticSearchTool()
 PROJECT_SYMBOL_SEARCH_TOOL = ProjectSymbolSearchTool()
 PROJECT_DEP_TRACE_TOOL = ProjectDependencyTraceTool()
@@ -404,6 +430,7 @@ __all__ = [
     "PROJECT_INDEX_BUILD_TOOL",
     "PROJECT_SEMANTIC_INDEX_BUILD_TOOL",
     "PROJECT_SEMANTIC_INDEX_INFO_TOOL",
+    "PROJECT_SCOPE_INFO_TOOL",
     "PROJECT_SEMANTIC_SEARCH_TOOL",
     "PROJECT_SYMBOL_SEARCH_TOOL",
     "PROJECT_DEP_TRACE_TOOL",
@@ -411,6 +438,7 @@ __all__ = [
     "ProjectIndexBuildTool",
     "ProjectSemanticIndexBuildTool",
     "ProjectSemanticIndexInfoTool",
+    "ProjectScopeInfoTool",
     "ProjectSemanticSearchTool",
     "ProjectSymbolSearchTool",
     "ProjectDependencyTraceTool",

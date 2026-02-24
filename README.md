@@ -10,6 +10,10 @@
 
 1. 🧠 长期记忆（LTM）系统：新增 `MemoryEvent/MemoryItem/Evidence` 数据模型、读写策略、维护策略，以及 Dashboard 管理 API 与可视化页面。
 2. 🗂️ 项目上下文（Project Context）索引：支持源码符号检索、依赖追踪、架构摘要，以及语义索引构建与检索能力。
+   - 结构化解析：`Python(.py/.pyi)`、`JS/TS/Vue(.js/.jsx/.ts/.tsx/.vue)`、`Markdown/RST(.md/.rst)`。
+   - 依赖追踪：支持 Python 本地导入与 JS/TS/Vue 本地导入（含相对路径、`@/`、`~/`、`/` 根路径写法）。
+   - 路径范围：扫描根目录由索引构建参数决定，默认排除 `.git`、`node_modules`、`dist`、`build`、`venv` 等目录。
+   - 范围查询：Dashboard 新增 `GET /api/project_context/scope`，可查看当前支持后缀、排除规则与已索引路径样本。
 3. 🛠️ 工程运维（Engineering Ops）中心：集成后台任务观测、工具演进策略预览/应用、编码韧性（resilience）指标与事件快照。
 4. 🔁 运行时韧性增强：增加工具循环重试、LLM 失败恢复、流式降级与上下文超限防护策略。
 5. 🧩 工作流编辑与部署：新增 Workflow 路由与前端页面，支持工作流保存、测试、多模态输入，以及部署为可用 Provider。

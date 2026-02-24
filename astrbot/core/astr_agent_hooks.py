@@ -67,12 +67,20 @@ class MainAgentHooks(BaseAgentRunHooks[AstrAgentContext]):
                 if hasattr(event, "message_str") and isinstance(event.message_str, str)
                 else None
             )
+            embedding_provider = None
+            embedding_provider_id = str(ltm_cfg.get("embedding_provider_id", "") or "").strip()
+            plugin_context = run_context.context.context
+            if embedding_provider_id and hasattr(plugin_context, "get_provider_by_id"):
+                provider = plugin_context.get_provider_by_id(embedding_provider_id)
+                if provider is not None and hasattr(provider, "get_embedding"):
+                    embedding_provider = provider
             memory_context = await ltm.retrieve_memory_context(
                 scope=scope,
                 scope_id=scope_id,
                 read_policy=read_policy,
                 query_text=query_text,
                 additional_scopes=additional_scopes,
+                embedding_provider=embedding_provider,
             )
 
             if memory_context and run_context.messages:
@@ -237,19 +245,45 @@ class MainAgentHooks(BaseAgentRunHooks[AstrAgentContext]):
             scope, scope_id = resolve_ltm_scope(event, ltm_cfg=ltm_cfg)
 
             # Extract text result from tool_result
-            result_text = None
+            result_text_parts: list[str] = []
+            non_text_parts: list[Any] = []
             if tool_result and tool_result.content:
                 for part in tool_result.content:
                     if isinstance(part, TextContent):
-                        result_text = part.text[:500]
+                        text = str(part.text or "").strip()
+                        if text:
+                            result_text_parts.append(text[:500])
+                    elif hasattr(part, "model_dump"):
+                        non_text_parts.append(part.model_dump())
+                    else:
+                        non_text_parts.append(str(part)[:300])
+
+            result_payload: Any | None = None
+            if result_text_parts:
+                result_payload = "\n".join(result_text_parts)[:1200]
+            elif non_text_parts:
+                result_payload = {"parts": non_text_parts[:8]}
+
+            tool_error = None
+            if tool_result is not None:
+                for attr in ("error", "message", "last_error"):
+                    value = getattr(tool_result, attr, None)
+                    if isinstance(value, str) and value.strip():
+                        tool_error = value[:300]
                         break
+                if tool_error is None and (
+                    bool(getattr(tool_result, "isError", False))
+                    or bool(getattr(tool_result, "is_error", False))
+                ):
+                    tool_error = "tool call returned an error flag"
 
             await ltm.record_tool_event(
                 scope=scope,
                 scope_id=scope_id,
                 tool_name=tool.name,
                 tool_args=tool_args,
-                tool_result=result_text,
+                tool_result=result_payload,
+                tool_error=tool_error,
                 platform_id=event.get_platform_id() if hasattr(event, "get_platform_id") else None,
                 session_id=event.session_id if hasattr(event, "session_id") else None,
             )

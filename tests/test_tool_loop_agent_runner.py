@@ -105,6 +105,50 @@ class MockErrProvider(MockProvider):
         )
 
 
+class MockPostRecallProvider(MockProvider):
+    async def text_chat(self, **kwargs) -> LLMResponse:
+        self.call_count += 1
+        prompt = str(kwargs.get("prompt") or "")
+        if "<draft_answer>" in prompt:
+            return LLMResponse(
+                role="assistant",
+                completion_text="根据记忆，你的生日是1990年1月1日。",
+                usage=TokenUsage(input_other=8, output=6),
+            )
+        return LLMResponse(
+            role="assistant",
+            completion_text="我不确定你的生日信息。",
+            usage=TokenUsage(input_other=10, output=5),
+        )
+
+
+class MockCertainAnswerProvider(MockProvider):
+    async def text_chat(self, **kwargs) -> LLMResponse:
+        self.call_count += 1
+        return LLMResponse(
+            role="assistant",
+            completion_text="你的偏好是中文回答。",
+            usage=TokenUsage(input_other=10, output=5),
+        )
+
+
+class MockNeedMoreInfoProvider(MockProvider):
+    async def text_chat(self, **kwargs) -> LLMResponse:
+        self.call_count += 1
+        prompt = str(kwargs.get("prompt") or "")
+        if "<draft_answer>" in prompt:
+            return LLMResponse(
+                role="assistant",
+                completion_text="根据记忆，你的生日是1990年1月1日。",
+                usage=TokenUsage(input_other=8, output=6),
+            )
+        return LLMResponse(
+            role="assistant",
+            completion_text="请提供更多相关信息。",
+            usage=TokenUsage(input_other=10, output=4),
+        )
+
+
 class MockHooks(BaseAgentRunHooks):
     """模拟钩子函数"""
 
@@ -125,6 +169,43 @@ class MockHooks(BaseAgentRunHooks):
 
     async def on_agent_done(self, run_context, llm_response):
         self.agent_done_called = True
+
+
+class _FakeEvent:
+    def __init__(self, message_str: str = "我生日是什么时候？"):
+        self.unified_msg_origin = "qq:FriendMessage:post_recall_001"
+        self.message_str = message_str
+
+
+class _FakePluginContext:
+    def __init__(self, ltm_cfg: dict):
+        self._ltm_cfg = ltm_cfg
+
+    def get_config(self, umo=None):
+        return {
+            "provider_ltm_settings": {
+                "long_term_memory": self._ltm_cfg,
+            }
+        }
+
+    def get_provider_by_id(self, provider_id: str):
+        return None
+
+
+class _FakeAstrContext:
+    def __init__(self, ltm_cfg: dict, message_str: str = "我生日是什么时候？"):
+        self.context = _FakePluginContext(ltm_cfg)
+        self.event = _FakeEvent(message_str=message_str)
+
+
+class _FakeLTMManager:
+    def __init__(self, memory_context: str):
+        self.memory_context = memory_context
+        self.call_count = 0
+
+    async def retrieve_memory_context(self, **kwargs):
+        self.call_count += 1
+        return self.memory_context
 
 
 @pytest.fixture
@@ -392,6 +473,211 @@ async def test_fallback_provider_used_when_primary_returns_err(
     assert final_resp.completion_text == "这是我的最终回答"
     assert primary_provider.call_count == 1
     assert fallback_provider.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_post_think_recall_refines_uncertain_answer(
+    runner, mock_tool_executor, mock_hooks, monkeypatch
+):
+    provider = MockPostRecallProvider()
+    request = ProviderRequest(prompt="我生日是什么时候？", func_tool=None, contexts=[])
+    ltm_cfg = {
+        "enable": True,
+        "read_policy": {
+            "enable": True,
+            "post_think_recall_enable": True,
+            "post_think_recall_only_on_uncertain": True,
+            "post_think_recall_max_items": 6,
+            "post_think_recall_max_tokens": 300,
+        },
+    }
+    fake_ltm = _FakeLTMManager(
+        "[Long-term Memory]\n- [profile] 用户生日是1990年1月1日 (confidence: 0.95)\n[End Memory]"
+    )
+
+    import astrbot.core.long_term_memory.manager as ltm_manager_module
+
+    monkeypatch.setattr(ltm_manager_module, "get_ltm_manager", lambda: fake_ltm)
+
+    await runner.reset(
+        provider=provider,
+        request=request,
+        run_context=ContextWrapper(context=_FakeAstrContext(ltm_cfg)),
+        tool_executor=mock_tool_executor,
+        agent_hooks=mock_hooks,
+        streaming=False,
+    )
+
+    async for _ in runner.step_until_done(2):
+        pass
+
+    final_resp = runner.get_final_llm_resp()
+    assert final_resp is not None
+    assert "1990年1月1日" in (final_resp.completion_text or "")
+    assert provider.call_count == 2
+    assert fake_ltm.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_post_think_recall_skips_when_answer_is_certain(
+    runner, mock_tool_executor, mock_hooks, monkeypatch
+):
+    provider = MockCertainAnswerProvider()
+    request = ProviderRequest(prompt="你记得我的偏好吗？", func_tool=None, contexts=[])
+    ltm_cfg = {
+        "enable": True,
+        "read_policy": {
+            "enable": True,
+            "post_think_recall_enable": True,
+            "post_think_recall_only_on_uncertain": True,
+        },
+    }
+    fake_ltm = _FakeLTMManager(
+        "[Long-term Memory]\n- [preference] 用户偏好中文回答 (confidence: 0.95)\n[End Memory]"
+    )
+
+    import astrbot.core.long_term_memory.manager as ltm_manager_module
+
+    monkeypatch.setattr(ltm_manager_module, "get_ltm_manager", lambda: fake_ltm)
+
+    await runner.reset(
+        provider=provider,
+        request=request,
+        run_context=ContextWrapper(context=_FakeAstrContext(ltm_cfg)),
+        tool_executor=mock_tool_executor,
+        agent_hooks=mock_hooks,
+        streaming=False,
+    )
+
+    async for _ in runner.step_until_done(2):
+        pass
+
+    final_resp = runner.get_final_llm_resp()
+    assert final_resp is not None
+    assert "中文回答" in (final_resp.completion_text or "")
+    assert provider.call_count == 1
+    assert fake_ltm.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_post_think_recall_disabled_for_streaming_mode(
+    runner, mock_tool_executor, mock_hooks, monkeypatch
+):
+    provider = MockPostRecallProvider()
+    request = ProviderRequest(prompt="我生日是什么时候？", func_tool=None, contexts=[])
+    ltm_cfg = {
+        "enable": True,
+        "read_policy": {
+            "enable": True,
+            "post_think_recall_enable": True,
+        },
+    }
+    fake_ltm = _FakeLTMManager(
+        "[Long-term Memory]\n- [profile] 用户生日是1990年1月1日 (confidence: 0.95)\n[End Memory]"
+    )
+
+    import astrbot.core.long_term_memory.manager as ltm_manager_module
+
+    monkeypatch.setattr(ltm_manager_module, "get_ltm_manager", lambda: fake_ltm)
+
+    await runner.reset(
+        provider=provider,
+        request=request,
+        run_context=ContextWrapper(context=_FakeAstrContext(ltm_cfg)),
+        tool_executor=mock_tool_executor,
+        agent_hooks=mock_hooks,
+        streaming=True,
+    )
+
+    async for _ in runner.step_until_done(2):
+        pass
+
+    assert provider.call_count == 1
+    assert fake_ltm.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_post_think_recall_triggers_on_memory_query_with_info_request(
+    runner, mock_tool_executor, mock_hooks, monkeypatch
+):
+    provider = MockNeedMoreInfoProvider()
+    request = ProviderRequest(prompt="我生日是什么时候？", func_tool=None, contexts=[])
+    ltm_cfg = {
+        "enable": True,
+        "read_policy": {
+            "enable": True,
+            "post_think_recall_enable": True,
+            "post_think_recall_only_on_uncertain": True,
+            "post_think_recall_uncertainty_threshold": 3,
+        },
+    }
+    fake_ltm = _FakeLTMManager(
+        "[Long-term Memory]\n- [profile] 用户生日是1990年1月1日 (confidence: 0.95)\n[End Memory]"
+    )
+
+    import astrbot.core.long_term_memory.manager as ltm_manager_module
+
+    monkeypatch.setattr(ltm_manager_module, "get_ltm_manager", lambda: fake_ltm)
+
+    await runner.reset(
+        provider=provider,
+        request=request,
+        run_context=ContextWrapper(context=_FakeAstrContext(ltm_cfg, message_str="我生日是什么时候？")),
+        tool_executor=mock_tool_executor,
+        agent_hooks=mock_hooks,
+        streaming=False,
+    )
+
+    async for _ in runner.step_until_done(2):
+        pass
+
+    final_resp = runner.get_final_llm_resp()
+    assert final_resp is not None
+    assert "1990年1月1日" in (final_resp.completion_text or "")
+    assert provider.call_count == 2
+    assert fake_ltm.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_post_think_recall_skips_info_request_for_non_memory_query(
+    runner, mock_tool_executor, mock_hooks, monkeypatch
+):
+    provider = MockNeedMoreInfoProvider()
+    request = ProviderRequest(prompt="请帮我写一段广告文案", func_tool=None, contexts=[])
+    ltm_cfg = {
+        "enable": True,
+        "read_policy": {
+            "enable": True,
+            "post_think_recall_enable": True,
+            "post_think_recall_only_on_uncertain": True,
+            "post_think_recall_uncertainty_threshold": 3,
+        },
+    }
+    fake_ltm = _FakeLTMManager(
+        "[Long-term Memory]\n- [preference] 用户偏好简洁文案 (confidence: 0.90)\n[End Memory]"
+    )
+
+    import astrbot.core.long_term_memory.manager as ltm_manager_module
+
+    monkeypatch.setattr(ltm_manager_module, "get_ltm_manager", lambda: fake_ltm)
+
+    await runner.reset(
+        provider=provider,
+        request=request,
+        run_context=ContextWrapper(context=_FakeAstrContext(ltm_cfg, message_str="请帮我写一段广告文案")),
+        tool_executor=mock_tool_executor,
+        agent_hooks=mock_hooks,
+        streaming=False,
+    )
+
+    async for _ in runner.step_until_done(2):
+        pass
+
+    final_resp = runner.get_final_llm_resp()
+    assert final_resp is not None
+    assert "请提供更多相关信息" in (final_resp.completion_text or "")
+    assert provider.call_count == 1
+    assert fake_ltm.call_count == 0
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ is mocked to return deterministic candidates.
 """
 
 import asyncio
+import sqlite3
 
 import pytest
 import pytest_asyncio
@@ -115,6 +116,109 @@ class SlowSequencedProvider:
                 ]
             )
         )
+
+
+# ---------------------------------------------------------------------------
+#  0. Schema Migration Compatibility
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_legacy_memory_relations_schema_migrates_losslessly(tmp_path):
+    """Legacy memory_relations schema should be auto-migrated without data loss."""
+    db_path = str(tmp_path / "test_ltm_legacy_rel.db")
+
+    # Simulate an old relation table without temporal/link columns.
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE memory_relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                relation_id VARCHAR(36) NOT NULL UNIQUE,
+                scope VARCHAR(32) NOT NULL,
+                scope_id VARCHAR(255) NOT NULL,
+                subject_key VARCHAR(255) NOT NULL,
+                predicate VARCHAR(64) NOT NULL,
+                object_text TEXT NOT NULL,
+                confidence FLOAT NOT NULL DEFAULT 0.5,
+                status VARCHAR(32) NOT NULL DEFAULT 'active'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO memory_relations (
+                relation_id, scope, scope_id, subject_key, predicate, object_text, confidence, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy_rel_001",
+                "user",
+                "legacy_scope_001",
+                "current_city",
+                "lives_in",
+                "北京",
+                0.91,
+                "active",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    sqlite_db = SQLiteDatabase(db_path)
+    await sqlite_db.initialize()
+    sqlite_db.inited = True
+
+    # Verify schema columns were auto-added.
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_relations)")}
+        for column in {
+            "evidence_count",
+            "created_at",
+            "updated_at",
+            "valid_at",
+            "invalid_at",
+            "superseded_by",
+            "memory_id",
+            "memory_type",
+        }:
+            assert column in cols
+
+        row = conn.execute(
+            """
+            SELECT
+                subject_key, predicate, object_text, confidence, status,
+                evidence_count, memory_id, memory_type
+            FROM memory_relations
+            WHERE relation_id = ?
+            """,
+            ("legacy_rel_001",),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "current_city"
+        assert row[1] == "lives_in"
+        assert row[2] == "北京"
+        assert float(row[3]) == pytest.approx(0.91)
+        assert row[4] == "active"
+        assert int(row[5]) == 1
+        assert row[6] is None
+        assert row[7] is None
+    finally:
+        conn.close()
+
+    # Verify ORM/DB APIs can still read legacy rows post-migration.
+    memory_db = MemoryDB(sqlite_db)
+    relations, total = await memory_db.list_relations(
+        scope="user",
+        scope_id="legacy_scope_001",
+        page=1,
+        page_size=10,
+    )
+    assert total == 1
+    assert relations[0].relation_id == "legacy_rel_001"
+    await sqlite_db.engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +378,384 @@ async def test_dedup_merge(ltm: LTMManager):
     )
     assert total == 1, f"Expected 1 item after merge, got {total}"
     assert items[0].evidence_count == 2
+
+
+@pytest.mark.asyncio
+async def test_min_evidence_count_delays_activation_until_threshold(ltm: LTMManager):
+    """min_evidence_count should gate activation until enough evidence accumulates."""
+    import json
+
+    scope_id = "test_min_evidence_001"
+    wp = MemoryWritePolicy(
+        enable=True,
+        mode="auto",
+        min_confidence=0.3,
+        min_evidence_count=2,
+    )
+    fake = FakeProvider(json.dumps([{
+        "type": "preference",
+        "fact": "用户偏好简洁回答",
+        "fact_key": "prefer_concise_reply",
+        "confidence": 0.9,
+        "importance": 0.7,
+    }]))
+
+    # First extraction: item is stored as shadow because evidence_count=1 < 2.
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="请回答简洁一点",
+    )
+    c1 = await ltm.run_extraction_cycle(provider=fake, write_policy=wp)
+    assert c1 == 1
+    items1, _ = await ltm.memory_db.list_items(scope="user", scope_id=scope_id)
+    assert len(items1) == 1
+    assert items1[0].status == "shadow"
+    assert items1[0].evidence_count == 1
+
+    # Second extraction: same fact gets enough evidence and is promoted to active.
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="继续保持简洁风格",
+    )
+    ltm._writer.reset_session_counts()
+    c2 = await ltm.run_extraction_cycle(provider=fake, write_policy=wp)
+    assert c2 == 1
+    items2, _ = await ltm.memory_db.list_items(scope="user", scope_id=scope_id)
+    assert len(items2) == 1
+    assert items2[0].evidence_count >= 2
+    assert items2[0].status == "active"
+
+
+@pytest.mark.asyncio
+async def test_temporal_supersede_conflicting_subject_key(ltm: LTMManager):
+    """A newer fact with same subject_key should supersede the older active one."""
+    import json
+
+    scope_id = "test_temporal_supersede_001"
+    wp = MemoryWritePolicy(
+        enable=True,
+        mode="auto",
+        min_confidence=0.3,
+        temporal_conflict_types=["profile"],
+    )
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="我现在住在北京",
+    )
+    fake_1 = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户当前住在北京",
+        "subject_key": "current_city",
+        "fact_key": "current_city_beijing",
+        "confidence": 0.9,
+        "importance": 0.8,
+    }]))
+    c1 = await ltm.run_extraction_cycle(provider=fake_1, write_policy=wp)
+    assert c1 == 1
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="我搬到上海了",
+    )
+    ltm._writer.reset_session_counts()
+    fake_2 = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户当前住在上海",
+        "subject_key": "current_city",
+        "fact_key": "current_city_shanghai",
+        "confidence": 0.92,
+        "importance": 0.82,
+    }]))
+    c2 = await ltm.run_extraction_cycle(provider=fake_2, write_policy=wp)
+    assert c2 == 1
+
+    items, total = await ltm.memory_db.list_items(scope="user", scope_id=scope_id)
+    assert total == 2
+
+    active_items = [it for it in items if it.status == "active"]
+    superseded_items = [it for it in items if it.status == "superseded"]
+    assert len(active_items) == 1
+    assert len(superseded_items) == 1
+    assert "上海" in active_items[0].fact
+    assert superseded_items[0].invalid_at is not None
+    assert superseded_items[0].superseded_by == active_items[0].memory_id
+
+    ctx = await ltm.retrieve_memory_context(
+        scope="user",
+        scope_id=scope_id,
+        read_policy=MemoryReadPolicy(enable=True, max_items=10, max_tokens=500),
+    )
+    assert "上海" in ctx
+    assert "北京" not in ctx
+
+
+@pytest.mark.asyncio
+async def test_as_of_retrieval_can_see_superseded_history(ltm: LTMManager):
+    """as_of retrieval should support historical views before supersession."""
+    import json
+    from datetime import timedelta
+
+    scope_id = "test_as_of_history_001"
+    wp = MemoryWritePolicy(
+        enable=True,
+        mode="auto",
+        min_confidence=0.3,
+        temporal_conflict_types=["profile"],
+    )
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="我住在北京",
+    )
+    fake_1 = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户当前住在北京",
+        "subject_key": "current_city",
+        "fact_key": "current_city_beijing",
+        "confidence": 0.9,
+        "importance": 0.8,
+    }]))
+    await ltm.run_extraction_cycle(provider=fake_1, write_policy=wp)
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="现在我住在上海",
+    )
+    ltm._writer.reset_session_counts()
+    fake_2 = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户当前住在上海",
+        "subject_key": "current_city",
+        "fact_key": "current_city_shanghai",
+        "confidence": 0.92,
+        "importance": 0.82,
+    }]))
+    await ltm.run_extraction_cycle(provider=fake_2, write_policy=wp)
+
+    items, _ = await ltm.memory_db.list_items(scope="user", scope_id=scope_id)
+    superseded = [it for it in items if it.status == "superseded"][0]
+    assert superseded.invalid_at is not None
+    if superseded.valid_at and superseded.valid_at < superseded.invalid_at:
+        historical_time = superseded.valid_at + (
+            superseded.invalid_at - superseded.valid_at
+        ) / 2
+    else:
+        historical_time = superseded.invalid_at - timedelta(milliseconds=1)
+
+    historical_ctx = await ltm.retrieve_memory_context(
+        scope="user",
+        scope_id=scope_id,
+        read_policy=MemoryReadPolicy(enable=True, max_items=10, max_tokens=500),
+        as_of=historical_time,
+    )
+    assert "北京" in historical_ctx
+    assert "上海" not in historical_ctx
+
+
+@pytest.mark.asyncio
+async def test_relation_layer_supersedes_conflicting_relations(ltm: LTMManager):
+    """Relation rows should supersede old object when same subject/predicate changes."""
+    import json
+    from datetime import timedelta
+
+    scope_id = "test_relation_supersede_001"
+    wp = MemoryWritePolicy(
+        enable=True,
+        mode="auto",
+        min_confidence=0.3,
+        temporal_conflict_types=["profile"],
+    )
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="我住在北京",
+    )
+    fake_1 = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户当前住在北京",
+        "subject_key": "current_city",
+        "relation_predicate": "lives_in",
+        "relation_object": "北京",
+        "fact_key": "current_city_beijing",
+        "confidence": 0.9,
+        "importance": 0.8,
+    }]))
+    await ltm.run_extraction_cycle(provider=fake_1, write_policy=wp)
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="现在住在上海",
+    )
+    ltm._writer.reset_session_counts()
+    fake_2 = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户当前住在上海",
+        "subject_key": "current_city",
+        "relation_predicate": "lives_in",
+        "relation_object": "上海",
+        "fact_key": "current_city_shanghai",
+        "confidence": 0.92,
+        "importance": 0.82,
+    }]))
+    await ltm.run_extraction_cycle(provider=fake_2, write_policy=wp)
+
+    active_relations = await ltm.memory_db.get_active_relations_for_scope(
+        scope="user",
+        scope_id=scope_id,
+        limit=20,
+    )
+    assert any(
+        rel.predicate == "lives_in" and "上海" in rel.object_text
+        for rel in active_relations
+    )
+    assert not any(
+        rel.predicate == "lives_in" and "北京" in rel.object_text
+        for rel in active_relations
+    )
+
+    superseded_relations, total_superseded = await ltm.memory_db.list_relations(
+        scope="user",
+        scope_id=scope_id,
+        status="superseded",
+        page=1,
+        page_size=20,
+    )
+    assert total_superseded >= 1
+    old_relation = superseded_relations[0]
+    assert old_relation.invalid_at is not None
+    if old_relation.valid_at and old_relation.valid_at < old_relation.invalid_at:
+        historical_time = old_relation.valid_at + (
+            old_relation.invalid_at - old_relation.valid_at
+        ) / 2
+    else:
+        historical_time = old_relation.invalid_at - timedelta(milliseconds=1)
+
+    historical_relations = await ltm.memory_db.get_active_relations_for_scope(
+        scope="user",
+        scope_id=scope_id,
+        limit=20,
+        as_of=historical_time,
+    )
+    assert any(
+        rel.predicate == "lives_in" and "北京" in rel.object_text
+        for rel in historical_relations
+    )
+
+
+@pytest.mark.asyncio
+async def test_relation_first_strategy_injects_relation_lines(ltm: LTMManager):
+    """When enabled, relation_first strategy should inject relation lines in context."""
+    import json
+
+    scope_id = "test_relation_strategy_001"
+    wp = MemoryWritePolicy(enable=True, mode="auto", min_confidence=0.3)
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="我喜欢用 TypeScript",
+    )
+    fake = FakeProvider(json.dumps([{
+        "type": "preference",
+        "fact": "用户偏好 TypeScript",
+        "subject_key": "coding_language_preference",
+        "relation_predicate": "prefers_language",
+        "relation_object": "TypeScript",
+        "fact_key": "prefer_typescript",
+        "confidence": 0.93,
+        "importance": 0.75,
+    }]))
+    await ltm.run_extraction_cycle(provider=fake, write_policy=wp)
+
+    rp = MemoryReadPolicy(
+        enable=True,
+        max_items=10,
+        max_tokens=600,
+        strategy="relation_first",
+        include_relations=True,
+        max_relation_lines=3,
+    )
+    ctx = await ltm.retrieve_memory_context(
+        scope="user",
+        scope_id=scope_id,
+        read_policy=rp,
+        query_text="typescript",
+    )
+    assert "[relation]" in ctx
+    assert "prefers_language" in ctx
+    assert "TypeScript" in ctx
+
+
+@pytest.mark.asyncio
+async def test_retry_reprocessing_same_event_is_idempotent(ltm: LTMManager):
+    """Reprocessing the same event should not inflate evidence_count."""
+    import json
+    from sqlmodel import update as sql_update
+    from astrbot.core.long_term_memory.models import MemoryEvent
+
+    scope_id = "test_retry_idempotent_001"
+    wp = MemoryWritePolicy(enable=True, mode="auto", min_confidence=0.3)
+    fake = FakeProvider(json.dumps([{
+        "type": "profile",
+        "fact": "用户名字是小明",
+        "fact_key": "user_name",
+        "confidence": 0.9,
+        "importance": 0.8,
+    }]))
+
+    await ltm.record_conversation_event(
+        scope="user", scope_id=scope_id, role="user", text="我叫小明",
+    )
+    c1 = await ltm.run_extraction_cycle(provider=fake, write_policy=wp)
+    assert c1 == 1
+
+    items_before, _ = await ltm.memory_db.list_items(scope="user", scope_id=scope_id)
+    assert len(items_before) == 1
+    assert items_before[0].evidence_count == 1
+
+    events, _ = await ltm.memory_db.list_events(scope="user", scope_id=scope_id)
+    assert events
+    eid = events[0].event_id
+
+    # Simulate retry of the same already-processed event.
+    async with ltm._memory_db._db.get_db() as session:
+        async with session.begin():
+            await session.execute(
+                sql_update(MemoryEvent)
+                .where(MemoryEvent.event_id == eid)
+                .values(processed=False, next_retry_at=None, dead_letter=False)
+            )
+
+    ltm._writer.reset_session_counts()
+    await ltm.run_extraction_cycle(provider=fake, write_policy=wp)
+
+    items_after, _ = await ltm.memory_db.list_items(scope="user", scope_id=scope_id)
+    assert len(items_after) == 1
+    assert items_after[0].evidence_count == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_window_skips_future_retry_events(memory_db: MemoryDB):
+    """get_unprocessed_events should skip events whose next_retry_at is in the future."""
+    evt_1 = await memory_db.insert_event(
+        scope="user",
+        scope_id="retry_window_scope",
+        source_type="message",
+        source_role="user",
+        content={"text": "first"},
+    )
+    evt_2 = await memory_db.insert_event(
+        scope="user",
+        scope_id="retry_window_scope",
+        source_type="message",
+        source_role="user",
+        content={"text": "second"},
+    )
+
+    await memory_db.mark_events_retry(
+        [evt_1.event_id],
+        error="temporary failure",
+        max_attempts=5,
+        base_delay_seconds=600,
+        max_delay_seconds=600,
+    )
+
+    pending = await memory_db.get_unprocessed_events(limit=10)
+    pending_ids = {evt.event_id for evt in pending}
+
+    assert evt_2.event_id in pending_ids
+    assert evt_1.event_id not in pending_ids
 
 
 # ---------------------------------------------------------------------------

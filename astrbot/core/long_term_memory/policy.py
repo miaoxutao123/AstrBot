@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 VALID_MEMORY_TYPES = ("profile", "preference", "task_state", "constraint", "episode")
 VALID_WRITE_MODES = ("shadow", "auto", "manual")
-VALID_STATUSES = ("active", "shadow", "disabled", "expired", "consolidated")
+VALID_STATUSES = ("active", "shadow", "disabled", "expired", "consolidated", "superseded")
 
 DEFAULT_RETENTION_DAYS = {
     "profile": -1,
@@ -31,6 +31,10 @@ class MemoryWritePolicy:
     require_approval_types: list[str] = field(default_factory=list)
     eviction_enabled: bool = True
     eviction_buffer_ratio: float = 0.9
+    enable_temporal_supersede: bool = True
+    temporal_conflict_types: list[str] = field(
+        default_factory=lambda: ["profile", "preference", "task_state", "constraint"],
+    )
 
     @classmethod
     def from_dict(cls, d: dict) -> "MemoryWritePolicy":
@@ -46,6 +50,13 @@ class MemoryWritePolicy:
             require_approval_types=list(d.get("require_approval_types", [])),
             eviction_enabled=bool(d.get("eviction_enabled", True)),
             eviction_buffer_ratio=float(d.get("eviction_buffer_ratio", 0.9)),
+            enable_temporal_supersede=bool(d.get("enable_temporal_supersede", True)),
+            temporal_conflict_types=list(
+                d.get(
+                    "temporal_conflict_types",
+                    ["profile", "preference", "task_state", "constraint"],
+                )
+            ),
         )
 
 
@@ -59,6 +70,12 @@ class MemoryReadPolicy:
     recency_weight: float = 0.3
     importance_weight: float = 0.4
     similarity_weight: float = 0.3
+    strategy: str = "balanced"
+    include_relations: bool = False
+    max_relation_lines: int = 5
+    relation_use_vector: bool = True
+    vector_quantization: str = "none"
+    relation_only_mode: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "MemoryReadPolicy":
@@ -71,6 +88,12 @@ class MemoryReadPolicy:
             recency_weight=float(d.get("recency_weight", 0.3)),
             importance_weight=float(d.get("importance_weight", 0.4)),
             similarity_weight=float(d.get("similarity_weight", 0.3)),
+            strategy=str(d.get("strategy", "balanced")),
+            include_relations=bool(d.get("include_relations", False)),
+            max_relation_lines=int(d.get("max_relation_lines", 5)),
+            relation_use_vector=bool(d.get("relation_use_vector", True)),
+            vector_quantization=str(d.get("vector_quantization", "none")),
+            relation_only_mode=bool(d.get("relation_only_mode", False)),
         )
 
 

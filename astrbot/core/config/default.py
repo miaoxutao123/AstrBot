@@ -240,6 +240,8 @@ DEFAULT_CONFIG = {
                 "require_approval_types": [],
                 "eviction_enabled": True,
                 "eviction_buffer_ratio": 0.9,
+                "enable_temporal_supersede": True,
+                "temporal_conflict_types": ["profile", "preference", "task_state", "constraint"],
             },
             "read_policy": {
                 "enable": True,
@@ -250,6 +252,24 @@ DEFAULT_CONFIG = {
                 "recency_weight": 0.3,
                 "importance_weight": 0.4,
                 "similarity_weight": 0.3,
+                "strategy": "balanced",
+                "include_relations": False,
+                "max_relation_lines": 5,
+                "relation_use_vector": True,
+                # "none" | "int8"
+                "vector_quantization": "none",
+                "relation_only_mode": False,
+                # Optional second-pass recall after first draft answer.
+                "post_think_recall_enable": False,
+                "post_think_recall_only_on_uncertain": True,
+                "post_think_recall_uncertainty_threshold": 3,
+                "post_think_recall_max_items": 8,
+                "post_think_recall_max_tokens": 400,
+                "post_think_recall_max_query_chars": 600,
+                "post_think_recall_max_draft_chars": 1200,
+                "post_think_recall_include_relations": True,
+                # If omitted, follow relation_only_mode.
+                "post_think_recall_relation_only_mode": None,
             },
             "identity": {
                 # user_scope_strategy:

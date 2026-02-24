@@ -7,6 +7,8 @@ Provides a high-level API for the rest of AstrBot to:
 """
 
 import asyncio
+import json
+from datetime import datetime
 from typing import Any
 
 from astrbot import logger
@@ -77,17 +79,32 @@ class LTMManager:
         scope_id: str,
         tool_name: str,
         tool_args: dict | None,
-        tool_result: str | None,
+        tool_result: Any | None,
+        tool_error: str | None = None,
         platform_id: str | None = None,
         session_id: str | None = None,
     ) -> str | None:
         """Record a tool execution as a memory event."""
-        content: dict[str, Any] = {"tool_name": tool_name}
+        content: dict[str, Any] = {
+            "tool": {
+                "name": str(tool_name or "")[:120],
+            }
+        }
         if tool_args:
-            # Only record a summary of args, not full payloads
-            content["args_summary"] = str(tool_args)[:200]
-        if tool_result:
-            content["result_summary"] = str(tool_result)[:500]
+            content["args"] = self._normalize_tool_payload(tool_args, max_items=20, max_chars=200)
+        if tool_result is not None:
+            content["result"] = self._normalize_tool_payload(
+                tool_result,
+                max_items=30,
+                max_chars=500,
+            )
+        if tool_error:
+            content["error"] = str(tool_error)[:300]
+        content["text"] = self._format_tool_event_text(
+            tool_name=tool_name,
+            tool_result=tool_result,
+            tool_error=tool_error,
+        )
 
         try:
             return await self._writer.record_event(
@@ -114,6 +131,8 @@ class LTMManager:
         read_policy: MemoryReadPolicy | None = None,
         query_text: str | None = None,
         additional_scopes: list[tuple[str, str]] | None = None,
+        embedding_provider=None,
+        as_of: datetime | None = None,
     ) -> str:
         """Retrieve formatted memory context for prompt injection.
 
@@ -127,6 +146,8 @@ class LTMManager:
                 read_policy=policy,
                 query_text=query_text,
                 additional_scopes=additional_scopes,
+                embedding_provider=embedding_provider,
+                as_of=as_of,
             )
         except Exception as e:
             logger.warning("LTM retrieval failed: %s", e)
@@ -307,6 +328,65 @@ class LTMManager:
     def on_session_end(self) -> None:
         """Called when a session ends to reset per-session counters."""
         self._writer.reset_session_counts()
+
+    @staticmethod
+    def _normalize_tool_payload(
+        payload: Any,
+        *,
+        max_items: int = 20,
+        max_chars: int = 300,
+    ) -> Any:
+        if payload is None:
+            return None
+        if isinstance(payload, str):
+            return payload[:max_chars]
+        if isinstance(payload, (int, float, bool)):
+            return payload
+        if isinstance(payload, dict):
+            result: dict[str, Any] = {}
+            for idx, (k, v) in enumerate(payload.items()):
+                if idx >= max_items:
+                    break
+                result[str(k)[:80]] = LTMManager._normalize_tool_payload(
+                    v,
+                    max_items=max_items,
+                    max_chars=max_chars,
+                )
+            return result
+        if isinstance(payload, list):
+            return [
+                LTMManager._normalize_tool_payload(
+                    item,
+                    max_items=max_items,
+                    max_chars=max_chars,
+                )
+                for item in payload[:max_items]
+            ]
+        return str(payload)[:max_chars]
+
+    @staticmethod
+    def _format_tool_event_text(
+        tool_name: str,
+        tool_result: Any | None,
+        tool_error: str | None,
+    ) -> str:
+        parts = [f"[tool:{str(tool_name or '')[:80]}]"]
+        if tool_error:
+            parts.append(f"error={str(tool_error)[:200]}")
+        if tool_result is not None:
+            if isinstance(tool_result, str):
+                result_text = tool_result
+            elif isinstance(tool_result, dict) and isinstance(tool_result.get("text"), str):
+                result_text = tool_result.get("text", "")
+            else:
+                try:
+                    result_text = json.dumps(tool_result, ensure_ascii=False)
+                except Exception:
+                    result_text = str(tool_result)
+            result_text = " ".join(result_text.split())
+            if result_text:
+                parts.append(f"result={result_text[:500]}")
+        return " ".join(parts)
 
 
 # Module-level singleton — initialized lazily by the core lifecycle.

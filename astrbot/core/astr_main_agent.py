@@ -38,6 +38,7 @@ from astrbot.core.astr_main_agent_resources import (
     PROJECT_ARCH_SUMMARY_TOOL,
     PROJECT_DEP_TRACE_TOOL,
     PROJECT_INDEX_BUILD_TOOL,
+    PROJECT_SCOPE_INFO_TOOL,
     PROJECT_SEMANTIC_INDEX_BUILD_TOOL,
     PROJECT_SEMANTIC_INDEX_INFO_TOOL,
     PROJECT_SEMANTIC_SEARCH_TOOL,
@@ -292,6 +293,7 @@ def _project_context_tools(cfg: dict, req: ProviderRequest) -> None:
     req.func_tool.add_tool(PROJECT_INDEX_BUILD_TOOL)
     req.func_tool.add_tool(PROJECT_SEMANTIC_INDEX_BUILD_TOOL)
     req.func_tool.add_tool(PROJECT_SEMANTIC_INDEX_INFO_TOOL)
+    req.func_tool.add_tool(PROJECT_SCOPE_INFO_TOOL)
     req.func_tool.add_tool(PROJECT_SEMANTIC_SEARCH_TOOL)
     req.func_tool.add_tool(PROJECT_SYMBOL_SEARCH_TOOL)
     req.func_tool.add_tool(PROJECT_DEP_TRACE_TOOL)

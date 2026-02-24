@@ -27,6 +27,14 @@ class LongTermMemoryRoute(Route):
                 ("PATCH", self.update_item),
                 ("DELETE", self.delete_item),
             ],
+            "/ltm/relations": [
+                ("GET", self.list_relations),
+            ],
+            "/ltm/relations/<relation_id>": [
+                ("GET", self.get_relation),
+                ("PATCH", self.update_relation),
+                ("DELETE", self.delete_relation),
+            ],
             "/ltm/events": ("GET", self.list_events),
             "/ltm/stats": ("GET", self.get_stats),
         }
@@ -133,7 +141,14 @@ class LongTermMemoryRoute(Route):
 
             kwargs = {}
             if "status" in data:
-                if data["status"] not in ("active", "shadow", "disabled", "expired", "consolidated"):
+                if data["status"] not in (
+                    "active",
+                    "shadow",
+                    "disabled",
+                    "expired",
+                    "consolidated",
+                    "superseded",
+                ):
                     return Response().error("Invalid status").__dict__
                 kwargs["status"] = data["status"]
             if "importance" in data:
@@ -208,6 +223,131 @@ class LongTermMemoryRoute(Route):
                 "page": page,
                 "page_size": page_size,
             }).__dict__
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return Response().error(str(e)).__dict__
+
+    async def list_relations(self):
+        try:
+            memory_db = self._get_memory_db()
+            page = int(request.args.get("page", 1))
+            page_size = int(request.args.get("page_size", 20))
+            scope = request.args.get("scope")
+            scope_id = request.args.get("scope_id")
+            predicate = request.args.get("predicate")
+            status = request.args.get("status")
+
+            relations, total = await memory_db.list_relations(
+                scope=scope,
+                scope_id=scope_id,
+                predicate=predicate,
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
+
+            return Response().ok({
+                "relations": [
+                    {
+                        "relation_id": rel.relation_id,
+                        "scope": rel.scope,
+                        "scope_id": rel.scope_id,
+                        "subject_key": rel.subject_key,
+                        "predicate": rel.predicate,
+                        "object_text": rel.object_text,
+                        "confidence": rel.confidence,
+                        "evidence_count": rel.evidence_count,
+                        "status": rel.status,
+                        "valid_at": rel.valid_at.isoformat() if rel.valid_at else None,
+                        "invalid_at": rel.invalid_at.isoformat() if rel.invalid_at else None,
+                        "superseded_by": rel.superseded_by,
+                        "memory_id": rel.memory_id,
+                        "memory_type": rel.memory_type,
+                        "created_at": rel.created_at.isoformat() if rel.created_at else None,
+                        "updated_at": rel.updated_at.isoformat() if rel.updated_at else None,
+                    }
+                    for rel in relations
+                ],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }).__dict__
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return Response().error(str(e)).__dict__
+
+    async def get_relation(self, relation_id: str):
+        try:
+            memory_db = self._get_memory_db()
+            relation = await memory_db.get_relation_by_id(relation_id)
+            if not relation:
+                return Response().error("Memory relation not found").__dict__
+
+            return Response().ok({
+                "relation": {
+                    "relation_id": relation.relation_id,
+                    "scope": relation.scope,
+                    "scope_id": relation.scope_id,
+                    "subject_key": relation.subject_key,
+                    "predicate": relation.predicate,
+                    "object_text": relation.object_text,
+                    "confidence": relation.confidence,
+                    "evidence_count": relation.evidence_count,
+                    "status": relation.status,
+                    "valid_at": relation.valid_at.isoformat() if relation.valid_at else None,
+                    "invalid_at": relation.invalid_at.isoformat() if relation.invalid_at else None,
+                    "superseded_by": relation.superseded_by,
+                    "memory_id": relation.memory_id,
+                    "memory_type": relation.memory_type,
+                    "created_at": relation.created_at.isoformat() if relation.created_at else None,
+                    "updated_at": relation.updated_at.isoformat() if relation.updated_at else None,
+                }
+            }).__dict__
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return Response().error(str(e)).__dict__
+
+    async def update_relation(self, relation_id: str):
+        try:
+            memory_db = self._get_memory_db()
+            data = await request.get_json()
+
+            kwargs = {}
+            if "status" in data:
+                if data["status"] not in ("active", "superseded", "disabled"):
+                    return Response().error("Invalid relation status").__dict__
+                kwargs["status"] = data["status"]
+            if "confidence" in data:
+                kwargs["confidence"] = max(0.0, min(1.0, float(data["confidence"])))
+            if "evidence_count" in data:
+                kwargs["evidence_count"] = max(1, int(data["evidence_count"]))
+
+            if not kwargs:
+                return Response().error("No fields to update").__dict__
+
+            relation = await memory_db.update_relation(relation_id, **kwargs)
+            if not relation:
+                return Response().error("Memory relation not found").__dict__
+
+            return Response().ok({
+                "relation_id": relation.relation_id,
+                "status": relation.status,
+                "confidence": relation.confidence,
+                "evidence_count": relation.evidence_count,
+            }).__dict__
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return Response().error(str(e)).__dict__
+
+    async def delete_relation(self, relation_id: str):
+        try:
+            memory_db = self._get_memory_db()
+            relation = await memory_db.get_relation_by_id(relation_id)
+            if not relation:
+                return Response().error("Memory relation not found").__dict__
+
+            await memory_db.delete_relation(relation_id)
+            return Response().ok(message="Memory relation deleted").__dict__
         except Exception as e:
             logger.error(traceback.format_exc())
             return Response().error(str(e)).__dict__

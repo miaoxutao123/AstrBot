@@ -10,12 +10,33 @@ class _FakeMemoryDB:
     def __init__(self, events):
         self._events = list(events)
         self.marked_batches: list[list[str]] = []
+        self.retry_batches: list[dict] = []
 
     async def get_unprocessed_events(self, limit: int = 20):
         return self._events[:limit]
 
     async def mark_events_processed(self, event_ids: list[str]) -> None:
         self.marked_batches.append(list(event_ids))
+
+    async def mark_events_retry(
+        self,
+        event_ids: list[str],
+        *,
+        error: str,
+        max_attempts: int = 5,
+        base_delay_seconds: int = 30,
+        max_delay_seconds: int = 3600,
+    ) -> tuple[int, int]:
+        self.retry_batches.append(
+            {
+                "event_ids": list(event_ids),
+                "error": error,
+                "max_attempts": max_attempts,
+                "base_delay_seconds": base_delay_seconds,
+                "max_delay_seconds": max_delay_seconds,
+            }
+        )
+        return (len(event_ids), 0)
 
 
 def _event(event_id: str, scope_id: str = "scope-1"):
@@ -48,6 +69,9 @@ async def test_writer_keeps_events_pending_when_extraction_raises(monkeypatch):
 
     assert count == 0
     assert db.marked_batches == []
+    assert len(db.retry_batches) == 1
+    assert db.retry_batches[0]["event_ids"] == ["e1"]
+    assert "extract" in db.retry_batches[0]["error"]
 
 
 @pytest.mark.asyncio
@@ -74,6 +98,9 @@ async def test_writer_keeps_events_pending_when_candidate_pipeline_errors(monkey
 
     assert count == 0
     assert db.marked_batches == []
+    assert len(db.retry_batches) == 1
+    assert db.retry_batches[0]["event_ids"] == ["e1"]
+    assert "pipeline" in db.retry_batches[0]["error"]
 
 
 @pytest.mark.asyncio
@@ -96,6 +123,7 @@ async def test_writer_marks_events_processed_when_no_runtime_errors(monkeypatch)
 
     assert count == 0
     assert db.marked_batches == [["e1"]]
+    assert db.retry_batches == []
 
 
 @pytest.mark.asyncio

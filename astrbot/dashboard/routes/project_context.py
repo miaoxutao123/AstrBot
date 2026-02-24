@@ -24,6 +24,7 @@ class ProjectContextRoute(Route):
         self.routes = [
             ("/project_context/build", ("POST", self.build_index)),
             ("/project_context/info", ("GET", self.get_info)),
+            ("/project_context/scope", ("GET", self.get_scope)),
             ("/project_context/symbols", ("GET", self.search_symbols)),
             ("/project_context/dependency", ("GET", self.trace_dependency)),
             ("/project_context/summary", ("GET", self.arch_summary)),
@@ -33,6 +34,20 @@ class ProjectContextRoute(Route):
             ("/project_context/semantic/search", ("GET", self.semantic_search)),
         ]
         self.register_routes()
+
+    def _coerce_int(
+        self,
+        value: Any,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(parsed, maximum))
 
     def _resolve_embedding_provider(
         self, provider_id: str
@@ -151,8 +166,18 @@ class ProjectContextRoute(Route):
             payload = payload or {}
             result = project_index_manager.build_index(
                 root=payload.get("root"),
-                max_files=int(payload.get("max_files", 12000)),
-                max_file_bytes=int(payload.get("max_file_bytes", 1500000)),
+                max_files=self._coerce_int(
+                    payload.get("max_files", 12000),
+                    default=12000,
+                    minimum=1,
+                    maximum=200000,
+                ),
+                max_file_bytes=self._coerce_int(
+                    payload.get("max_file_bytes", 1500000),
+                    default=1500000,
+                    minimum=1024,
+                    maximum=20_000_000,
+                ),
             )
             return jsonify(Response().ok(data=result).__dict__)
         except Exception as e:  # noqa: BLE001
@@ -169,6 +194,16 @@ class ProjectContextRoute(Route):
             logger.error(traceback.format_exc())
             return jsonify(
                 Response().error(f"Failed to get index info: {e!s}").__dict__
+            )
+
+    async def get_scope(self):
+        try:
+            result = project_index_manager.get_analysis_scope()
+            return jsonify(Response().ok(data=result).__dict__)
+        except Exception as e:  # noqa: BLE001
+            logger.error(traceback.format_exc())
+            return jsonify(
+                Response().error(f"Failed to get analysis scope: {e!s}").__dict__
             )
 
     async def search_symbols(self):
@@ -307,9 +342,24 @@ class ProjectContextRoute(Route):
                 return jsonify(Response().error(err).__dict__)
 
             meta = provider.meta()
-            batch_size = int(payload.get("batch_size", 16) or 16)
-            tasks_limit = int(payload.get("tasks_limit", 2) or 2)
-            max_retries = int(payload.get("max_retries", 3) or 3)
+            batch_size = self._coerce_int(
+                payload.get("batch_size", 16),
+                default=16,
+                minimum=1,
+                maximum=64,
+            )
+            tasks_limit = self._coerce_int(
+                payload.get("tasks_limit", 2),
+                default=2,
+                minimum=1,
+                maximum=16,
+            )
+            max_retries = self._coerce_int(
+                payload.get("max_retries", 3),
+                default=3,
+                minimum=0,
+                maximum=10,
+            )
             build_kwargs = {
                 "embed_many": lambda texts: provider.get_embeddings_batch(
                     texts,
@@ -321,8 +371,18 @@ class ProjectContextRoute(Route):
                 "batch_size": batch_size,
                 "provider_id": meta.id,
                 "provider_model": meta.model or "",
-                "max_docs": int(payload.get("max_docs", 1800) or 1800),
-                "max_doc_chars": int(payload.get("max_doc_chars", 1200) or 1200),
+                "max_docs": self._coerce_int(
+                    payload.get("max_docs", 1800),
+                    default=1800,
+                    minimum=20,
+                    maximum=5000,
+                ),
+                "max_doc_chars": self._coerce_int(
+                    payload.get("max_doc_chars", 1200),
+                    default=1200,
+                    minimum=200,
+                    maximum=3000,
+                ),
                 "path_prefix": str(payload.get("path_prefix", "") or "") or None,
             }
 
@@ -332,9 +392,17 @@ class ProjectContextRoute(Route):
                 )
             except FileNotFoundError:
                 project_index_manager.build_index(
-                    max_files=int(payload.get("max_files", 12000) or 12000),
-                    max_file_bytes=int(
-                        payload.get("max_file_bytes", 1500000) or 1500000
+                    max_files=self._coerce_int(
+                        payload.get("max_files", 12000),
+                        default=12000,
+                        minimum=1,
+                        maximum=200000,
+                    ),
+                    max_file_bytes=self._coerce_int(
+                        payload.get("max_file_bytes", 1500000),
+                        default=1500000,
+                        minimum=1024,
+                        maximum=20_000_000,
                     ),
                 )
                 result = await project_index_manager.build_semantic_index(
