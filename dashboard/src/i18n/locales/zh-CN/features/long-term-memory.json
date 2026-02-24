@@ -4,6 +4,7 @@
   "tabs": {
     "items": "记忆条目",
     "events": "原始事件",
+    "graph": "记忆图谱",
     "stats": "统计概览"
   },
   "filters": {
@@ -90,6 +91,70 @@
     "byStatus": "按状态分布",
     "avgConfidence": "平均置信度",
     "avgImportance": "平均重要度"
+  },
+  "graph": {
+    "canvasTitle": "关系拓扑图",
+    "canvasHint": "点击节点或连线查看细节，支持按置信度和关系规模筛选",
+    "filters": {
+      "scope": "作用域",
+      "scopeId": "作用域 ID",
+      "status": "状态",
+      "predicate": "关系谓词",
+      "minConfidence": "最低置信度",
+      "maxRelations": "最多关系数"
+    },
+    "actions": {
+      "apply": "应用筛选",
+      "reload": "重新加载"
+    },
+    "stats": {
+      "nodes": "节点 {count}",
+      "edges": "关系 {count}",
+      "predicates": "谓词 {count}"
+    },
+    "panels": {
+      "details": "图谱详情",
+      "legend": "图例",
+      "noneSelected": "请选择一个节点或关系查看详情。"
+    },
+    "legend": {
+      "subject": "主题节点",
+      "object": "对象节点",
+      "predicates": "关系分布"
+    },
+    "fields": {
+      "subject": "主题",
+      "predicate": "谓词",
+      "object": "对象",
+      "confidence": "置信度",
+      "scope": "作用域",
+      "status": "状态",
+      "memoryType": "记忆类型",
+      "memoryId": "记忆 ID",
+      "updatedAt": "更新时间",
+      "nodeType": "节点类型",
+      "value": "节点值",
+      "connections": "连接数",
+      "avgConfidence": "平均置信度",
+      "connectedEdges": "关联关系"
+    },
+    "statuses": {
+      "superseded": "已替代"
+    },
+    "defaults": {
+      "unknownSubject": "未知主题",
+      "unknownObject": "未知对象",
+      "unknownPredicate": "未知关系"
+    },
+    "messages": {
+      "fetchError": "加载关系图失败"
+    },
+    "empty": {
+      "title": "当前筛选下暂无可视化关系",
+      "hint": "可以降低置信度或扩大筛选范围后重试",
+      "noConnections": "暂无关联关系",
+      "noPredicates": "暂无谓词数据"
+    }
   },
   "dialogs": {
     "detail": {

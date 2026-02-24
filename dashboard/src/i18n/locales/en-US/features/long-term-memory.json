@@ -4,6 +4,7 @@
   "tabs": {
     "items": "Memory Items",
     "events": "Raw Events",
+    "graph": "Memory Graph",
     "stats": "Statistics"
   },
   "filters": {
@@ -90,6 +91,70 @@
     "byStatus": "By Status",
     "avgConfidence": "Avg Confidence",
     "avgImportance": "Avg Importance"
+  },
+  "graph": {
+    "canvasTitle": "Relation Topology",
+    "canvasHint": "Click nodes or links to inspect details. Use confidence and relation caps to tune density.",
+    "filters": {
+      "scope": "Scope",
+      "scopeId": "Scope ID",
+      "status": "Status",
+      "predicate": "Predicate",
+      "minConfidence": "Min Confidence",
+      "maxRelations": "Max Relations"
+    },
+    "actions": {
+      "apply": "Apply Filters",
+      "reload": "Reload"
+    },
+    "stats": {
+      "nodes": "Nodes {count}",
+      "edges": "Edges {count}",
+      "predicates": "Predicates {count}"
+    },
+    "panels": {
+      "details": "Graph Details",
+      "legend": "Legend",
+      "noneSelected": "Select a node or edge to inspect details."
+    },
+    "legend": {
+      "subject": "Subject Node",
+      "object": "Object Node",
+      "predicates": "Predicate Distribution"
+    },
+    "fields": {
+      "subject": "Subject",
+      "predicate": "Predicate",
+      "object": "Object",
+      "confidence": "Confidence",
+      "scope": "Scope",
+      "status": "Status",
+      "memoryType": "Memory Type",
+      "memoryId": "Memory ID",
+      "updatedAt": "Updated At",
+      "nodeType": "Node Type",
+      "value": "Node Value",
+      "connections": "Connections",
+      "avgConfidence": "Avg Confidence",
+      "connectedEdges": "Connected Relations"
+    },
+    "statuses": {
+      "superseded": "Superseded"
+    },
+    "defaults": {
+      "unknownSubject": "Unknown Subject",
+      "unknownObject": "Unknown Object",
+      "unknownPredicate": "Unknown Predicate"
+    },
+    "messages": {
+      "fetchError": "Failed to load relation graph"
+    },
+    "empty": {
+      "title": "No relations available for current filters",
+      "hint": "Try lowering confidence threshold or broadening the scope",
+      "noConnections": "No connected relations",
+      "noPredicates": "No predicate data"
+    }
   },
   "dialogs": {
     "detail": {

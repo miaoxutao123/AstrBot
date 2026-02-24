@@ -38,6 +38,7 @@
                 <v-tabs v-model="activeTab" color="primary" class="px-4">
                     <v-tab value="items">{{ tm('tabs.items') }}</v-tab>
                     <v-tab value="events">{{ tm('tabs.events') }}</v-tab>
+                    <v-tab value="graph">{{ tm('tabs.graph') }}</v-tab>
                     <v-tab value="stats">{{ tm('tabs.stats') }}</v-tab>
                 </v-tabs>
 
@@ -226,6 +227,12 @@
                         </v-card-text>
                     </v-window-item>
 
+                    <v-window-item value="graph">
+                        <v-card-text class="pa-4">
+                            <MemoryGraphTab ref="memoryGraphTab" />
+                        </v-card-text>
+                    </v-window-item>
+
                     <v-window-item value="stats">
                         <v-card-text>
                             <v-row>
@@ -400,9 +407,13 @@
 import axios from 'axios';
 import { debounce } from 'lodash';
 import { useModuleI18n } from '@/i18n/composables';
+import MemoryGraphTab from '@/views/long-term-memory/MemoryGraphTab.vue';
 
 export default {
     name: 'LongTermMemoryPage',
+    components: {
+        MemoryGraphTab,
+    },
 
     setup() {
         const { tm } = useModuleI18n('features/long-term-memory');
@@ -543,9 +554,20 @@ export default {
             localStorage.setItem('ltm_guide_dismissed', '1');
         },
 
-        refreshCurrentTab() {
+        async refreshCurrentTab() {
             if (this.activeTab === 'items') this.fetchItems();
             else if (this.activeTab === 'events') this.fetchEvents();
+            else if (this.activeTab === 'graph') {
+                const graphRef = this.$refs.memoryGraphTab;
+                if (graphRef && typeof graphRef.refresh === 'function') {
+                    this.loading = true;
+                    try {
+                        await graphRef.refresh();
+                    } finally {
+                        this.loading = false;
+                    }
+                }
+            }
             else if (this.activeTab === 'stats') this.fetchStats();
         },
 
