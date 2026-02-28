@@ -6,7 +6,7 @@ import sys
 import time
 import traceback
 import typing as T
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mcp.types import (
     BlobResourceContents,
@@ -71,6 +71,20 @@ class _HandleFunctionToolsResult:
     @classmethod
     def from_cached_image(cls, image: T.Any) -> "_HandleFunctionToolsResult":
         return cls(kind="cached_image", cached_image=image)
+
+
+@dataclass(slots=True)
+class FollowUpTicket:
+    """Ticket used by pipeline follow-up coordinator."""
+
+    seq: int
+    text: str
+    resolved: asyncio.Event = field(default_factory=asyncio.Event)
+    consumed: bool = False
+
+    def resolve(self, consumed: bool = False) -> None:
+        self.consumed = consumed
+        self.resolved.set()
 
 _TRANSIENT_PROVIDER_ERROR_HINTS = (
     "timeout",
@@ -297,6 +311,24 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
 
         self.stats = AgentStats()
         self.stats.start_time = time.time()
+        self._follow_up_seq = 0
+
+    def follow_up(self, message_text: str) -> FollowUpTicket | None:
+        """Capture a follow-up message for compatibility with pipeline follow-up stage.
+
+        Current runner behavior is to let the follow-up continue as the next normal turn
+        (not in-band consumed by current run), so the ticket is resolved immediately with
+        consumed=False.
+        """
+        text = (message_text or "").strip()
+        if not text:
+            return None
+
+        seq = int(getattr(self, "_follow_up_seq", 0))
+        self._follow_up_seq = seq + 1
+        ticket = FollowUpTicket(seq=seq, text=text)
+        ticket.resolve(consumed=False)
+        return ticket
 
     def _get_tool_evolution_cfg(self) -> dict[str, T.Any]:
         astr_context = getattr(self.run_context, "context", None)
