@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,6 +54,98 @@ def _ensure_safe_path(path: str) -> str:
     if not any(abs_path.startswith(root) for root in allowed_roots):
         raise PermissionError("Path is outside the allowed computer roots.")
     return abs_path
+
+
+_ASTRBOT_TEXT_OUTPUT_RE = re.compile(
+    r"^\[ASTRBOT_TEXT_OUTPUT#[^\]]+\]:\s?(?P<text>.*)$"
+)
+_ASTRBOT_IMAGE_OUTPUT_RE = re.compile(
+    r"^\[ASTRBOT_IMAGE_OUTPUT#[^\]]+\]:\s?(?P<path>.*)$"
+)
+_ASTRBOT_FILE_OUTPUT_RE = re.compile(
+    r"^\[ASTRBOT_FILE_OUTPUT#[^\]]+\]:\s?(?P<path>.*)$"
+)
+_DATA_URL_IMAGE_RE = re.compile(
+    r"^data:(?P<mime>image/[a-zA-Z0-9.+-]+);base64,(?P<data>.+)$",
+    re.IGNORECASE,
+)
+
+
+def _decode_inline_image_data(payload: str) -> dict[str, str] | None:
+    raw = (payload or "").strip()
+    if not raw:
+        return None
+
+    mime_type = "image/png"
+    b64_data = raw
+    match = _DATA_URL_IMAGE_RE.match(raw)
+    if match:
+        mime_type = match.group("mime").lower()
+        b64_data = match.group("data")
+
+    # Compact newlines/spaces that may come from wrapped output.
+    b64_data = "".join(b64_data.split())
+    try:
+        base64.b64decode(b64_data, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    return {mime_type: b64_data}
+
+
+def _encode_image_file(path: str) -> dict[str, str] | None:
+    if not path:
+        return None
+    image_path = os.path.abspath(path)
+    if not os.path.isfile(image_path):
+        return None
+
+    mime_type, _ = mimetypes.guess_type(image_path)
+    if not mime_type or not mime_type.startswith("image/"):
+        mime_type = "image/png"
+
+    try:
+        with open(image_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+    except OSError:
+        return None
+    return {mime_type: data}
+
+
+def _extract_python_outputs(stdout: str) -> tuple[str, list[dict[str, str]]]:
+    if not stdout:
+        return "", []
+
+    images: list[dict[str, str]] = []
+    text_lines: list[str] = []
+
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("IMAGE_DATA:"):
+            image_payload = _decode_inline_image_data(stripped.split(":", 1)[1])
+            if image_payload is not None:
+                images.append(image_payload)
+                continue
+
+        image_match = _ASTRBOT_IMAGE_OUTPUT_RE.match(stripped)
+        if image_match:
+            image_payload = _encode_image_file(image_match.group("path").strip())
+            if image_payload is not None:
+                images.append(image_payload)
+                continue
+
+        text_match = _ASTRBOT_TEXT_OUTPUT_RE.match(line)
+        if text_match:
+            text_lines.append(text_match.group("text"))
+            continue
+
+        file_match = _ASTRBOT_FILE_OUTPUT_RE.match(stripped)
+        if file_match:
+            text_lines.append(f"[file] {file_match.group('path').strip()}")
+            continue
+
+        text_lines.append(line)
+
+    return "\n".join(text_lines), images
 
 
 @dataclass
@@ -119,9 +215,10 @@ class LocalPythonComponent(PythonComponent):
                 )
                 stdout = "" if silent else result.stdout
                 stderr = result.stderr if result.returncode != 0 else ""
+                parsed_text, parsed_images = _extract_python_outputs(stdout)
                 return {
                     "data": {
-                        "output": {"text": stdout, "images": []},
+                        "output": {"text": parsed_text, "images": parsed_images},
                         "error": stderr,
                     }
                 }

@@ -109,21 +109,46 @@
                             <div class="text-caption text-white text-opacity-80">{{ tm('graph.canvasHint') }}</div>
                         </div>
                         <v-spacer></v-spacer>
-                        <div class="d-flex ga-2 flex-wrap justify-end">
+                        <div class="d-flex ga-2 flex-wrap justify-end align-center">
                             <v-chip size="small" color="teal" variant="flat">{{ tm('graph.stats.nodes', { count: graphStats.nodes }) }}</v-chip>
                             <v-chip size="small" color="orange" variant="flat">{{ tm('graph.stats.edges', { count: graphStats.edges }) }}</v-chip>
                             <v-chip size="small" color="cyan-darken-2" variant="flat">
                                 {{ tm('graph.stats.predicates', { count: graphStats.predicates }) }}
                             </v-chip>
+                            <v-btn-toggle
+                                v-model="layoutMode"
+                                density="compact"
+                                variant="outlined"
+                                mandatory
+                                class="ml-1 layout-toggle"
+                            >
+                                <v-btn value="force" size="small" title="力导向布局">
+                                    <v-icon size="15">mdi-graph-outline</v-icon>
+                                </v-btn>
+                                <v-btn value="bipartite" size="small" title="二分列布局">
+                                    <v-icon size="15">mdi-view-column-outline</v-icon>
+                                </v-btn>
+                            </v-btn-toggle>
+                            <v-btn
+                                icon
+                                variant="text"
+                                size="small"
+                                :title="zoom === 1 ? '放大' : '重置缩放'"
+                                @click="resetZoom"
+                            >
+                                <v-icon size="16" color="white">{{ zoom === 1 ? 'mdi-magnify-plus-outline' : 'mdi-magnify-remove-outline' }}</v-icon>
+                            </v-btn>
                         </div>
                     </div>
 
-                    <div ref="graphViewport" class="graph-viewport">
+                    <div ref="graphViewport" class="graph-viewport" @wheel.prevent="onWheel">
                         <svg
                             class="memory-graph-svg"
                             :viewBox="`0 0 ${viewport.width} ${viewport.height}`"
                             preserveAspectRatio="xMidYMid meet"
+                            :style="svgTransformStyle"
                             @click="clearSelection"
+                            @mousedown="onSvgMouseDown"
                         >
                             <defs>
                                 <linearGradient id="ltmGraphBackground" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -200,8 +225,9 @@
                                     <text
                                         v-if="showNodeLabel(node)"
                                         class="graph-node-label"
-                                        :x="node.kind === 'subject' ? -(node.r + 8) : node.r + 8"
-                                        :text-anchor="node.kind === 'subject' ? 'end' : 'start'"
+                                        :x="nodeLabelX(node)"
+                                        :y="nodeLabelY(node)"
+                                        :text-anchor="nodeLabelAnchor(node)"
                                     >
                                         {{ node.displayLabel }}
                                     </text>
@@ -418,6 +444,101 @@ function distributePositions(nodes, x, top, bottom) {
     });
 }
 
+/**
+ * Force-directed layout simulation (pure JS, no dependencies).
+ * Mutates node.x / node.y in place.
+ * Time: O(N² * iters) – acceptable for N ≤ 500 on modern hardware.
+ */
+function runForceLayout(nodes, edges, width, height) {
+    const N = nodes.length;
+    if (N === 0) return;
+
+    const PAD = 55;
+    const w = Math.max(width, 500);
+    const h = Math.max(height, 300);
+    const cx = w / 2;
+    const cy = h / 2;
+    // Ideal edge length scales with canvas area per node
+    const IDEAL_LEN = clamp(Math.sqrt((w * h) / Math.max(N, 1)) * 0.85, 70, 220);
+    const REPULSION = IDEAL_LEN * IDEAL_LEN * 1.4;
+    const SPRING_K = 0.05;
+    const CENTER_K = 0.018;
+    const DAMPING = 0.82;
+    const ITERS = clamp(Math.floor(14000 / Math.max(N, 1) + 60), 80, 320);
+
+    // Deterministic initial positions – spiral to avoid all-at-center singularity
+    const phi = (1 + Math.sqrt(5)) / 2; // golden angle
+    for (let i = 0; i < N; i++) {
+        const node = nodes[i];
+        const t = i / Math.max(N - 1, 1);
+        const angle = i * phi * Math.PI * 2 + (hashString(node.id) % 100) * 0.01;
+        const r = IDEAL_LEN * (0.6 + t * 1.8);
+        node.x = clamp(cx + Math.cos(angle) * r, PAD, w - PAD);
+        node.y = clamp(cy + Math.sin(angle) * r, PAD, h - PAD);
+        node.vx = 0;
+        node.vy = 0;
+    }
+
+    // Index: node.id → array index
+    const idx = new Map();
+    nodes.forEach((n, i) => idx.set(n.id, i));
+
+    const fx = new Float64Array(N);
+    const fy = new Float64Array(N);
+
+    for (let iter = 0; iter < ITERS; iter++) {
+        const alpha = Math.max(0.04, 1 - iter / (ITERS * 0.85)); // cooling factor
+        fx.fill(0);
+        fy.fill(0);
+
+        // Node–node repulsion
+        for (let i = 0; i < N; i++) {
+            for (let j = i + 1; j < N; j++) {
+                const dx = nodes[i].x - nodes[j].x;
+                const dy = nodes[i].y - nodes[j].y;
+                const dist2 = dx * dx + dy * dy + 0.25;
+                const dist = Math.sqrt(dist2);
+                const force = (REPULSION / dist2) * Math.min(dist, IDEAL_LEN * 2) / Math.max(dist, 1);
+                const fx_ij = force * dx / dist;
+                const fy_ij = force * dy / dist;
+                fx[i] += fx_ij;
+                fy[i] += fy_ij;
+                fx[j] -= fx_ij;
+                fy[j] -= fy_ij;
+            }
+        }
+
+        // Edge spring forces
+        for (const edge of edges) {
+            const si = idx.get(edge.source);
+            const ti = idx.get(edge.target);
+            if (si === undefined || ti === undefined || si === ti) continue;
+            const dx = nodes[ti].x - nodes[si].x;
+            const dy = nodes[ti].y - nodes[si].y;
+            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+            const force = SPRING_K * (dist - IDEAL_LEN);
+            fx[si] += force * dx / dist;
+            fy[si] += force * dy / dist;
+            fx[ti] -= force * dx / dist;
+            fy[ti] -= force * dy / dist;
+        }
+
+        // Centering gravity
+        for (let i = 0; i < N; i++) {
+            fx[i] += CENTER_K * (cx - nodes[i].x) * alpha;
+            fy[i] += CENTER_K * (cy - nodes[i].y) * alpha;
+        }
+
+        // Integrate
+        for (let i = 0; i < N; i++) {
+            nodes[i].vx = (nodes[i].vx + fx[i] * alpha) * DAMPING;
+            nodes[i].vy = (nodes[i].vy + fy[i] * alpha) * DAMPING;
+            nodes[i].x = clamp(nodes[i].x + nodes[i].vx, PAD, w - PAD);
+            nodes[i].y = clamp(nodes[i].y + nodes[i].vy, PAD, h - PAD);
+        }
+    }
+}
+
 export default {
     name: 'MemoryGraphTab',
 
@@ -431,6 +552,11 @@ export default {
             loading: false,
             relations: [],
             predicateOptions: [],
+            layoutMode: 'force',
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            _pan: { active: false, startX: 0, startY: 0, originX: 0, originY: 0 },
             filters: {
                 scope: null,
                 scopeId: '',
@@ -566,8 +692,13 @@ export default {
             const topPadding = 58;
             const bottomPadding = height - 44;
 
-            distributePositions(subjectNodes, width * 0.28, topPadding, bottomPadding);
-            distributePositions(objectNodes, width * 0.72, topPadding, bottomPadding);
+            if (this.layoutMode === 'bipartite') {
+                distributePositions(subjectNodes, width * 0.28, topPadding, bottomPadding);
+                distributePositions(objectNodes, width * 0.72, topPadding, bottomPadding);
+            } else {
+                // Force-directed: subjects and objects mix freely
+                runForceLayout(nodes, edges, width, height);
+            }
 
             for (const node of nodes) {
                 node.r = clamp(8 + Math.sqrt(Math.max(node.degree, 1)) * 2.6, 8, 22);
@@ -600,6 +731,15 @@ export default {
                 nodes: this.graphLayout.nodes.length,
                 edges: this.graphLayout.edges.length,
                 predicates: predicateSet.size,
+            };
+        },
+
+        svgTransformStyle() {
+            // CSS transform for zoom/pan – purely visual, SVG coordinates unchanged
+            return {
+                transform: `scale(${this.zoom}) translate(${this.panX}px, ${this.panY}px)`,
+                transformOrigin: 'center center',
+                cursor: this.zoom > 1 ? 'grab' : 'default',
             };
         },
 
@@ -748,11 +888,27 @@ export default {
             const target = edge.targetNode;
             if (!source || !target) return '';
 
+            if (this.layoutMode === 'force') {
+                // Quadratic Bezier with perpendicular offset – works for any angle
+                const sx = source.x;
+                const sy = source.y;
+                const tx = target.x;
+                const ty = target.y;
+                const mx = (sx + tx) / 2;
+                const my = (sy + ty) / 2;
+                const len = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2) + 0.1;
+                const bend = edge.curvature * 0.55;
+                // Perpendicular vector (normalized), scaled by bend
+                const nx = -(ty - sy) / len * bend;
+                const ny = (tx - sx) / len * bend;
+                return `M ${sx} ${sy} Q ${mx + nx} ${my + ny} ${tx} ${ty}`;
+            }
+
+            // Bipartite: horizontal cubic Bezier
             const dx = target.x - source.x;
             const c1x = source.x + dx * 0.34;
             const c2x = source.x + dx * 0.66;
             const bend = edge.curvature;
-
             return `M ${source.x} ${source.y} C ${c1x} ${source.y + bend}, ${c2x} ${target.y - bend}, ${target.x} ${target.y}`;
         },
 
@@ -818,6 +974,65 @@ export default {
             this.message = text;
             this.messageType = type;
             this.showMessage = true;
+        },
+
+        // ── Node label positioning ────────────────────────────────────────
+        nodeLabelX(node) {
+            if (this.layoutMode !== 'force') {
+                // Bipartite: label to the side
+                return node.kind === 'subject' ? -(node.r + 8) : node.r + 8;
+            }
+            // Force: label below node, horizontally centered
+            return 0;
+        },
+
+        nodeLabelY(node) {
+            if (this.layoutMode !== 'force') {
+                return 0; // vertically centered (dominant-baseline: middle)
+            }
+            return node.r + 13;
+        },
+
+        nodeLabelAnchor(node) {
+            if (this.layoutMode !== 'force') {
+                return node.kind === 'subject' ? 'end' : 'start';
+            }
+            return 'middle';
+        },
+
+        // ── Zoom / Pan ────────────────────────────────────────────────────
+        onWheel(e) {
+            const factor = e.deltaY < 0 ? 1.12 : 0.9;
+            this.zoom = Math.min(Math.max(this.zoom * factor, 0.25), 5);
+        },
+
+        onSvgMouseDown(e) {
+            // Only plain left-click drag (not on a node/edge – those use .stop)
+            if (e.button !== 0) return;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const originX = this.panX;
+            const originY = this.panY;
+            const vp = this.$refs.graphViewport;
+            const cssW = vp ? vp.clientWidth : 1;
+            const scale = (this.viewport.width / cssW) / this.zoom;
+
+            const onMove = (me) => {
+                this.panX = originX + (me.clientX - startX) * scale;
+                this.panY = originY + (me.clientY - startY) * scale;
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        },
+
+        resetZoom() {
+            this.zoom = 1;
+            this.panX = 0;
+            this.panY = 0;
         },
 
         observeViewport() {
@@ -899,12 +1114,28 @@ export default {
 
 .graph-node-label {
     fill: rgba(241, 245, 249, 0.96);
-    font-size: 12px;
+    font-size: 11px;
     dominant-baseline: middle;
     paint-order: stroke;
-    stroke: rgba(8, 47, 73, 0.85);
+    stroke: rgba(8, 47, 73, 0.88);
     stroke-width: 3;
     stroke-linejoin: round;
+    pointer-events: none;
+    user-select: none;
+}
+
+.layout-toggle {
+    border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.layout-toggle .v-btn {
+    color: rgba(255, 255, 255, 0.7) !important;
+    min-width: 32px !important;
+}
+
+.layout-toggle .v-btn--active {
+    color: #2dd4bf !important;
+    background: rgba(45, 212, 191, 0.2) !important;
 }
 
 .graph-empty-state text {

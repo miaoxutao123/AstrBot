@@ -7,7 +7,6 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext, AstrMessageEvent
 from astrbot.core.computer.computer_client import get_booter, get_local_booter
-from astrbot.core.computer.tools.permissions import check_admin_permission
 from astrbot.core.message.message_event_result import MessageChain
 
 param_schema = {
@@ -27,6 +26,21 @@ param_schema = {
 }
 
 
+def _check_admin_permission(context: ContextWrapper[AstrAgentContext]) -> str | None:
+    cfg = context.context.context.get_config(
+        umo=context.context.event.unified_msg_origin
+    )
+    provider_settings = cfg.get("provider_settings", {})
+    require_admin = provider_settings.get("computer_use_require_admin", True)
+    if require_admin and context.context.event.role != "admin":
+        return (
+            "error: Permission denied. Python execution is only allowed for admin users. "
+            "Tell user to set admins in `AstrBot WebUI -> Config -> General Config` by adding their user ID to the admins list if they need this feature."
+            f"User's ID is: {context.context.event.get_sender_id()}. User's ID can be found by using /sid command."
+        )
+    return None
+
+
 async def handle_result(result: dict, event: AstrMessageEvent) -> ToolExecResult:
     data = result.get("data", {})
     output = data.get("output", {})
@@ -41,14 +55,43 @@ async def handle_result(result: dict, event: AstrMessageEvent) -> ToolExecResult
 
     if images:
         for img in images:
+            mime_type = "image/png"
+            base64_data = ""
+            if isinstance(img, dict):
+                for key, value in img.items():
+                    if (
+                        isinstance(key, str)
+                        and key.startswith("image/")
+                        and isinstance(value, str)
+                    ):
+                        mime_type = key
+                        base64_data = value
+                        break
+
+                if not base64_data:
+                    raw_data = img.get("data")
+                    raw_mime = img.get("mimeType")
+                    if (
+                        isinstance(raw_data, str)
+                        and isinstance(raw_mime, str)
+                        and raw_mime.startswith("image/")
+                    ):
+                        mime_type = raw_mime
+                        base64_data = raw_data
+
+            if not base64_data:
+                continue
+
             resp.content.append(
                 mcp.types.ImageContent(
-                    type="image", data=img["image/png"], mimeType="image/png"
+                    type="image",
+                    data=base64_data,
+                    mimeType=mime_type,
                 )
             )
 
             if event.get_platform_name() == "webchat":
-                await event.send(message=MessageChain().base64_image(img["image/png"]))
+                await event.send(message=MessageChain().base64_image(base64_data))
     if text:
         resp.content.append(mcp.types.TextContent(type="text", text=text))
 
@@ -67,7 +110,7 @@ class PythonTool(FunctionTool):
     async def call(
         self, context: ContextWrapper[AstrAgentContext], code: str, silent: bool = False
     ) -> ToolExecResult:
-        if permission_error := check_admin_permission(context, "Python execution"):
+        if permission_error := _check_admin_permission(context):
             return permission_error
         sb = await get_booter(
             context.context.context,
@@ -90,7 +133,7 @@ class LocalPythonTool(FunctionTool):
     async def call(
         self, context: ContextWrapper[AstrAgentContext], code: str, silent: bool = False
     ) -> ToolExecResult:
-        if permission_error := check_admin_permission(context, "Python execution"):
+        if permission_error := _check_admin_permission(context):
             return permission_error
         sb = get_local_booter()
         try:
