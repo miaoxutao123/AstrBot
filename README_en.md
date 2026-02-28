@@ -2,9 +2,9 @@
 
 <div align="center">
 
-<a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README.md">中文</a> ｜
-<a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_ja.md">日本語</a> ｜
+<a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_zh.md">简体中文</a> ｜
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_zh-TW.md">繁體中文</a> ｜
+<a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_ja.md">日本語</a> ｜
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_fr.md">Français</a> ｜
 <a href="https://github.com/AstrBotDevs/AstrBot/blob/master/README_ru.md">Русский</a>
 
@@ -37,7 +37,7 @@
 
 AstrBot is an open-source all-in-one Agent chatbot platform that integrates with mainstream instant messaging apps. It provides reliable and scalable conversational AI infrastructure for individuals, developers, and teams. Whether you're building a personal AI companion, intelligent customer service, automation assistant, or enterprise knowledge base, AstrBot enables you to quickly build production-ready AI applications within your IM platform workflows.
 
-![070d50ba43ea3c96980787127bbbe552](https://github.com/user-attachments/assets/6fe147c5-68d9-4f47-a8de-252e63fdcbd8)
+![screenshot_1 5x_postspark_2026-02-27_22-37-45](https://github.com/user-attachments/assets/f17cdb90-52d7-4773-be2e-ff64b566af6b)
 
 ## Key Features
 
@@ -45,7 +45,7 @@ AstrBot is an open-source all-in-one Agent chatbot platform that integrates with
 2. ✨ AI LLM Conversations, Multimodal, Agent, MCP, Skills, Knowledge Base, Persona Settings, Auto Context Compression.
 3. 🤖 Supports integration with Dify, Alibaba Cloud Bailian, Coze, and other agent platforms.
 4. 🌐 Multi-Platform: QQ, WeChat Work, Feishu, DingTalk, WeChat Official Accounts, Telegram, Slack, and [more](#supported-messaging-platforms).
-5. 📦 Plugin Extensions with nearly 800 plugins available for one-click installation.
+5. 📦 Plugin Extensions with 1000+ plugins available for one-click installation.
 6. 🛡️ [Agent Sandbox](https://docs.astrbot.app/use/astrbot-agent-sandbox.html) for isolated, safe execution of code, shell calls, and session-level resource reuse.
 7. 💻 WebUI Support.
 8. 🌈 Web ChatUI Support with built-in agent sandbox and web search.
@@ -58,7 +58,7 @@ AstrBot is an open-source all-in-one Agent chatbot platform that integrates with
     <th>💙 Role-playing & Emotional Companionship</th>
     <th>✨ Proactive Agent</th>
     <th>🚀 General Agentic Capabilities</th>
-    <th>🧩 900+ Community Plugins</th>
+    <th>🧩 1000+ Community Plugins</th>
   </tr>
   <tr>
     <td align="center"><p align="center"><img width="984" height="1746" alt="99b587c5d35eea09d84f33e6cf6cfd4f" src="https://github.com/user-attachments/assets/89196061-3290-458d-b51f-afa178049f84" /></p></td>
@@ -70,160 +70,108 @@ AstrBot is an open-source all-in-one Agent chatbot platform that integrates with
 
 ## Quick Start
 
-#### Docker Deployment (Recommended 🥳)
-
-We recommend deploying AstrBot using Docker or Docker Compose.
-
-Please refer to the official documentation: [Deploy AstrBot with Docker](https://astrbot.app/deploy/astrbot/docker.html#%E4%BD%BF%E7%94%A8-docker-%E9%83%A8%E7%BD%B2-astrbot).
-
-#### uv Deployment
+### One-Click Deployment
 
 ```bash
 uv tool install astrbot
 astrbot
 ```
 
-#### System Package Manager Installation
+> Requires [uv](https://docs.astral.sh/uv/) to be installed.
 
-##### Arch Linux
+### Docker Deployment
 
-```bash
-yay -S astrbot-git
-# or use paru
-paru -S astrbot-git
-```
+We recommend deploying AstrBot using Docker / Docker Compose.
 
-#### BT-Panel Deployment
+Please refer to the official documentation: [Deploy AstrBot with Docker](https://astrbot.app/deploy/astrbot/docker.html#%E4%BD%BF%E7%94%A8-docker-%E9%83%A8%E7%BD%B2-astrbot).
 
-AstrBot has partnered with BT-Panel and is now available in their marketplace.
-
-Please refer to the official documentation: [BT-Panel Deployment](https://astrbot.app/deploy/astrbot/btpanel.html).
-
-#### 1Panel Deployment
-
-AstrBot has been officially listed on the 1Panel marketplace.
-
-Please refer to the official documentation: [1Panel Deployment](https://astrbot.app/deploy/astrbot/1panel.html).
-
-#### Deploy on RainYun
+### Deploy on RainYun
 
 AstrBot has been officially listed on RainYun's cloud application platform with one-click deployment.
 
 [![Deploy on RainYun](https://rainyun-apps.cn-nb1.rains3.com/materials/deploy-on-rainyun-en.svg)](https://app.rainyun.com/apps/rca/store/5994?ref=NjU1ODg0)
 
-#### Deploy on Replit
+### Desktop Application (Tauri)
+
+Desktop repository: [AstrBot-desktop](https://github.com/AstrBotDevs/AstrBot-desktop).
+
+Supports multiple system architectures, direct package installation, and out-of-the-box usage. A convenient one-click desktop deployment option for beginners.
+
+### One-Click Launcher Deployment (AstrBot Launcher)
+
+A quick deployment and multi-instance solution with environment isolation. Visit the [AstrBot Launcher](https://github.com/Raven95676/astrbot-launcher) repository and install the package for your OS from the latest release.
+
+### Deploy on Replit
 
 Community-contributed deployment method.
 
 [![Run on Repl.it](https://repl.it/badge/github/AstrBotDevs/AstrBot)](https://repl.it/github/AstrBotDevs/AstrBot)
 
-#### Windows One-Click Installer
-
-Please refer to the official documentation: [Deploy AstrBot with Windows One-Click Installer](https://astrbot.app/deploy/astrbot/windows.html).
-
-#### CasaOS Deployment
-
-Community-contributed deployment method.
-
-Please refer to the official documentation: [CasaOS Deployment](https://astrbot.app/deploy/astrbot/casaos.html).
-
-#### Manual Deployment
-
-First, install uv:
-
-```bash
-pip install uv
-```
-
-Install AstrBot via Git Clone:
-
-```bash
-git clone https://github.com/AstrBotDevs/AstrBot && cd AstrBot
-uv run main.py
-```
-
-Or refer to the official documentation: [Deploy AstrBot from Source](https://astrbot.app/deploy/astrbot/cli.html).
-
-#### System Package Manager Installation 
-
-##### Arch Linux
+### AUR
 
 ```bash
 yay -S astrbot-git
-# or use paru
-paru -S astrbot-git
 ```
 
-#### Desktop (Tauri)
-
-Desktop packaging has moved to a standalone Tauri repository: [https://github.com/AstrBotDevs/AstrBot-desktop](https://github.com/AstrBotDevs/AstrBot-desktop).
+**More deployment methods**: [BT-Panel Deployment](https://astrbot.app/deploy/astrbot/btpanel.html) | [1Panel Deployment](https://astrbot.app/deploy/astrbot/1panel.html) | [CasaOS Deployment](https://astrbot.app/deploy/astrbot/casaos.html) | [Manual Deployment](https://astrbot.app/deploy/astrbot/cli.html)
 
 ## Supported Messaging Platforms
 
-**Officially Maintained**
+Connect AstrBot to your favorite chat platform.
 
-- QQ (Official Platform & OneBot)
-- Telegram
-- WeChat Work Application & WeChat Work Intelligent Bot
-- WeChat Customer Service & WeChat Official Accounts
-- Feishu (Lark)
-- DingTalk
-- Slack
-- Discord
-- Satori
-- Misskey
-- LINE
-- WhatsApp (Coming Soon)
-
-**Community Maintained**
-
-- [Matrix](https://github.com/stevessr/astrbot_plugin_matrix_adapter)
-- [KOOK](https://github.com/wuyan1003/astrbot_plugin_kook_adapter)
-- [VoceChat](https://github.com/HikariFroya/astrbot_plugin_vocechat)
+| Platform | Maintainer |
+|---------|---------------|
+| QQ | Official |
+| OneBot v11 protocol implementation | Official |
+| Telegram | Official |
+| Wecom & Wecom AI Bot | Official |
+| WeChat Official Accounts | Official |
+| Feishu (Lark) | Official |
+| DingTalk | Official |
+| Slack | Official |
+| Discord | Official |
+| LINE | Official |
+| Satori | Official |
+| Misskey | Official |
+| WhatsApp (Coming Soon) | Official |
+| [Matrix](https://github.com/stevessr/astrbot_plugin_matrix_adapter) | Community |
+| [KOOK](https://github.com/wuyan1003/astrbot_plugin_kook_adapter) | Community |
+| [VoceChat](https://github.com/HikariFroya/astrbot_plugin_vocechat) | Community |
 
 ## Supported Model Services
 
-**LLM Services**
-
-- OpenAI and Compatible Services
-- Anthropic
-- Google Gemini
-- Moonshot AI
-- Zhipu AI
-- DeepSeek
-- Ollama (Self-hosted)
-- LM Studio (Self-hosted)
-- [CompShare](https://www.compshare.cn/?ytag=GPU_YY-gh_astrbot&referral_code=FV7DcGowN4hB5UuXKgpE74)
-- [302.AI](https://share.302.ai/rr1M3l)
-- [TokenPony](https://www.tokenpony.cn/3YPyf)
-- [SiliconFlow](https://docs.siliconflow.cn/cn/usercases/use-siliconcloud-in-astrbot)
-- [PPIO Cloud](https://ppio.com/user/register?invited_by=AIOONE)
-- ModelScope
-- OneAPI
-
-**LLMOps Platforms**
-
-- Dify
-- Alibaba Cloud Bailian Applications
-- Coze
-
-**Speech-to-Text Services**
-
-- OpenAI Whisper
-- SenseVoice
-
-**Text-to-Speech Services**
-
-- OpenAI TTS
-- Gemini TTS
-- GPT-Sovits-Inference
-- GPT-Sovits
-- FishAudio
-- Edge TTS
-- Alibaba Cloud Bailian TTS
-- Azure TTS
-- Minimax TTS
-- Volcano Engine TTS
+| Service | Type |
+|---------|---------------|
+| OpenAI and Compatible Services | LLM Services |
+| Anthropic | LLM Services |
+| Google Gemini | LLM Services |
+| Moonshot AI | LLM Services |
+| Zhipu AI | LLM Services |
+| DeepSeek | LLM Services |
+| Ollama (Self-hosted) | LLM Services |
+| LM Studio (Self-hosted) | LLM Services |
+| [CompShare](https://www.compshare.cn/?ytag=GPU_YY-gh_astrbot&referral_code=FV7DcGowN4hB5UuXKgpE74) | LLM Services |
+| [302.AI](https://share.302.ai/rr1M3l) | LLM Services |
+| [TokenPony](https://www.tokenpony.cn/3YPyf) | LLM Services |
+| [SiliconFlow](https://docs.siliconflow.cn/cn/usercases/use-siliconcloud-in-astrbot) | LLM Services |
+| [PPIO Cloud](https://ppio.com/user/register?invited_by=AIOONE) | LLM Services |
+| ModelScope | LLM Services |
+| OneAPI | LLM Services |
+| Dify | LLMOps Platforms |
+| Alibaba Cloud Bailian Applications | LLMOps Platforms |
+| Coze | LLMOps Platforms |
+| OpenAI Whisper | Speech-to-Text Services |
+| SenseVoice | Speech-to-Text Services |
+| OpenAI TTS | Text-to-Speech Services |
+| Gemini TTS | Text-to-Speech Services |
+| GPT-Sovits-Inference | Text-to-Speech Services |
+| GPT-Sovits | Text-to-Speech Services |
+| FishAudio | Text-to-Speech Services |
+| Edge TTS | Text-to-Speech Services |
+| Alibaba Cloud Bailian TTS | Text-to-Speech Services |
+| Azure TTS | Text-to-Speech Services |
+| Minimax TTS | Text-to-Speech Services |
+| Volcano Engine TTS | Text-to-Speech Services |
 
 ## ❤️ Contributing
 
@@ -254,10 +202,6 @@ pre-commit install
 - Group 7: 743746109
 - Group 8: 1030353265
 - Developer Group: 975206796
-
-### Telegram Group
-
-<a href="https://t.me/+hAsD2Ebl5as3NmY1"><img alt="Telegram_community" src="https://img.shields.io/badge/Telegram-AstrBot-purple?style=for-the-badge&color=76bad9"></a>
 
 ### Discord Server
 

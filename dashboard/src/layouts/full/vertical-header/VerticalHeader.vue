@@ -50,11 +50,28 @@ let installLoading = ref(false);
 const isDesktopReleaseMode = ref(
   typeof window !== 'undefined' && !!window.astrbotDesktop?.isDesktop
 );
-const redirectConfirmDialog = ref(false);
-const pendingRedirectUrl = ref('');
-const resolvingReleaseTarget = ref(false);
-const desktopReleaseBaseUrl = 'https://github.com/AstrBotDevs/AstrBot-desktop/releases';
-const fallbackReleaseUrl = desktopReleaseBaseUrl;
+const desktopUpdateDialog = ref(false);
+const desktopUpdateChecking = ref(false);
+const desktopUpdateInstalling = ref(false);
+const desktopUpdateHasNewVersion = ref(false);
+const desktopUpdateCurrentVersion = ref('-');
+const desktopUpdateLatestVersion = ref('-');
+const desktopUpdateStatus = ref('');
+
+const getAppUpdaterBridge = (): AstrBotAppUpdaterBridge | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const bridge = window.astrbotAppUpdater;
+  if (
+    bridge &&
+    typeof bridge.checkForAppUpdate === 'function' &&
+    typeof bridge.installAppUpdate === 'function'
+  ) {
+    return bridge;
+  }
+  return null;
+};
 
 const getSelectedGitHubProxy = () => {
   if (typeof window === "undefined" || !window.localStorage) return "";
@@ -75,16 +92,6 @@ const releasesHeader = computed(() => [
   { title: t('core.header.updateDialog.table.sourceUrl'), key: 'zipball_url' },
   { title: t('core.header.updateDialog.table.actions'), key: 'switch' }
 ]);
-const latestReleaseTag = computed(() => {
-  const firstRelease = (releases.value as any[])?.[0];
-  if (firstRelease?.tag_name) {
-    return firstRelease.tag_name as string;
-  }
-  return hasNewVersion.value
-    ? t('core.header.updateDialog.redirectConfirm.latestLabel')
-    : (botCurrVersion.value || '-');
-});
-
 // Form validation
 const formValid = ref(true);
 const passwordRules = computed(() => [
@@ -112,50 +119,88 @@ const accountEditStatus = ref({
   message: ''
 });
 
-const open = (link: string) => {
-  window.open(link, '_blank');
-};
-
-function requestExternalRedirect(link: string) {
-  pendingRedirectUrl.value = link;
-  redirectConfirmDialog.value = true;
+function cancelDesktopUpdate() {
+  if (desktopUpdateInstalling.value) {
+    return;
+  }
+  desktopUpdateDialog.value = false;
 }
 
-function cancelExternalRedirect() {
-  redirectConfirmDialog.value = false;
-  pendingRedirectUrl.value = '';
-}
+async function openDesktopUpdateDialog() {
+  desktopUpdateDialog.value = true;
+  desktopUpdateChecking.value = true;
+  desktopUpdateInstalling.value = false;
+  desktopUpdateHasNewVersion.value = false;
+  desktopUpdateCurrentVersion.value = '-';
+  desktopUpdateLatestVersion.value = '-';
+  desktopUpdateStatus.value = t('core.header.updateDialog.desktopApp.checking');
 
-function confirmExternalRedirect() {
-  const targetUrl = pendingRedirectUrl.value;
-  cancelExternalRedirect();
-  if (targetUrl) {
-    open(targetUrl);
+  const bridge = getAppUpdaterBridge();
+  if (!bridge) {
+    desktopUpdateChecking.value = false;
+    desktopUpdateStatus.value = t('core.header.updateDialog.desktopApp.checkFailed');
+    return;
+  }
+
+  try {
+    const result = await bridge.checkForAppUpdate();
+    if (!result?.ok) {
+      desktopUpdateCurrentVersion.value = result?.currentVersion || '-';
+      desktopUpdateLatestVersion.value =
+        result?.latestVersion || result?.currentVersion || '-';
+      desktopUpdateStatus.value =
+        result?.reason || t('core.header.updateDialog.desktopApp.checkFailed');
+      return;
+    }
+
+    desktopUpdateCurrentVersion.value = result.currentVersion || '-';
+    desktopUpdateLatestVersion.value =
+      result.latestVersion || result.currentVersion || '-';
+    desktopUpdateHasNewVersion.value = !!result.hasUpdate;
+    desktopUpdateStatus.value = result.hasUpdate
+      ? t('core.header.updateDialog.desktopApp.hasNewVersion')
+      : t('core.header.updateDialog.desktopApp.isLatest');
+  } catch (error) {
+    console.error(error);
+    desktopUpdateStatus.value = t('core.header.updateDialog.desktopApp.checkFailed');
+  } finally {
+    desktopUpdateChecking.value = false;
   }
 }
 
-const getReleaseUrlForDesktop = () => {
-  const firstRelease = (releases.value as any[])?.[0];
-  if (firstRelease?.tag_name) {
-    const tag = firstRelease.tag_name as string;
-    return `${desktopReleaseBaseUrl}/tag/${tag}`;
+async function confirmDesktopUpdate() {
+  if (!desktopUpdateHasNewVersion.value || desktopUpdateInstalling.value) {
+    return;
   }
-  if (hasNewVersion.value) return fallbackReleaseUrl;
-  const tag = botCurrVersion.value?.startsWith('v') ? botCurrVersion.value : 'latest';
-  return tag === 'latest'
-    ? fallbackReleaseUrl
-    : `${desktopReleaseBaseUrl}/tag/${tag}`;
-};
+
+  const bridge = getAppUpdaterBridge();
+  if (!bridge) {
+    desktopUpdateStatus.value = t('core.header.updateDialog.desktopApp.installFailed');
+    return;
+  }
+
+  desktopUpdateInstalling.value = true;
+  desktopUpdateStatus.value = t('core.header.updateDialog.desktopApp.installing');
+
+  try {
+    const result = await bridge.installAppUpdate();
+    if (result?.ok) {
+      desktopUpdateDialog.value = false;
+      return;
+    }
+    desktopUpdateStatus.value =
+      result?.reason || t('core.header.updateDialog.desktopApp.installFailed');
+  } catch (error) {
+    console.error(error);
+    desktopUpdateStatus.value = t('core.header.updateDialog.desktopApp.installFailed');
+  } finally {
+    desktopUpdateInstalling.value = false;
+  }
+}
 
 function handleUpdateClick() {
   if (isDesktopReleaseMode.value) {
-    requestExternalRedirect('');
-    resolvingReleaseTarget.value = true;
-    checkUpdate();
-    void getReleases().finally(() => {
-      pendingRedirectUrl.value = getReleaseUrlForDesktop() || fallbackReleaseUrl;
-      resolvingReleaseTarget.value = false;
-    });
+    void openDesktopUpdateDialog();
     return;
   }
   checkUpdate();
@@ -675,40 +720,38 @@ onMounted(async () => {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="redirectConfirmDialog" max-width="460">
+    <v-dialog v-model="desktopUpdateDialog" max-width="460">
       <v-card>
         <v-card-title class="text-h3 pa-4 pl-6 pb-0">
-          {{ t('core.header.updateDialog.redirectConfirm.title') }}
+          {{ t('core.header.updateDialog.desktopApp.title') }}
         </v-card-title>
         <v-card-text>
           <div class="mb-3">
-            {{ t('core.header.updateDialog.redirectConfirm.message') }}
+            {{ t('core.header.updateDialog.desktopApp.message') }}
           </div>
           <v-alert type="info" variant="tonal" density="compact">
             <div>
-              {{ t('core.header.updateDialog.redirectConfirm.targetVersion') }}
-              <strong v-if="!resolvingReleaseTarget">{{ latestReleaseTag }}</strong>
-              <v-progress-circular v-else indeterminate size="16" width="2" class="ml-1" />
+              {{ t('core.header.updateDialog.desktopApp.currentVersion') }}
+              <strong>{{ desktopUpdateCurrentVersion }}</strong>
             </div>
-            <div class="text-caption">
-              {{ t('core.header.updateDialog.redirectConfirm.currentVersion') }}
-              {{ botCurrVersion || '-' }}
+            <div>
+              {{ t('core.header.updateDialog.desktopApp.latestVersion') }}
+              <strong v-if="!desktopUpdateChecking">{{ desktopUpdateLatestVersion }}</strong>
+              <v-progress-circular v-else indeterminate size="16" width="2" class="ml-1" />
             </div>
           </v-alert>
           <div class="text-caption mt-3">
-            <div>{{ t('core.header.updateDialog.redirectConfirm.guideTitle') }}</div>
-            <div>1. {{ t('core.header.updateDialog.redirectConfirm.guideStep1') }}</div>
-            <div>2. {{ t('core.header.updateDialog.redirectConfirm.guideStep2') }}</div>
-            <div>3. {{ t('core.header.updateDialog.redirectConfirm.guideStep3') }}</div>
+            {{ desktopUpdateStatus }}
           </div>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn color="grey" variant="text" @click="cancelExternalRedirect">
+          <v-btn color="grey" variant="text" @click="cancelDesktopUpdate" :disabled="desktopUpdateInstalling">
             {{ t('core.common.dialog.cancelButton') }}
           </v-btn>
-          <v-btn color="primary" variant="flat" @click="confirmExternalRedirect"
-            :loading="resolvingReleaseTarget" :disabled="resolvingReleaseTarget || !pendingRedirectUrl">
+          <v-btn color="primary" variant="flat" @click="confirmDesktopUpdate"
+            :loading="desktopUpdateInstalling"
+            :disabled="desktopUpdateChecking || desktopUpdateInstalling || !desktopUpdateHasNewVersion">
             {{ t('core.common.dialog.confirmButton') }}
           </v-btn>
         </v-card-actions>

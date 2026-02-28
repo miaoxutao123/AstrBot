@@ -11,13 +11,22 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .webchat_queue_mgr import webchat_queue_mgr
 
-imgs_dir = os.path.join(get_astrbot_data_path(), "webchat", "imgs")
+attachments_dir = os.path.join(get_astrbot_data_path(), "attachments")
+
+
+def _extract_conversation_id(session_id: str) -> str:
+    """Extract raw webchat conversation id from event/session id."""
+    if session_id.startswith("webchat!"):
+        parts = session_id.split("!", 2)
+        if len(parts) == 3:
+            return parts[2]
+    return session_id
 
 
 class WebChatMessageEvent(AstrMessageEvent):
     def __init__(self, message_str, message_obj, platform_meta, session_id) -> None:
         super().__init__(message_str, message_obj, platform_meta, session_id)
-        os.makedirs(imgs_dir, exist_ok=True)
+        os.makedirs(attachments_dir, exist_ok=True)
 
     @staticmethod
     async def _send(
@@ -27,7 +36,7 @@ class WebChatMessageEvent(AstrMessageEvent):
         streaming: bool = False,
     ) -> str | None:
         request_id = str(message_id)
-        conversation_id = session_id.split("!")[-1]
+        conversation_id = _extract_conversation_id(session_id)
         web_chat_back_queue = webchat_queue_mgr.get_or_create_back_queue(
             request_id,
             conversation_id,
@@ -69,7 +78,7 @@ class WebChatMessageEvent(AstrMessageEvent):
             elif isinstance(comp, Image):
                 # save image to local
                 filename = f"{str(uuid.uuid4())}.jpg"
-                path = os.path.join(imgs_dir, filename)
+                path = os.path.join(attachments_dir, filename)
                 image_base64 = await comp.convert_to_base64()
                 with open(path, "wb") as f:
                     f.write(base64.b64decode(image_base64))
@@ -85,7 +94,7 @@ class WebChatMessageEvent(AstrMessageEvent):
             elif isinstance(comp, Record):
                 # save record to local
                 filename = f"{str(uuid.uuid4())}.wav"
-                path = os.path.join(imgs_dir, filename)
+                path = os.path.join(attachments_dir, filename)
                 record_base64 = await comp.convert_to_base64()
                 with open(path, "wb") as f:
                     f.write(base64.b64decode(record_base64))
@@ -104,7 +113,7 @@ class WebChatMessageEvent(AstrMessageEvent):
                 original_name = comp.name or os.path.basename(file_path)
                 ext = os.path.splitext(original_name)[1] or ""
                 filename = f"{uuid.uuid4()!s}{ext}"
-                dest_path = os.path.join(imgs_dir, filename)
+                dest_path = os.path.join(attachments_dir, filename)
                 shutil.copy2(file_path, dest_path)
                 data = f"[FILE]{filename}"
                 await web_chat_back_queue.put(
@@ -130,7 +139,7 @@ class WebChatMessageEvent(AstrMessageEvent):
         reasoning_content = ""
         message_id = self.message_obj.message_id
         request_id = str(message_id)
-        conversation_id = self.session_id.split("!")[-1]
+        conversation_id = _extract_conversation_id(self.session_id)
         web_chat_back_queue = webchat_queue_mgr.get_or_create_back_queue(
             request_id,
             conversation_id,

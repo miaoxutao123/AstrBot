@@ -25,6 +25,26 @@ from astrbot.core.utils.io import download_image_by_url, file_to_base64
 from astrbot.core.utils.tencent_record_helper import wav_to_tencent_silk
 
 
+def _patch_qq_botpy_formdata() -> None:
+    """Patch qq-botpy for aiohttp>=3.12 compatibility.
+
+    qq-botpy 1.2.1 defines botpy.http._FormData._gen_form_data() and expects
+    aiohttp.FormData to have a private flag named _is_processed, which is no
+    longer present in newer aiohttp versions.
+    """
+
+    try:
+        from botpy.http import _FormData  # type: ignore
+
+        if not hasattr(_FormData, "_is_processed"):
+            setattr(_FormData, "_is_processed", False)
+    except Exception:
+        logger.debug("[QQOfficial] Skip botpy FormData patch.")
+
+
+_patch_qq_botpy_formdata()
+
+
 class QQOfficialMessageEvent(AstrMessageEvent):
     MARKDOWN_NOT_ALLOWED_ERROR = "不允许发送原生 markdown"
 
@@ -142,6 +162,8 @@ class QQOfficialMessageEvent(AstrMessageEvent):
                     )
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
+                    payload["content"] = plain_text or None
                 if record_file_path:  # group record msg
                     media = await self.upload_group_and_c2c_record(
                         record_file_path,
@@ -150,6 +172,8 @@ class QQOfficialMessageEvent(AstrMessageEvent):
                     )
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
+                    payload["content"] = plain_text or None
                 ret = await self._send_with_markdown_fallback(
                     send_func=lambda retry_payload: self.bot.api.post_group_message(
                         group_openid=source.group_openid,  # type: ignore
@@ -168,6 +192,8 @@ class QQOfficialMessageEvent(AstrMessageEvent):
                     )
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
+                    payload["content"] = plain_text or None
                 if record_file_path:  # c2c record
                     media = await self.upload_group_and_c2c_record(
                         record_file_path,
@@ -176,6 +202,8 @@ class QQOfficialMessageEvent(AstrMessageEvent):
                     )
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
+                    payload["content"] = plain_text or None
                 if stream:
                     ret = await self._send_with_markdown_fallback(
                         send_func=lambda retry_payload: self.post_c2c_message(
