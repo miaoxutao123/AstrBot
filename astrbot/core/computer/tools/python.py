@@ -23,42 +23,10 @@ param_schema = {
         "silent": {
             "type": "boolean",
             "description": "Whether to suppress the output of the code execution.",
-            "default": False,
         },
     },
     "required": ["code"],
 }
-
-
-async def handle_result(result: dict, event: AstrMessageEvent) -> ToolExecResult:
-    data = result.get("data", {})
-    output = data.get("output", {})
-    error = data.get("error", "")
-    images: list[dict] = output.get("images", [])
-    text: str = output.get("text", "")
-
-    resp = mcp.types.CallToolResult(content=[])
-
-    if error:
-        resp.content.append(mcp.types.TextContent(type="text", text=f"error: {error}"))
-
-    if images:
-        for img in images:
-            resp.content.append(
-                mcp.types.ImageContent(
-                    type="image", data=img["image/png"], mimeType="image/png"
-                )
-            )
-
-            if event.get_platform_name() == "webchat":
-                await event.send(message=MessageChain().base64_image(img["image/png"]))
-    if text:
-        resp.content.append(mcp.types.TextContent(type="text", text=text))
-
-    if not resp.content:
-        resp.content.append(mcp.types.TextContent(type="text", text="No output."))
-
-    return resp
 
 
 @dataclass
@@ -67,20 +35,20 @@ class PythonTool(FunctionTool):
     description: str = f"Run codes in an IPython shell. Current OS: {_OS_NAME}."
     parameters: dict = field(default_factory=lambda: param_schema)
 
-    async def call(
-        self, context: ContextWrapper[AstrAgentContext], code: str, silent: bool = False
-    ) -> ToolExecResult:
-        if permission_error := check_admin_permission(context, "Python execution"):
-            return permission_error
-        sb = await get_booter(
-            context.context.context,
-            context.context.event.unified_msg_origin,
+    async def execute(self, event: AstrMessageEvent, ctx: ContextWrapper, **kwargs) -> ToolExecResult:
+        code = kwargs.get("code")
+        silent = kwargs.get("silent", False)
+        if not code:
+            return ToolExecResult(error="No code provided.")
+
+        booter = await get_booter(ctx.get_agent_context(AstrAgentContext))
+        if not booter:
+            return ToolExecResult(error="No IPython environment available.")
+
+        result = await booter.execute_ipython(code, silent)
+        return ToolExecResult(
+            message_chain=MessageChain().text(result.strip()) if result else None
         )
-        try:
-            result = await sb.python.exec(code, silent=silent)
-            return await handle_result(result, context.context.event)
-        except Exception as e:
-            return f"Error executing code: {str(e)}"
 
 
 @dataclass
@@ -90,17 +58,23 @@ class LocalPythonTool(FunctionTool):
         f"Execute codes in a Python environment. Current OS: {_OS_NAME}. "
         "Use system-compatible commands."
     )
-
     parameters: dict = field(default_factory=lambda: param_schema)
 
-    async def call(
-        self, context: ContextWrapper[AstrAgentContext], code: str, silent: bool = False
-    ) -> ToolExecResult:
-        if permission_error := check_admin_permission(context, "Python execution"):
-            return permission_error
-        sb = get_local_booter()
-        try:
-            result = await sb.python.exec(code, silent=silent)
-            return await handle_result(result, context.context.event)
-        except Exception as e:
-            return f"Error executing code: {str(e)}"
+    async def execute(self, event: AstrMessageEvent, ctx: ContextWrapper, **kwargs) -> ToolExecResult:
+        code = kwargs.get("code")
+        silent = kwargs.get("silent", False)
+        if not code:
+            return ToolExecResult(error="No code provided.")
+
+        check_result = await check_admin_permission(event, ctx.get_agent_context(AstrAgentContext))
+        if check_result:
+            return check_result
+
+        booter = await get_local_booter(ctx.get_agent_context(AstrAgentContext))
+        if not booter:
+            return ToolExecResult(error="No Local Python environment available.")
+
+        result = await booter.execute_python(code, silent)
+        return ToolExecResult(
+            message_chain=MessageChain().text(result.strip()) if result else None
+        )
