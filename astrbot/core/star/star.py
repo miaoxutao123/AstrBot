@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class StarMetadata:
-    """
-    插件的元数据。
+    """插件的元数据。
 
     当 activated 为 False 时，star_cls 可能为 None，请不要在插件未激活时调用 star_cls 的方法。
     """
@@ -28,6 +27,8 @@ class StarMetadata:
     """插件作者"""
     desc: str | None = None
     """插件简介"""
+    short_desc: str | None = None
+    """插件短简介"""
     version: str | None = None
     """插件版本"""
     repo: str | None = None
@@ -55,6 +56,24 @@ class StarMetadata:
 
     star_handler_full_names: list[str] = field(default_factory=list)
     """注册的 Handler 的全名列表"""
+
+    display_name: str | None = None
+    """用于展示的插件名称"""
+
+    logo_path: str | None = None
+    """插件 Logo 的路径"""
+
+    support_platforms: list[str] = field(default_factory=list)
+    """插件声明支持的平台适配器 ID 列表（对应 ADAPTER_NAME_2_TYPE 的 key）"""
+
+    astrbot_version: str | None = None
+    """插件要求的 AstrBot 版本范围（PEP 440 specifier，如 >=4.13.0,<4.17.0）"""
+
+    i18n: dict[str, dict] = field(default_factory=dict)
+    """插件自带的国际化文案，按 locale 分组。"""
+
+    pages: list[dict] = field(default_factory=list)
+    """插件注册的 Pages 元数据。"""
 
     def __str__(self) -> str:
         return f"Plugin {self.name} ({self.version}) by {self.author}: {self.desc}"

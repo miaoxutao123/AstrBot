@@ -1,72 +1,561 @@
-import base64
-import json
-import os
-import inspect
-import random
 import asyncio
-import astrbot.core.message.components as Comp
+import base64
+import binascii
+import copy
+import inspect
+import json
+import random
+import re
+import uuid
+from collections.abc import AsyncGenerator
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import unquote, urlparse
 
-from openai import AsyncOpenAI, AsyncAzureOpenAI
-from openai.types.chat.chat_completion import ChatCompletion
-
-from openai._exceptions import NotFoundError, UnprocessableEntityError
+import httpx
+from openai import AsyncAzureOpenAI, AsyncOpenAI
+from openai._exceptions import NotFoundError
 from openai.lib.streaming.chat._completions import ChatCompletionStreamState
-from astrbot.core.utils.io import download_image_by_url
-from astrbot.core.message.message_event_result import MessageChain
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+from openai.types.completion_usage import CompletionUsage
+from PIL import Image as PILImage
+from PIL import UnidentifiedImageError
 
-from astrbot.api.provider import Provider
+import astrbot.core.message.components as Comp
 from astrbot import logger
-from astrbot.core.provider.func_tool_manager import ToolSet
-from typing import List, AsyncGenerator
+from astrbot.api.provider import Provider
+from astrbot.core.agent.message import (
+    AudioURLPart,
+    ContentPart,
+    ImageURLPart,
+    Message,
+    TextPart,
+)
+from astrbot.core.agent.tool import ToolSet
+from astrbot.core.exceptions import EmptyModelOutputError
+from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.provider.entities import LLMResponse, TokenUsage, ToolCallsResult
+from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+from astrbot.core.utils.io import download_file, download_image_by_url
+from astrbot.core.utils.media_utils import ensure_wav
+from astrbot.core.utils.network_utils import (
+    create_proxy_client,
+    is_connection_error,
+    log_connection_failure,
+)
+from astrbot.core.utils.string_utils import normalize_and_dedupe_strings
+
 from ..register import register_provider_adapter
-from astrbot.core.provider.entities import LLMResponse, ToolCallsResult
 
 
 @register_provider_adapter(
-    "openai_chat_completion", "OpenAI API Chat Completion 提供商适配器"
+    "openai_chat_completion",
+    "OpenAI API Chat Completion 提供商适配器",
 )
 class ProviderOpenAIOfficial(Provider):
-    def __init__(
-        self,
-        provider_config,
-        provider_settings,
-        default_persona=None,
-    ) -> None:
-        super().__init__(
-            provider_config,
-            provider_settings,
-            default_persona,
+    _ERROR_TEXT_CANDIDATE_MAX_CHARS = 4096
+    # 部分 OpenAI 兼容中转站会校验 data URL 的 MIME 类型是否和图片字节一致。
+    # 这里统一维护格式映射，确保本地文件和 `base64://` 图片引用使用相同声明。
+    _IMAGE_FORMAT_MIME_TYPES = {
+        "JPEG": "image/jpeg",
+        "PNG": "image/png",
+        "GIF": "image/gif",
+        "WEBP": "image/webp",
+        "BMP": "image/bmp",
+        "TIFF": "image/tiff",
+        "AVIF": "image/avif",
+    }
+
+    @classmethod
+    def _truncate_error_text_candidate(cls, text: str) -> str:
+        if len(text) <= cls._ERROR_TEXT_CANDIDATE_MAX_CHARS:
+            return text
+        return text[: cls._ERROR_TEXT_CANDIDATE_MAX_CHARS]
+
+    @staticmethod
+    def _safe_json_dump(value: Any) -> str | None:
+        try:
+            return json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            return None
+
+    def _get_image_moderation_error_patterns(self) -> list[str]:
+        """Return configured moderation patterns (case-insensitive substring match, not regex)."""
+        configured = self.provider_config.get("image_moderation_error_patterns", [])
+        patterns: list[str] = []
+        if isinstance(configured, str):
+            configured = [configured]
+        if isinstance(configured, list):
+            for pattern in configured:
+                if not isinstance(pattern, str):
+                    continue
+                pattern = pattern.strip()
+                if pattern:
+                    patterns.append(pattern)
+        return patterns
+
+    @staticmethod
+    def _extract_error_text_candidates(error: Exception) -> list[str]:
+        candidates: list[str] = []
+
+        def _append_candidate(candidate: Any):
+            if candidate is None:
+                return
+            text = str(candidate).strip()
+            if not text:
+                return
+            candidates.append(
+                ProviderOpenAIOfficial._truncate_error_text_candidate(text)
+            )
+
+        _append_candidate(str(error))
+
+        body = getattr(error, "body", None)
+        if isinstance(body, dict):
+            err_obj = body.get("error")
+            body_text = ProviderOpenAIOfficial._safe_json_dump(
+                {"error": err_obj} if isinstance(err_obj, dict) else body
+            )
+            _append_candidate(body_text)
+            if isinstance(err_obj, dict):
+                for field in ("message", "type", "code", "param"):
+                    value = err_obj.get(field)
+                    if value is not None:
+                        _append_candidate(value)
+        elif isinstance(body, str):
+            _append_candidate(body)
+
+        response = getattr(error, "response", None)
+        if response is not None:
+            response_text = getattr(response, "text", None)
+            if isinstance(response_text, str):
+                _append_candidate(response_text)
+
+        return normalize_and_dedupe_strings(candidates)
+
+    def _is_content_moderated_upload_error(self, error: Exception) -> bool:
+        patterns = [
+            pattern.lower() for pattern in self._get_image_moderation_error_patterns()
+        ]
+        if not patterns:
+            return False
+        candidates = [
+            candidate.lower()
+            for candidate in self._extract_error_text_candidates(error)
+        ]
+        for pattern in patterns:
+            if any(pattern in candidate for candidate in candidates):
+                return True
+        return False
+
+    @staticmethod
+    def _context_contains_image(contexts: list[dict]) -> bool:
+        for context in contexts:
+            content = context.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if isinstance(item, dict) and item.get("type") in {
+                    "image_url",
+                    "audio_url",
+                }:
+                    return True
+        return False
+
+    def _is_invalid_attachment_error(self, error: Exception) -> bool:
+        body = getattr(error, "body", None)
+        code: str | None = None
+        message: str | None = None
+        if isinstance(body, dict):
+            err_obj = body.get("error")
+            if isinstance(err_obj, dict):
+                raw_code = err_obj.get("code")
+                raw_message = err_obj.get("message")
+                code = raw_code.lower() if isinstance(raw_code, str) else None
+                message = raw_message.lower() if isinstance(raw_message, str) else None
+
+        if code == "invalid_attachment":
+            return True
+
+        text_sources: list[str] = []
+        if message:
+            text_sources.append(message)
+        if code:
+            text_sources.append(code)
+        text_sources.extend(map(str, self._extract_error_text_candidates(error)))
+
+        error_text = " ".join(text.lower() for text in text_sources if text)
+        if "invalid_attachment" in error_text:
+            return True
+        if "download attachment" in error_text and "404" in error_text:
+            return True
+        return False
+
+    @classmethod
+    def _encode_image_file_to_data_url(
+        cls,
+        image_path: str,
+        *,
+        mode: Literal["safe", "strict"],
+    ) -> str | None:
+        try:
+            image_bytes = Path(image_path).read_bytes()
+        except OSError:
+            if mode == "strict":
+                raise
+            return None
+
+        image_format = cls._detect_image_format(image_bytes)
+        if image_format is None:
+            if mode == "strict":
+                raise ValueError(f"Invalid image file: {image_path}")
+            return None
+
+        mime_type = cls._image_format_to_mime_type(image_format)
+        image_bs64 = base64.b64encode(image_bytes).decode("utf-8")
+        return f"data:{mime_type};base64,{image_bs64}"
+
+    @classmethod
+    def _detect_image_format(cls, image_bytes: bytes) -> str | None:
+        """返回 Pillow 校验后的图片格式，非法图片返回 None。"""
+        try:
+            # verify() 只校验图片容器，不完整解码像素。
+            # 这里仅需要可信的格式标签，因此这种方式足够且开销较小。
+            with PILImage.open(BytesIO(image_bytes)) as image:
+                image.verify()
+                return str(image.format or "").upper()
+        except (OSError, UnidentifiedImageError):
+            return None
+
+    @classmethod
+    def _image_format_to_mime_type(cls, image_format: str | None) -> str:
+        """将 Pillow 图片格式映射为 data URL 使用的 MIME 类型。"""
+        # 未识别格式保持历史 JPEG 兜底，兼容传入任意 `base64://` 内容的旧调用方。
+        return cls._IMAGE_FORMAT_MIME_TYPES.get(
+            str(image_format or "").upper(), "image/jpeg"
         )
+
+    @classmethod
+    def _base64_image_ref_to_data_url(cls, image_ref: str) -> str:
+        """将 `base64://` 图片引用转换为带真实 MIME 的 data URL。"""
+        raw_base64 = image_ref.removeprefix("base64://")
+        mime_type = "image/jpeg"
+        try:
+            # 平台适配器可能通过 `base64://` 传入 PNG/GIF/WebP 等图片字节，
+            # 但不会额外携带 MIME 元数据。发送 OpenAI 请求前先识别真实格式，
+            # 避免把 PNG 等图片错误声明为 JPEG。
+            image_bytes = base64.b64decode(raw_base64)
+        except (binascii.Error, ValueError):
+            # 对错误或非图片 base64 保持旧行为：继续返回 JPEG data URL，
+            # 避免让历史调用方因为格式识别失败而直接抛异常。
+            pass
+        else:
+            image_format = cls._detect_image_format(image_bytes)
+            mime_type = cls._image_format_to_mime_type(image_format)
+        return f"data:{mime_type};base64,{raw_base64}"
+
+    @staticmethod
+    def _file_uri_to_path(file_uri: str) -> str:
+        """Normalize file URIs to paths.
+
+        `file://localhost/...` and drive-letter forms are treated as local paths.
+        Other non-empty hosts are preserved as UNC-style paths.
+        """
+        parsed = urlparse(file_uri)
+        if parsed.scheme != "file":
+            return file_uri
+
+        netloc = unquote(parsed.netloc or "")
+        path = unquote(parsed.path or "")
+        if re.fullmatch(r"[A-Za-z]:", netloc):
+            return str(Path(f"{netloc}{path}"))
+        if re.match(r"^/[A-Za-z]:/", path):
+            path = path[1:]
+        if netloc and netloc != "localhost":
+            path = f"//{netloc}{path}"
+        return str(Path(path))
+
+    async def _image_ref_to_data_url(
+        self,
+        image_ref: str,
+        *,
+        mode: Literal["safe", "strict"] = "safe",
+    ) -> str | None:
+        if image_ref.startswith("base64://"):
+            return self._base64_image_ref_to_data_url(image_ref)
+
+        if image_ref.startswith("http"):
+            image_path = await download_image_by_url(image_ref)
+        elif image_ref.startswith("file://"):
+            image_path = self._file_uri_to_path(image_ref)
+        else:
+            image_path = image_ref
+
+        return self._encode_image_file_to_data_url(
+            image_path,
+            mode=mode,
+        )
+
+    async def _resolve_image_part(
+        self,
+        image_url: str,
+        *,
+        image_detail: str | None = None,
+    ) -> dict | None:
+        if image_url.startswith("data:"):
+            image_payload = {"url": image_url}
+        else:
+            image_data = await self._image_ref_to_data_url(image_url, mode="safe")
+            if not image_data:
+                logger.warning(f"图片 {image_url} 得到的结果为空，将忽略。")
+                return None
+            image_payload = {"url": image_data}
+
+        if image_detail:
+            image_payload["detail"] = image_detail
+        return {
+            "type": "image_url",
+            "image_url": image_payload,
+        }
+
+    def _extract_image_part_info(self, part: dict) -> tuple[str | None, str | None]:
+        if not isinstance(part, dict) or part.get("type") != "image_url":
+            return None, None
+
+        image_url_data = part.get("image_url")
+        if not isinstance(image_url_data, dict):
+            logger.warning("图片内容块格式无效，将保留原始内容。")
+            return None, None
+
+        url = image_url_data.get("url")
+        if not isinstance(url, str) or not url:
+            logger.warning("图片内容块缺少有效 URL，将保留原始内容。")
+            return None, None
+
+        image_detail = image_url_data.get("detail")
+        if not isinstance(image_detail, str):
+            image_detail = None
+        return url, image_detail
+
+    def _extract_audio_part_info(self, part: dict) -> str | None:
+        if not isinstance(part, dict) or part.get("type") != "audio_url":
+            return None
+
+        audio_url_data = part.get("audio_url")
+        if not isinstance(audio_url_data, dict):
+            logger.warning("音频内容块格式无效，将保留原始内容。")
+            return None
+
+        url = audio_url_data.get("url")
+        if not isinstance(url, str) or not url:
+            logger.warning("音频内容块缺少有效路径，将保留原始内容。")
+            return None
+
+        return url
+
+    async def _audio_ref_to_local_path(self, audio_ref: str) -> tuple[str, list[Path]]:
+        cleanup_paths: list[Path] = []
+        if audio_ref.startswith("http"):
+            suffix = Path(urlparse(audio_ref).path).suffix or ".wav"
+            temp_dir = Path(get_astrbot_temp_path())
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            target_path = temp_dir / f"provider_audio_{uuid.uuid4().hex}{suffix}"
+            await download_file(audio_ref, str(target_path))
+            cleanup_paths.append(target_path)
+            return str(target_path), cleanup_paths
+        if audio_ref.startswith("file://"):
+            return self._file_uri_to_path(audio_ref), cleanup_paths
+        return audio_ref, cleanup_paths
+
+    async def _resolve_audio_part(self, audio_ref: str) -> dict | None:
+        cleanup_paths: list[Path] = []
+        try:
+            audio_path, cleanup_paths = await self._audio_ref_to_local_path(audio_ref)
+            suffix = Path(audio_path).suffix.lower()
+            if suffix == ".mp3":
+                audio_format = "mp3"
+            else:
+                converted_audio_path = await ensure_wav(audio_path)
+                if converted_audio_path != audio_path:
+                    cleanup_paths.append(Path(converted_audio_path))
+                audio_path = converted_audio_path
+                audio_format = "wav"
+            audio_bytes = Path(audio_path).read_bytes()
+        except Exception as exc:
+            logger.warning("音频 %s 预处理失败，将忽略。错误: %s", audio_ref, exc)
+            return None
+        finally:
+            for cleanup_path in cleanup_paths:
+                try:
+                    cleanup_path.unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "Failed to cleanup %s: %s",
+                        cleanup_path,
+                        cleanup_exc,
+                    )
+
+        return {
+            "type": "input_audio",
+            "input_audio": {
+                "data": base64.b64encode(audio_bytes).decode("utf-8"),
+                "format": audio_format,
+            },
+        }
+
+    async def _transform_content_part(self, part: dict) -> dict:
+        if not isinstance(part, dict):
+            return part
+
+        if part.get("type") == "image_url":
+            url, image_detail = self._extract_image_part_info(part)
+            if not url:
+                return part
+
+            try:
+                resolved_part = await self._resolve_image_part(
+                    url, image_detail=image_detail
+                )
+            except Exception as exc:
+                logger.warning(
+                    "图片 %s 预处理失败，将保留原始内容。错误: %s",
+                    url,
+                    exc,
+                )
+                return part
+
+            return resolved_part or part
+
+        if part.get("type") == "audio_url":
+            audio_ref = self._extract_audio_part_info(part)
+            if not audio_ref:
+                return part
+            resolved_part = await self._resolve_audio_part(audio_ref)
+            return resolved_part or part
+
+        return part
+
+    async def _materialize_message_image_parts(self, message: dict) -> dict:
+        content = message.get("content")
+        if not isinstance(content, list):
+            return {**message}
+
+        new_content = [await self._transform_content_part(part) for part in content]
+        return {**message, "content": new_content}
+
+    async def _materialize_context_image_parts(
+        self, context_query: list[dict]
+    ) -> list[dict]:
+        return [
+            await self._materialize_message_image_parts(message)
+            for message in context_query
+        ]
+
+    async def _fallback_to_text_only_and_retry(
+        self,
+        payloads: dict,
+        context_query: list,
+        chosen_key: str,
+        available_api_keys: list[str],
+        func_tool: ToolSet | None,
+        reason: str,
+        *,
+        image_fallback_used: bool = False,
+    ) -> tuple:
+        logger.warning(
+            "检测到图片请求失败（%s），已移除图片并重试（保留文本内容）。",
+            reason,
+        )
+        new_contexts = await self._remove_image_from_context(context_query)
+        payloads["messages"] = new_contexts
+        return (
+            False,
+            chosen_key,
+            available_api_keys,
+            payloads,
+            new_contexts,
+            func_tool,
+            image_fallback_used,
+        )
+
+    def _create_http_client(self, provider_config: dict) -> httpx.AsyncClient:
+        """创建带代理的 HTTP 客户端"""
+        proxy = provider_config.get("proxy", "")
+        httpx_module: Any = httpx
+        try:
+            from openai import _base_client as openai_base_client
+
+            httpx_module = getattr(openai_base_client, "httpx", httpx)
+        except ImportError:
+            pass
+        return create_proxy_client("OpenAI", proxy, httpx_module=httpx_module)
+
+    def __init__(self, provider_config, provider_settings) -> None:
+        super().__init__(provider_config, provider_settings)
         self.chosen_api_key = None
-        self.api_keys: List = super().get_keys()
+        self.api_keys: list = super().get_keys()
         self.chosen_api_key = self.api_keys[0] if len(self.api_keys) > 0 else None
         self.timeout = provider_config.get("timeout", 120)
+        self.custom_headers = provider_config.get("custom_headers", {})
         if isinstance(self.timeout, str):
             self.timeout = int(self.timeout)
-        # 适配 azure openai #332
+
+        if not isinstance(self.custom_headers, dict) or not self.custom_headers:
+            self.custom_headers = None
+        else:
+            for key in self.custom_headers:
+                self.custom_headers[key] = str(self.custom_headers[key])
+
         if "api_version" in provider_config:
-            # 使用 azure api
+            # Using Azure OpenAI API
             self.client = AsyncAzureOpenAI(
                 api_key=self.chosen_api_key,
                 api_version=provider_config.get("api_version", None),
+                default_headers=self.custom_headers,
                 base_url=provider_config.get("api_base", ""),
                 timeout=self.timeout,
+                http_client=self._create_http_client(provider_config),
             )
         else:
-            # 使用 openai api
+            # Using OpenAI Official API
             self.client = AsyncOpenAI(
                 api_key=self.chosen_api_key,
                 base_url=provider_config.get("api_base", None),
+                default_headers=self.custom_headers,
                 timeout=self.timeout,
+                http_client=self._create_http_client(provider_config),
             )
 
         self.default_params = inspect.signature(
-            self.client.chat.completions.create
+            self.client.chat.completions.create,
         ).parameters.keys()
 
-        model_config = provider_config.get("model_config", {})
-        model = model_config.get("model", "unknown")
+        model = provider_config.get("model", "unknown")
         self.set_model(model)
+
+        self.reasoning_key = "reasoning_content"
+
+    def _ollama_disable_thinking_enabled(self) -> bool:
+        value = self.provider_config.get("ollama_disable_thinking", False)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    def _apply_provider_specific_extra_body_overrides(
+        self, extra_body: dict[str, Any]
+    ) -> None:
+        if self.provider_config.get("provider") != "ollama":
+            return
+        if not self._ollama_disable_thinking_enabled():
+            return
+
+        # Ollama's OpenAI-compatible endpoint reliably maps reasoning_effort=none
+        # to think=false, while direct think=false passthrough is not stable.
+        extra_body.pop("reasoning", None)
+        extra_body.pop("think", None)
+        extra_body["reasoning_effort"] = "none"
 
     async def get_models(self):
         try:
@@ -79,20 +568,58 @@ class ProviderOpenAIOfficial(Provider):
         except NotFoundError as e:
             raise Exception(f"获取模型列表失败：{e}")
 
-    async def _query(self, payloads: dict, tools: ToolSet) -> LLMResponse:
+    @staticmethod
+    def _sanitize_assistant_messages(payloads: dict) -> None:
+        """在请求发送前过滤/规范化空的 assistant 消息。
+
+        严格 API（Moonshot、DeepSeek Reasoner 等）会在 assistant 消息同时缺少
+        ``content`` 和 ``tool_calls`` 时返回 400。把 ``""`` / ``None`` / ``[]``
+        都视作空内容：无 tool_calls 时整条过滤掉；有 tool_calls 时将 content
+        设为 ``None`` 以符合 OpenAI 规范。就地修改 ``payloads["messages"]``。
+        """
+        messages = payloads.get("messages")
+        if not isinstance(messages, list):
+            return
+
+        def _is_empty(content: Any) -> bool:
+            return content is None or content == "" or content == []
+
+        cleaned: list[Any] = []
+        for idx, msg in enumerate(messages):
+            if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                cleaned.append(msg)
+                continue
+
+            content = msg.get("content")
+            tool_calls = msg.get("tool_calls")
+            reasoning_content = msg.get("reasoning_content")
+
+            if _is_empty(content) and not tool_calls and not reasoning_content:
+                logger.warning(f"过滤第 {idx} 条空 assistant 消息 (无工具调用)")
+                continue
+
+            if _is_empty(content) and tool_calls:
+                msg["content"] = None
+
+            cleaned.append(msg)
+
+        payloads["messages"] = cleaned
+
+    async def _query(self, payloads: dict, tools: ToolSet | None) -> LLMResponse:
         if tools:
             model = payloads.get("model", "").lower()
             omit_empty_param_field = "gemini" in model
             tool_list = tools.get_func_desc_openai_style(
-                omit_empty_parameter_field=omit_empty_param_field
+                omit_empty_parameter_field=omit_empty_param_field,
             )
             if tool_list:
                 payloads["tools"] = tool_list
+                payloads["tool_choice"] = payloads.get("tool_choice", "auto")
 
         # 不在默认参数中的参数放在 extra_body 中
         extra_body = {}
         to_del = []
-        for key in payloads.keys():
+        for key in payloads:
             if key not in self.default_params:
                 extra_body[key] = payloads[key]
                 to_del.append(key)
@@ -103,40 +630,44 @@ class ProviderOpenAIOfficial(Provider):
         custom_extra_body = self.provider_config.get("custom_extra_body", {})
         if isinstance(custom_extra_body, dict):
             extra_body.update(custom_extra_body)
+        self._apply_provider_specific_extra_body_overrides(extra_body)
 
         model = payloads.get("model", "").lower()
 
-        # 针对 deepseek 模型的特殊处理：deepseek-reasoner调用必须移除 tools ，否则将被切换至 deepseek-chat
-        if model == "deepseek-reasoner" and "tools" in payloads:
-            del payloads["tools"]
+        self._sanitize_assistant_messages(payloads)
 
         completion = await self.client.chat.completions.create(
-            **payloads, stream=False, extra_body=extra_body
+            **payloads,
+            stream=False,
+            extra_body=extra_body,
         )
 
         if not isinstance(completion, ChatCompletion):
             raise Exception(
-                f"API 返回的 completion 类型错误：{type(completion)}: {completion}。"
+                f"API 返回的 completion 类型错误：{type(completion)}: {completion}。",
             )
 
         logger.debug(f"completion: {completion}")
 
-        llm_response = await self.parse_openai_completion(completion, tools)
+        llm_response = await self._parse_openai_completion(completion, tools)
 
         return llm_response
 
     async def _query_stream(
-        self, payloads: dict, tools: ToolSet
+        self,
+        payloads: dict,
+        tools: ToolSet | None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """流式查询API，逐步返回结果"""
         if tools:
             model = payloads.get("model", "").lower()
             omit_empty_param_field = "gemini" in model
             tool_list = tools.get_func_desc_openai_style(
-                omit_empty_parameter_field=omit_empty_param_field
+                omit_empty_parameter_field=omit_empty_param_field,
             )
             if tool_list:
                 payloads["tools"] = tool_list
+                payloads["tool_choice"] = payloads.get("tool_choice", "auto")
 
         # 不在默认参数中的参数放在 extra_body 中
         extra_body = {}
@@ -147,15 +678,21 @@ class ProviderOpenAIOfficial(Provider):
             extra_body.update(custom_extra_body)
 
         to_del = []
-        for key in payloads.keys():
+        for key in payloads:
             if key not in self.default_params:
                 extra_body[key] = payloads[key]
                 to_del.append(key)
         for key in to_del:
             del payloads[key]
+        self._apply_provider_specific_extra_body_overrides(extra_body)
+
+        self._sanitize_assistant_messages(payloads)
 
         stream = await self.client.chat.completions.create(
-            **payloads, stream=True, extra_body=extra_body
+            **payloads,
+            stream=True,
+            extra_body=extra_body,
+            stream_options={"include_usage": True},
         )
 
         llm_response = LLMResponse("assistant", is_chunk=True)
@@ -163,94 +700,329 @@ class ProviderOpenAIOfficial(Provider):
         state = ChatCompletionStreamState()
 
         async for chunk in stream:
-            try:
-                state.handle_chunk(chunk)
-            except Exception as e:
-                logger.warning("Saving chunk state error: " + str(e))
-            if len(chunk.choices) == 0:
-                continue
-            delta = chunk.choices[0].delta
-            # 处理文本内容
-            if delta.content:
-                completion_text = delta.content
+            choice = chunk.choices[0] if chunk.choices else None
+            delta = choice.delta if choice else None
+
+            if delta and (dtcs := delta.tool_calls):
+                for idx, tc in enumerate(dtcs):
+                    # siliconflow workaround
+                    if tc.function and tc.function.arguments:
+                        tc.type = "function"
+                    # Fix for #6661: Add missing 'index' field to tool_call deltas
+                    # Gemini and some OpenAI-compatible proxies omit this field
+                    if not hasattr(tc, "index") or tc.index is None:
+                        tc.index = idx
+            # 跳过 delta=None 的 chunk，避免 SDK 内部 _convert_initial_chunk_into_snapshot
+            # 第 747 行 choice.delta.to_dict() 抛出 NoneType 错误。
+            # refs: AstrBot#6689 / openai-python#5069 / #5047
+            # 例外：流末尾的 usage chunk（choices=[]，delta=None 但有 usage 数据）
+            # 需要传给 state，否则最终 completion 会丢失 usage 信息
+            if delta is not None or chunk.usage:
+                try:
+                    state.handle_chunk(chunk)
+                except Exception as e:
+                    logger.error("Saving chunk state error: " + str(e))
+            # logger.debug(f"chunk delta: {delta}")
+            # handle the content delta
+            reasoning = self._extract_reasoning_content(chunk)
+            _y = False
+            llm_response.id = chunk.id
+            llm_response.reasoning_content = None
+            llm_response.completion_text = ""
+            if reasoning is not None:
+                llm_response.reasoning_content = reasoning
+                _y = True
+            if delta and delta.content:
+                # Don't strip streaming chunks to preserve spaces between words
+                completion_text = self._normalize_content(delta.content, strip=False)
                 llm_response.result_chain = MessageChain(
-                    chain=[Comp.Plain(completion_text)]
+                    chain=[Comp.Plain(completion_text)],
                 )
+                _y = True
+            if chunk.usage:
+                llm_response.usage = self._extract_usage(chunk.usage)
+            elif choice and (choice_usage := getattr(choice, "usage", None)):
+                # Workaround for some providers that only return usage in choices[].usage, e.g. MoonshotAI
+                # See https://github.com/AstrBotDevs/AstrBot/issues/6614
+                llm_response.usage = self._extract_usage(choice_usage)
+                state.current_completion_snapshot.usage = choice_usage
+            if _y:
                 yield llm_response
 
-        final_completion = state.get_final_completion()
-        llm_response = await self.parse_openai_completion(final_completion, tools)
+        try:
+            final_completion = state.get_final_completion()
+            llm_response = await self._parse_openai_completion(final_completion, tools)
+            yield llm_response
+        except Exception as e:
+            logger.error("get_final_completion error: " + str(e))
+            # 流式内容已通过 yield 发出，记录错误后正常结束即可
+            return
 
-        yield llm_response
+    def _extract_reasoning_content(
+        self,
+        completion: ChatCompletion | ChatCompletionChunk,
+    ) -> str | None:
+        """Extract reasoning content from OpenAI ChatCompletion if available."""
 
-    async def parse_openai_completion(self, completion: ChatCompletion, tools: ToolSet):
-        """解析 OpenAI 的 ChatCompletion 响应"""
+        def _get_reasoning_attr(obj: Any) -> str | None:
+            fields_set = getattr(obj, "model_fields_set", None)
+            if isinstance(fields_set, set) and self.reasoning_key in fields_set:
+                attr = getattr(obj, self.reasoning_key, "")
+                return "" if attr is None else str(attr)
+            attr = getattr(obj, self.reasoning_key, None)
+            return None if attr is None else str(attr)
+
+        if not completion.choices:
+            return None
+        if isinstance(completion, ChatCompletion):
+            choice = completion.choices[0]
+            reasoning_attr = _get_reasoning_attr(choice.message)
+        elif isinstance(completion, ChatCompletionChunk):
+            delta = completion.choices[0].delta
+            reasoning_attr = _get_reasoning_attr(delta)
+        else:
+            return None
+        return reasoning_attr
+
+    def _extract_usage(self, usage: CompletionUsage | dict) -> TokenUsage:
+        ptd = getattr(usage, "prompt_tokens_details", None)
+        cached = getattr(ptd, "cached_tokens", 0) if ptd else 0
+        cached = (
+            cached if isinstance(cached, int) else 0
+        )  # ptd.cached_tokens 可能为None
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0  # 安全
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        cached = cached or 0
+        prompt_tokens = prompt_tokens or 0
+        completion_tokens = completion_tokens or 0
+        return TokenUsage(
+            input_other=prompt_tokens - cached,
+            input_cached=cached,
+            output=completion_tokens,
+        )
+
+    @staticmethod
+    def _normalize_content(raw_content: Any, strip: bool = True) -> str:
+        """Normalize content from various formats to plain string.
+
+        Some LLM providers return content as list[dict] format
+        like [{'type': 'text', 'text': '...'}] instead of
+        plain string. This method handles both formats.
+
+        Args:
+            raw_content: The raw content from LLM response, can be str, list, dict, or other.
+            strip: Whether to strip whitespace from the result. Set to False for
+                   streaming chunks to preserve spaces between words.
+
+        Returns:
+            Normalized plain text string.
+        """
+        # Handle dict format (e.g., {"type": "text", "text": "..."})
+        if isinstance(raw_content, dict):
+            if "text" in raw_content:
+                text_val = raw_content.get("text", "")
+                return str(text_val) if text_val is not None else ""
+            # For other dict formats, return empty string and log
+            logger.warning(f"Unexpected dict format content: {raw_content}")
+            return ""
+
+        if isinstance(raw_content, list):
+            # Check if this looks like OpenAI content-part format
+            # Only process if at least one item has {'type': 'text', 'text': ...} structure
+            has_content_part = any(
+                isinstance(part, dict) and part.get("type") == "text"
+                for part in raw_content
+            )
+            if has_content_part:
+                text_parts = []
+                for part in raw_content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_val = part.get("text", "")
+                        # Coerce to str in case text is null or non-string
+                        text_parts.append(str(text_val) if text_val is not None else "")
+                return "".join(text_parts)
+            # Not content-part format, return string representation
+            return str(raw_content)
+
+        if isinstance(raw_content, str):
+            content = raw_content.strip() if strip else raw_content
+            # Check if the string is a JSON-encoded list (e.g., "[{'type': 'text', ...}]")
+            # This can happen when streaming concatenates content that was originally list format
+            # Only check if it looks like a complete JSON array (requires strip for check)
+            check_content = raw_content.strip()
+            if (
+                check_content.startswith("[")
+                and check_content.endswith("]")
+                and len(check_content) < 8192
+            ):
+                try:
+                    # First try standard JSON parsing
+                    parsed = json.loads(check_content)
+                except json.JSONDecodeError:
+                    # If that fails, try parsing as Python literal (handles single quotes)
+                    # This is safer than blind replace("'", '"') which corrupts apostrophes
+                    try:
+                        import ast
+
+                        parsed = ast.literal_eval(check_content)
+                    except (ValueError, SyntaxError):
+                        parsed = None
+
+                if isinstance(parsed, list):
+                    # Only convert if it matches OpenAI content-part schema
+                    # i.e., at least one item has {'type': 'text', 'text': ...}
+                    has_content_part = any(
+                        isinstance(part, dict) and part.get("type") == "text"
+                        for part in parsed
+                    )
+                    if has_content_part:
+                        text_parts = []
+                        for part in parsed:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_val = part.get("text", "")
+                                # Coerce to str in case text is null or non-string
+                                text_parts.append(
+                                    str(text_val) if text_val is not None else ""
+                                )
+                        if text_parts:
+                            return "".join(text_parts)
+            return content
+
+        # Fallback for other types (int, float, etc.)
+        return str(raw_content) if raw_content is not None else ""
+
+    async def _parse_openai_completion(
+        self, completion: ChatCompletion, tools: ToolSet | None
+    ) -> LLMResponse:
+        """Parse OpenAI ChatCompletion into LLMResponse"""
         llm_response = LLMResponse("assistant")
 
-        if len(completion.choices) == 0:
-            raise Exception("API 返回的 completion 为空。")
+        if not completion.choices:
+            raise EmptyModelOutputError(
+                f"OpenAI completion has no choices. response_id={completion.id}"
+            )
         choice = completion.choices[0]
 
+        # parse the text completion
         if choice.message.content is not None:
-            # text completion
-            completion_text = str(choice.message.content).strip()
+            completion_text = self._normalize_content(choice.message.content)
+            # specially, some providers may set <think> tags around reasoning content in the completion text,
+            # we use regex to remove them, and store then in reasoning_content field
+            reasoning_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+            matches = reasoning_pattern.findall(completion_text)
+            if matches:
+                llm_response.reasoning_content = "\n".join(
+                    [match.strip() for match in matches],
+                )
+                completion_text = reasoning_pattern.sub("", completion_text).strip()
+            # Also clean up orphan </think> tags that may leak from some models
+            completion_text = re.sub(r"</think>\s*$", "", completion_text).strip()
             llm_response.result_chain = MessageChain().message(completion_text)
+        elif refusal := getattr(choice.message, "refusal", None):
+            refusal_text = self._normalize_content(refusal)
+            if refusal_text:
+                llm_response.result_chain = MessageChain().message(refusal_text)
 
-        if choice.message.tool_calls:
-            # tools call (function calling)
+        # parse the reasoning content if any
+        # the priority is higher than the <think> tag extraction
+        reasoning_content = self._extract_reasoning_content(completion)
+        if reasoning_content is not None:
+            llm_response.reasoning_content = reasoning_content
+
+        # parse tool calls if any
+        if choice.message.tool_calls and tools is not None:
             args_ls = []
             func_name_ls = []
             tool_call_ids = []
+            tool_call_extra_content_dict = {}
             for tool_call in choice.message.tool_calls:
                 if isinstance(tool_call, str):
                     # workaround for #1359
                     tool_call = json.loads(tool_call)
-                for tool in tools.func_list:
-                    if (
-                        tool_call.type == "function"
-                        and tool.name == tool_call.function.name
-                    ):
-                        # workaround for #1454
-                        if isinstance(tool_call.function.arguments, str):
+                if tools is None:
+                    # 工具集未提供
+                    # Should be unreachable
+                    raise Exception("工具集未提供")
+
+                if tool_call.type == "function":
+                    # workaround for #1454
+                    if isinstance(tool_call.function.arguments, str):
+                        try:
                             args = json.loads(tool_call.function.arguments)
-                        else:
-                            args = tool_call.function.arguments
-                        args_ls.append(args)
-                        func_name_ls.append(tool_call.function.name)
-                        tool_call_ids.append(tool_call.id)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"解析参数失败: {e}")
+                            args = {}
+                    else:
+                        args = tool_call.function.arguments
+                    # Some API may return None for tools with no parameters
+                    if args is None:
+                        args = {}
+                    args_ls.append(args)
+                    func_name_ls.append(tool_call.function.name)
+                    tool_call_ids.append(tool_call.id)
+
+                    # gemini-2.5 / gemini-3 series extra_content handling
+                    extra_content = getattr(tool_call, "extra_content", None)
+                    if extra_content is not None:
+                        tool_call_extra_content_dict[tool_call.id] = extra_content
+
             llm_response.role = "tool"
             llm_response.tools_call_args = args_ls
             llm_response.tools_call_name = func_name_ls
             llm_response.tools_call_ids = tool_call_ids
-
+            llm_response.tools_call_extra_content = tool_call_extra_content_dict
+        # specially handle finish reason
         if choice.finish_reason == "content_filter":
             raise Exception(
-                "API 返回的 completion 由于内容安全过滤被拒绝(非 AstrBot)。"
+                "API 返回的 completion 由于内容安全过滤被拒绝(非 AstrBot)。",
+            )
+        has_text_output = bool((llm_response.completion_text or "").strip())
+        has_reasoning_output = bool((llm_response.reasoning_content or "").strip())
+        if (
+            not has_text_output
+            and not has_reasoning_output
+            and not llm_response.tools_call_args
+        ):
+            logger.error(f"OpenAI completion has no usable output: {completion}.")
+            raise EmptyModelOutputError(
+                "OpenAI completion has no usable output. "
+                f"response_id={completion.id}, finish_reason={choice.finish_reason}"
             )
 
-        if llm_response.completion_text is None and not llm_response.tools_call_args:
-            logger.error(f"API 返回的 completion 无法解析：{completion}。")
-            raise Exception(f"API 返回的 completion 无法解析：{completion}。")
-
         llm_response.raw_completion = completion
+        llm_response.id = completion.id
+
+        if completion.usage:
+            llm_response.usage = self._extract_usage(completion.usage)
 
         return llm_response
 
     async def _prepare_chat_payload(
         self,
-        prompt: str,
+        prompt: str | None,
         image_urls: list[str] | None = None,
-        contexts: list | None = None,
+        audio_urls: list[str] | None = None,
+        contexts: list[dict] | list[Message] | None = None,
         system_prompt: str | None = None,
         tool_calls_result: ToolCallsResult | list[ToolCallsResult] | None = None,
         model: str | None = None,
+        extra_user_content_parts: list[ContentPart] | None = None,
         **kwargs,
     ) -> tuple:
         """准备聊天所需的有效载荷和上下文"""
         if contexts is None:
             contexts = []
-        new_record = await self.assemble_context(prompt, image_urls)
-        context_query = [*contexts, new_record]
+        new_record = None
+        if prompt is not None:
+            new_record = await self.assemble_context(
+                prompt or "",
+                image_urls,
+                audio_urls,
+                extra_user_content_parts,
+            )
+        context_query = copy.deepcopy(self._ensure_message_to_dicts(contexts))
+        if new_record:
+            context_query.append(new_record)
         if system_prompt:
             context_query.insert(0, {"role": "system", "content": system_prompt})
 
@@ -266,33 +1038,107 @@ class ProviderOpenAIOfficial(Provider):
                 for tcr in tool_calls_result:
                     context_query.extend(tcr.to_openai_messages())
 
-        model_config = self.provider_config.get("model_config", {})
-        model_config["model"] = model or self.get_model()
+        if self._context_contains_image(context_query):
+            context_query = await self._materialize_context_image_parts(context_query)
 
-        payloads = {"messages": context_query, **model_config}
+        model = model or self.get_model()
+
+        payloads = {"messages": context_query, "model": model}
+
+        self._finally_convert_payload(payloads)
 
         return payloads, context_query
+
+    def _finally_convert_payload(self, payloads: dict) -> None:
+        """Finally convert the payload. Such as think part conversion, tool inject."""
+        model = payloads.get("model", "").lower()
+        is_gemini = "gemini" in model
+        deepseek_reasoning_models = {"deepseek-v4-pro", "deepseek-v4-flash"}
+        is_deepseek_v4_reasoning = (
+            model in deepseek_reasoning_models
+            or "api.deepseek.com" in self.client.base_url.host
+        )
+        # MiMo 推理模型（MiMo-V2.5-Pro / MiMo-V2.5 / MiMo-V2-Pro / MiMo-V2-Omni / MiMo-V2-Flash）
+        # 要求 assistant 历史消息必须回传 reasoning_content，否则返回 400
+        mimo_reasoning_models = {
+            "mimo-v2.5-pro",
+            "mimo-v2.5",
+            "mimo-v2-pro",
+            "mimo-v2-omni",
+            "mimo-v2-flash",
+        }
+        is_mimo_reasoning = model in mimo_reasoning_models
+        for message in payloads.get("messages", []):
+            if message.get("role") == "assistant" and isinstance(
+                message.get("content"), list
+            ):
+                reasoning_content = ""
+                reasoning_content_present = False
+                new_content = []  # not including think part
+                for part in message["content"]:
+                    if part.get("type") == "think":
+                        reasoning_content_present = True
+                        reasoning_content += str(part.get("think"))
+                    else:
+                        new_content.append(part)
+                # Some providers (Grok, etc.) reject empty content lists.
+                # When all parts were think blocks, fall back to None.
+                message["content"] = new_content or None
+                if reasoning_content_present:
+                    message["reasoning_content"] = reasoning_content
+
+            if (
+                message.get("role") == "assistant"
+                and is_deepseek_v4_reasoning
+                and "reasoning_content" not in message
+            ):
+                # DeepSeek v4 reasoning models require the field on assistant
+                # history messages, even when the reasoning content is empty.
+                message["reasoning_content"] = ""
+
+            if (
+                message.get("role") == "assistant"
+                and is_mimo_reasoning
+                and "reasoning_content" not in message
+            ):
+                # MiMo 推理模型要求 assistant 历史消息回传 reasoning_content，
+                # 缺失时 API 返回 400。参见 MiMo 官方文档。
+                message["reasoning_content"] = ""
+
+            # Gemini 的 function_response 要求 google.protobuf.Struct（即 JSON 对象），
+            # 纯文本会触发 400 Invalid argument，需要包一层 JSON。
+            if is_gemini and message.get("role") == "tool":
+                content = message.get("content", "")
+                if isinstance(content, str):
+                    try:
+                        json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        message["content"] = json.dumps(
+                            {"result": content}, ensure_ascii=False
+                        )
 
     async def _handle_api_error(
         self,
         e: Exception,
         payloads: dict,
         context_query: list,
-        func_tool: ToolSet,
+        func_tool: ToolSet | None,
         chosen_key: str,
-        available_api_keys: List[str],
+        available_api_keys: list[str],
         retry_cnt: int,
         max_retries: int,
+        image_fallback_used: bool = False,
     ) -> tuple:
         """处理API错误并尝试恢复"""
         if "429" in str(e):
             logger.warning(
-                f"API 调用过于频繁，尝试使用其他 Key 重试。当前 Key: {chosen_key[:12]}"
+                f"API 调用过于频繁，尝试使用其他 Key 重试。当前 Key: {chosen_key[:12]}",
             )
             # 最后一次不等待
             if retry_cnt < max_retries - 1:
                 await asyncio.sleep(1)
-            available_api_keys.remove(chosen_key)
+            if chosen_key in available_api_keys:
+                available_api_keys.remove(chosen_key)
             if len(available_api_keys) > 0:
                 chosen_key = random.choice(available_api_keys)
                 return (
@@ -302,12 +1148,12 @@ class ProviderOpenAIOfficial(Provider):
                     payloads,
                     context_query,
                     func_tool,
+                    image_fallback_used,
                 )
-            else:
-                raise e
-        elif "maximum context length" in str(e):
+            raise e
+        if "maximum context length" in str(e) or "context length" in str(e).lower():
             logger.warning(
-                f"上下文长度超过限制。尝试弹出最早的记录然后重试。当前记录条数: {len(context_query)}"
+                f"上下文长度超过限制。尝试弹出最早的记录然后重试。当前记录条数: {len(context_query)}",
             )
             await self.pop_record(context_query)
             payloads["messages"] = context_query
@@ -318,73 +1164,107 @@ class ProviderOpenAIOfficial(Provider):
                 payloads,
                 context_query,
                 func_tool,
+                image_fallback_used,
             )
-        elif "The model is not a VLM" in str(e):  # siliconcloud
+        if "The model is not a VLM" in str(e):  # siliconcloud
+            if image_fallback_used or not self._context_contains_image(context_query):
+                raise e
             # 尝试删除所有 image
-            new_contexts = await self._remove_image_from_context(context_query)
-            payloads["messages"] = new_contexts
-            context_query = new_contexts
+            return await self._fallback_to_text_only_and_retry(
+                payloads,
+                context_query,
+                chosen_key,
+                available_api_keys,
+                func_tool,
+                "model_not_vlm",
+                image_fallback_used=True,
+            )
+        if self._is_content_moderated_upload_error(e):
+            if image_fallback_used or not self._context_contains_image(context_query):
+                raise e
+            return await self._fallback_to_text_only_and_retry(
+                payloads,
+                context_query,
+                chosen_key,
+                available_api_keys,
+                func_tool,
+                "image_content_moderated",
+                image_fallback_used=True,
+            )
+        if self._is_invalid_attachment_error(e):
+            if image_fallback_used or not self._context_contains_image(context_query):
+                raise e
+            return await self._fallback_to_text_only_and_retry(
+                payloads,
+                context_query,
+                chosen_key,
+                available_api_keys,
+                func_tool,
+                "invalid_attachment",
+                image_fallback_used=True,
+            )
+
+        if (
+            "Function calling is not enabled" in str(e)
+            or ("tool" in str(e).lower() and "support" in str(e).lower())
+            or ("function" in str(e).lower() and "support" in str(e).lower())
+        ):
+            # openai, ollama, gemini openai, siliconcloud 的错误提示与 code 不统一，只能通过字符串匹配
+            logger.warning(
+                f"{self.get_model()} 不支持函数工具调用，已自动去除，不影响使用。如需永久关闭，可前往 WebUI 中关闭工具调用。",
+            )
+            payloads.pop("tools", None)
             return (
                 False,
                 chosen_key,
                 available_api_keys,
                 payloads,
                 context_query,
-                func_tool,
+                None,
+                image_fallback_used,
             )
-        elif (
-            "Function calling is not enabled" in str(e)
-            or ("tool" in str(e).lower() and "support" in str(e).lower())
-            or ("function" in str(e).lower() and "support" in str(e).lower())
-        ):
-            # openai, ollama, gemini openai, siliconcloud 的错误提示与 code 不统一，只能通过字符串匹配
-            logger.info(
-                f"{self.get_model()} 不支持函数工具调用，已自动去除，不影响使用。"
-            )
-            if "tools" in payloads:
-                del payloads["tools"]
-            return False, chosen_key, available_api_keys, payloads, context_query, None
-        else:
-            logger.error(f"发生了错误。Provider 配置如下: {self.provider_config}")
+        # logger.error(f"发生了错误。Provider 配置如下: {self.provider_config}")
 
-            if "tool" in str(e).lower() and "support" in str(e).lower():
-                logger.error("疑似该模型不支持函数调用工具调用。请输入 /tool off_all")
+        if is_connection_error(e):
+            proxy = self.provider_config.get("proxy", "")
+            log_connection_failure("OpenAI", e, proxy)
 
-            if "Connection error." in str(e):
-                proxy = os.environ.get("http_proxy", None)
-                if proxy:
-                    logger.error(
-                        f"可能为代理原因，请检查代理是否正常。当前代理: {proxy}"
-                    )
-
-            raise e
+        raise e
 
     async def text_chat(
         self,
-        prompt,
+        prompt=None,
         session_id=None,
         image_urls=None,
+        audio_urls=None,
         func_tool=None,
         contexts=None,
         system_prompt=None,
         tool_calls_result=None,
         model=None,
+        extra_user_content_parts=None,
+        tool_choice: Literal["auto", "required"] = "auto",
         **kwargs,
     ) -> LLMResponse:
         payloads, context_query = await self._prepare_chat_payload(
             prompt,
             image_urls,
+            audio_urls,
             contexts,
             system_prompt,
             tool_calls_result,
             model=model,
+            extra_user_content_parts=extra_user_content_parts,
             **kwargs,
         )
+        if func_tool and not func_tool.empty():
+            payloads["tool_choice"] = tool_choice
 
         llm_response = None
         max_retries = 10
         available_api_keys = self.api_keys.copy()
         chosen_key = random.choice(available_api_keys)
+        image_fallback_used = False
 
         last_exception = None
         retry_cnt = 0
@@ -393,12 +1273,6 @@ class ProviderOpenAIOfficial(Provider):
                 self.client.api_key = chosen_key
                 llm_response = await self._query(payloads, func_tool)
                 break
-            except UnprocessableEntityError as e:
-                logger.warning(f"不可处理的实体错误：{e}，尝试删除图片。")
-                # 尝试删除所有 image
-                new_contexts = await self._remove_image_from_context(context_query)
-                payloads["messages"] = new_contexts
-                context_query = new_contexts
             except Exception as e:
                 last_exception = e
                 (
@@ -408,6 +1282,7 @@ class ProviderOpenAIOfficial(Provider):
                     payloads,
                     context_query,
                     func_tool,
+                    image_fallback_used,
                 ) = await self._handle_api_error(
                     e,
                     payloads,
@@ -417,6 +1292,7 @@ class ProviderOpenAIOfficial(Provider):
                     available_api_keys,
                     retry_cnt,
                     max_retries,
+                    image_fallback_used=image_fallback_used,
                 )
                 if success:
                     break
@@ -430,30 +1306,36 @@ class ProviderOpenAIOfficial(Provider):
 
     async def text_chat_stream(
         self,
-        prompt: str,
+        prompt=None,
         session_id=None,
         image_urls=None,
+        audio_urls=None,
         func_tool=None,
         contexts=None,
         system_prompt=None,
         tool_calls_result=None,
         model=None,
+        tool_choice: Literal["auto", "required"] = "auto",
         **kwargs,
     ) -> AsyncGenerator[LLMResponse, None]:
         """流式对话，与服务商交互并逐步返回结果"""
         payloads, context_query = await self._prepare_chat_payload(
             prompt,
             image_urls,
+            audio_urls,
             contexts,
             system_prompt,
             tool_calls_result,
             model=model,
             **kwargs,
         )
+        if func_tool and not func_tool.empty():
+            payloads["tool_choice"] = tool_choice
 
         max_retries = 10
         available_api_keys = self.api_keys.copy()
         chosen_key = random.choice(available_api_keys)
+        image_fallback_used = False
 
         last_exception = None
         retry_cnt = 0
@@ -463,12 +1345,6 @@ class ProviderOpenAIOfficial(Provider):
                 async for response in self._query_stream(payloads, func_tool):
                     yield response
                 break
-            except UnprocessableEntityError as e:
-                logger.warning(f"不可处理的实体错误：{e}，尝试删除图片。")
-                # 尝试删除所有 image
-                new_contexts = await self._remove_image_from_context(context_query)
-                payloads["messages"] = new_contexts
-                context_query = new_contexts
             except Exception as e:
                 last_exception = e
                 (
@@ -478,6 +1354,7 @@ class ProviderOpenAIOfficial(Provider):
                     payloads,
                     context_query,
                     func_tool,
+                    image_fallback_used,
                 ) = await self._handle_api_error(
                     e,
                     payloads,
@@ -487,6 +1364,7 @@ class ProviderOpenAIOfficial(Provider):
                     available_api_keys,
                     retry_cnt,
                     max_retries,
+                    image_fallback_used=image_fallback_used,
                 )
                 if success:
                     break
@@ -497,10 +1375,8 @@ class ProviderOpenAIOfficial(Provider):
                 raise Exception("未知错误")
             raise last_exception
 
-    async def _remove_image_from_context(self, contexts: List):
-        """
-        从上下文中删除所有带有 image 的记录
-        """
+    async def _remove_image_from_context(self, contexts: list):
+        """从上下文中删除所有带有 image 的记录"""
         new_contexts = []
 
         for context in contexts:
@@ -521,50 +1397,88 @@ class ProviderOpenAIOfficial(Provider):
     def get_current_key(self) -> str:
         return self.client.api_key
 
-    def get_keys(self) -> List[str]:
+    def get_keys(self) -> list[str]:
         return self.api_keys
 
-    def set_key(self, key):
+    def set_key(self, key) -> None:
         self.client.api_key = key
 
     async def assemble_context(
-        self, text: str, image_urls: List[str] | None = None
+        self,
+        text: str,
+        image_urls: list[str] | None = None,
+        audio_urls: list[str] | None = None,
+        extra_user_content_parts: list[ContentPart] | None = None,
     ) -> dict:
         """组装成符合 OpenAI 格式的 role 为 user 的消息段"""
-        if image_urls:
-            user_content = {
-                "role": "user",
-                "content": [{"type": "text", "text": text if text else "[图片]"}],
-            }
-            for image_url in image_urls:
-                if image_url.startswith("http"):
-                    image_path = await download_image_by_url(image_url)
-                    image_data = await self.encode_image_bs64(image_path)
-                elif image_url.startswith("file:///"):
-                    image_path = image_url.replace("file:///", "")
-                    image_data = await self.encode_image_bs64(image_path)
+
+        # 构建内容块列表
+        content_blocks = []
+
+        # 1. 用户原始发言（OpenAI 建议：用户发言在前）
+        if text:
+            content_blocks.append({"type": "text", "text": text})
+        elif image_urls:
+            # 如果没有文本但有图片，添加占位文本
+            content_blocks.append({"type": "text", "text": "[Image]"})
+        elif audio_urls:
+            content_blocks.append({"type": "text", "text": "[Audio]"})
+        elif extra_user_content_parts:
+            # 如果只有额外内容块，也需要添加占位文本
+            content_blocks.append({"type": "text", "text": " "})
+
+        # 2. 额外的内容块（系统提醒、指令等）
+        if extra_user_content_parts:
+            for part in extra_user_content_parts:
+                if isinstance(part, TextPart):
+                    content_blocks.append({"type": "text", "text": part.text})
+                elif isinstance(part, ImageURLPart):
+                    image_part = await self._resolve_image_part(
+                        part.image_url.url,
+                    )
+                    if image_part:
+                        content_blocks.append(image_part)
+                elif isinstance(part, AudioURLPart):
+                    audio_part = await self._resolve_audio_part(part.audio_url.url)
+                    if audio_part:
+                        content_blocks.append(audio_part)
                 else:
-                    image_data = await self.encode_image_bs64(image_url)
-                if not image_data:
-                    logger.warning(f"图片 {image_url} 得到的结果为空，将忽略。")
-                    continue
-                user_content["content"].append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data},
-                    }
-                )
-            return user_content
-        else:
-            return {"role": "user", "content": text}
+                    raise ValueError(f"不支持的额外内容块类型: {type(part)}")
+
+        # 3. 图片内容
+        if image_urls:
+            for image_url in image_urls:
+                image_part = await self._resolve_image_part(image_url)
+                if image_part:
+                    content_blocks.append(image_part)
+
+        if audio_urls:
+            for audio_path in audio_urls:
+                audio_part = await self._resolve_audio_part(audio_path)
+                if audio_part:
+                    content_blocks.append(audio_part)
+
+        # 如果只有主文本且没有额外内容块和图片，返回简单格式以保持向后兼容
+        if (
+            text
+            and not extra_user_content_parts
+            and not image_urls
+            and not audio_urls
+            and len(content_blocks) == 1
+            and content_blocks[0]["type"] == "text"
+        ):
+            return {"role": "user", "content": content_blocks[0]["text"]}
+
+        # 否则返回多模态格式
+        return {"role": "user", "content": content_blocks}
 
     async def encode_image_bs64(self, image_url: str) -> str:
-        """
-        将图片转换为 base64
-        """
-        if image_url.startswith("base64://"):
-            return image_url.replace("base64://", "data:image/jpeg;base64,")
-        with open(image_url, "rb") as f:
-            image_bs64 = base64.b64encode(f.read()).decode("utf-8")
-            return "data:image/jpeg;base64," + image_bs64
-        return ""
+        """将图片转换为 base64"""
+        image_data = await self._image_ref_to_data_url(image_url, mode="strict")
+        if image_data is None:
+            raise RuntimeError(f"Failed to encode image data: {image_url}")
+        return image_data
+
+    async def terminate(self):
+        if self.client:
+            await self.client.close()

@@ -1,1389 +1,1785 @@
 <template>
-    <v-card class="chat-page-card">
-        <v-card-text class="chat-page-container">
-            <div class="chat-layout">
-                <div class="sidebar-panel" :class="{ 'sidebar-collapsed': sidebarCollapsed }"
-                    :style="{ 'background-color': isDark ? sidebarCollapsed ? '#1e1e1e' : '#2d2d2d' : sidebarCollapsed ? '#ffffff' : '#f5f5f5' }"
-                    @mouseenter="handleSidebarMouseEnter" @mouseleave="handleSidebarMouseLeave">
+  <div
+    v-if="props.active"
+    class="chat-ui"
+    :class="{ 'is-dark': isDark, 'sidebar-collapsed': isSidebarCollapsed }"
+  >
+    <v-navigation-drawer
+      v-model="chatSidebarDrawer"
+      class="chat-sidebar"
+      :class="{ collapsed: isSidebarCollapsed }"
+      :permanent="lgAndUp"
+      :temporary="!lgAndUp"
+      :rail="lgAndUp && sidebarCollapsed"
+      :width="280"
+      :rail-width="68"
+      location="left"
+      floating
+    >
+      <div class="sidebar-top">
+        <div v-if="lgAndUp" class="brand-row">
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            class="sidebar-toggle"
+            @click="sidebarCollapsed = !sidebarCollapsed"
+          >
+            <v-icon
+              size="20"
+              class="sidebar-action-icon"
+              :class="{ 'chevron-collapsed': isSidebarCollapsed }"
+            >
+              mdi-chevron-left
+            </v-icon>
+          </v-btn>
+        </div>
 
-                    <div style="display: flex; align-items: center; justify-content: center; padding: 16px; padding-bottom: 0px;"
-                        v-if="chatboxMode">
-                        <img width="50" src="@/assets/images/astrbot_logo_mini.webp" alt="AstrBot Logo">
-                        <span v-if="!sidebarCollapsed"
-                            style="font-weight: 1000; font-size: 26px; margin-left: 8px;">AstrBot</span>
-                    </div>
+        <v-btn
+          class="new-chat-btn sidebar-provider-btn"
+          :class="{
+            'icon-only': isSidebarCollapsed,
+            'sidebar-workspace-btn--active': isProviderWorkspace,
+          }"
+          variant="text"
+          :icon="isSidebarCollapsed"
+          @click="openProviderWorkspace"
+        >
+          <v-icon
+            size="20"
+            class="sidebar-action-icon"
+            :class="{ 'mr-2': !isSidebarCollapsed }"
+            >mdi-creation</v-icon
+          >
+          <span v-if="!isSidebarCollapsed">{{ tm("actions.providerConfig") }}</span>
+        </v-btn>
 
+        <v-btn
+          class="new-chat-btn"
+          :class="{ 'icon-only': isSidebarCollapsed }"
+          variant="text"
+          :icon="isSidebarCollapsed"
+          @click="startNewChat"
+        >
+          <v-icon
+            size="20"
+            class="sidebar-action-icon"
+            :class="{ 'mr-2': !isSidebarCollapsed }"
+            >mdi-square-edit-outline</v-icon
+          >
+          <span v-if="!isSidebarCollapsed">{{ tm("actions.newChat") }}</span>
+        </v-btn>
 
-                    <div class="sidebar-collapse-btn-container">
-                        <v-btn icon class="sidebar-collapse-btn" @click="toggleSidebar" variant="text"
-                            color="deep-purple">
-                            <v-icon>{{ (sidebarCollapsed || (!sidebarCollapsed && sidebarHoverExpanded)) ?
-                                'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
-                        </v-btn>
-                    </div>
+        <ProjectList
+          v-if="!isSidebarCollapsed"
+          :projects="projects"
+          :selected-project-id="selectedProjectId"
+          @create-project="openCreateProjectDialog"
+          @edit-project="openEditProjectDialog"
+          @delete-project="handleDeleteProject"
+          @select-project="selectProject"
+        />
+      </div>
 
-                    <div style="padding: 16px; padding-top: 8px;">
-                        <v-btn block variant="text" class="new-chat-btn" @click="newC" :disabled="!currCid"
-                            v-if="!sidebarCollapsed" prepend-icon="mdi-plus"
-                            style="background-color: transparent !important; border-radius: 4px;">{{
-                                tm('actions.newChat') }}</v-btn>
-                        <v-btn icon="mdi-plus" rounded="lg" @click="newC" :disabled="!currCid" v-if="sidebarCollapsed"
-                            elevation="0"></v-btn>
-                    </div>
-                    <div v-if="!sidebarCollapsed">
-                        <v-divider class="mx-4"></v-divider>
-                    </div>
+      <div v-if="!isSidebarCollapsed" class="session-list">
+        <div
+          v-for="session in sessions"
+          :key="session.session_id"
+          class="session-item"
+          :class="{ active: !isProviderWorkspace && currSessionId === session.session_id }"
+          role="button"
+          tabindex="0"
+          @click="selectSession(session.session_id)"
+          @keydown.enter="selectSession(session.session_id)"
+          @keydown.space.prevent="selectSession(session.session_id)"
+        >
+          <span v-if="!isSidebarCollapsed" class="session-title">{{
+            sessionTitle(session)
+          }}</span>
+          <div class="session-actions" @click.stop>
+            <v-btn
+              icon="mdi-pencil-outline"
+              size="x-small"
+              variant="text"
+              class="session-action-btn"
+              :title="tm('conversation.editDisplayName')"
+              @click="editSidebarSessionTitle(session)"
+            />
+            <v-btn
+              icon="mdi-delete-outline"
+              size="x-small"
+              variant="text"
+              class="session-action-btn"
+              :title="tm('actions.deleteChat')"
+              @click="deleteSidebarSession(session)"
+            />
+          </div>
+          <v-progress-circular
+            v-if="isSessionRunning(session.session_id)"
+            class="session-progress"
+            indeterminate
+            size="16"
+            width="2"
+          />
+        </div>
 
+        <div
+          v-if="!isSidebarCollapsed && !sessions.length && !loadingSessions"
+          class="empty-sessions"
+        >
+          {{ tm("conversation.noHistory") }}
+        </div>
+      </div>
 
-                    <div style="overflow-y: auto; flex-grow: 1;" :class="{ 'fade-in': sidebarHoverExpanded }"
-                        v-if="!sidebarCollapsed">
-                        <v-card v-if="conversations.length > 0" flat style="background-color: transparent;">
-                            <v-list density="compact" nav class="conversation-list"
-                                style="background-color: transparent;" v-model:selected="selectedConversations"
-                                @update:selected="getConversationMessages">
-                                <v-list-item v-for="(item, i) in conversations" :key="item.cid" :value="item.cid"
-                                    rounded="lg" class="conversation-item" active-color="secondary">
-                                    <v-list-item-title v-if="!sidebarCollapsed" class="conversation-title">{{ item.title
-                                        || tm('conversation.newConversation') }}</v-list-item-title>
-                                    <v-list-item-subtitle v-if="!sidebarCollapsed" class="timestamp">{{
-                                        formatDate(item.updated_at)
-                                    }}</v-list-item-subtitle>
+      <div class="sidebar-footer">
+        <StyledMenu
+          location="top start"
+          offset="10"
+          :close-on-content-click="false"
+        >
+          <template #activator="{ props: menuProps }">
+            <v-btn
+              v-bind="menuProps"
+              class="settings-btn"
+              :class="{ 'icon-only': isSidebarCollapsed }"
+              variant="text"
+              :icon="isSidebarCollapsed"
+            >
+              <v-icon
+                size="20"
+                class="sidebar-action-icon"
+                :class="{ 'mr-2': !isSidebarCollapsed }"
+                >mdi-cog-outline</v-icon
+              >
+              <span v-if="!isSidebarCollapsed">{{
+                t("core.common.settings")
+              }}</span>
+            </v-btn>
+          </template>
 
-                                    <template v-if="!sidebarCollapsed" v-slot:append>
-                                        <div class="conversation-actions">
-                                            <v-btn icon="mdi-pencil" size="x-small" variant="text"
-                                                class="edit-title-btn"
-                                                @click.stop="showEditTitleDialog(item.cid, item.title)" />
-                                            <v-btn icon="mdi-delete" size="x-small" variant="text"
-                                                class="delete-conversation-btn" color="error"
-                                                @click.stop="deleteConversation(item.cid)" />
-                                        </div>
-                                    </template>
-                                </v-list-item>
-                            </v-list>
-                        </v-card>
+          <div class="settings-menu-content">
+            <v-menu
+              location="end"
+              offset="8"
+              open-on-hover
+              :close-on-content-click="true"
+            >
+              <template #activator="{ props: transportMenuProps }">
+                <v-list-item
+                  v-bind="transportMenuProps"
+                  class="styled-menu-item"
+                  rounded="md"
+                >
+                  <template #prepend>
+                    <v-icon size="18">mdi-connection</v-icon>
+                  </template>
+                  <v-list-item-title>{{
+                    tm("transport.title")
+                  }}</v-list-item-title>
+                  <template #append>
+                    <span class="settings-menu-value">{{
+                      currentTransportLabel
+                    }}</span>
+                    <v-icon size="18">mdi-chevron-right</v-icon>
+                  </template>
+                </v-list-item>
+              </template>
 
-                        <v-fade-transition>
-                            <div class="no-conversations" v-if="conversations.length === 0">
-                                <v-icon icon="mdi-message-text-outline" size="large" color="grey-lighten-1"></v-icon>
-                                <div class="no-conversations-text" v-if="!sidebarCollapsed || sidebarHoverExpanded">
-                                    {{ tm('conversation.noHistory') }}</div>
-                            </div>
-                        </v-fade-transition>
-                    </div>
+              <v-card class="styled-menu-card" elevation="8" rounded="lg">
+                <v-list density="compact" class="styled-menu-list pa-1">
+                  <v-list-item
+                    v-for="item in transportOptions"
+                    :key="item.value"
+                    class="styled-menu-item"
+                    :class="{
+                      'styled-menu-item-active': transportMode === item.value,
+                    }"
+                    rounded="md"
+                    @click="transportMode = item.value"
+                  >
+                    <v-list-item-title>{{
+                      tm(item.labelKey)
+                    }}</v-list-item-title>
+                    <template #append>
+                      <v-icon v-if="transportMode === item.value" size="18">
+                        mdi-check
+                      </v-icon>
+                    </template>
+                  </v-list-item>
+                </v-list>
+              </v-card>
+            </v-menu>
 
-                </div>
+            <v-menu
+              location="end"
+              offset="8"
+              open-on-hover
+              :close-on-content-click="true"
+            >
+              <template #activator="{ props: languageMenuProps }">
+                <v-list-item
+                  v-bind="languageMenuProps"
+                  class="styled-menu-item"
+                  rounded="md"
+                >
+                  <template #prepend>
+                    <v-icon size="18">mdi-translate</v-icon>
+                  </template>
+                  <v-list-item-title>{{
+                    t("core.common.language")
+                  }}</v-list-item-title>
+                  <template #append>
+                    <span class="settings-menu-value">{{
+                      currentLanguage?.label || locale
+                    }}</span>
+                    <v-icon size="18">mdi-chevron-right</v-icon>
+                  </template>
+                </v-list-item>
+              </template>
 
-                <!-- 右侧聊天内容区域 -->
-                <div class="chat-content-panel">
+              <v-card class="styled-menu-card" elevation="8" rounded="lg">
+                <v-list density="compact" class="styled-menu-list pa-1">
+                  <v-list-item
+                    v-for="lang in languageOptions"
+                    :key="lang.value"
+                    class="styled-menu-item"
+                    :class="{
+                      'styled-menu-item-active': locale === lang.value,
+                    }"
+                    rounded="md"
+                    @click="switchLanguage(lang.value as Locale)"
+                  >
+                    <template #prepend>
+                      <span class="language-flag">{{ lang.flag }}</span>
+                    </template>
+                    <v-list-item-title>{{ lang.label }}</v-list-item-title>
+                    <template #append>
+                      <v-icon v-if="locale === lang.value" size="18">
+                        mdi-check
+                      </v-icon>
+                    </template>
+                  </v-list-item>
+                </v-list>
+              </v-card>
+            </v-menu>
 
-                    <div class="conversation-header fade-in">
-                        <div v-if="currCid && getCurrentConversation">
-                            <h3
-                                style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                {{ getCurrentConversation.title || tm('conversation.newConversation') }}</h3>
-                            <span style="font-size: 12px;">{{ formatDate(getCurrentConversation.updated_at) }}</span>
-                        </div>
-                        <div class="conversation-header-actions">
-                            <!-- router 推送到 /chatbox -->
-                            <v-tooltip :text="tm('actions.fullscreen')" v-if="!chatboxMode">
-                                <template v-slot:activator="{ props }">
-                                    <v-icon v-bind="props"
-                                        @click="router.push(currCid ? `/chatbox/${currCid}` : '/chatbox')"
-                                        class="fullscreen-icon">mdi-fullscreen</v-icon>
-                                </template>
-                            </v-tooltip>
-                            <!-- 语言切换按钮 -->
-                            <v-tooltip :text="t('core.common.language')" v-if="chatboxMode">
-                                <template v-slot:activator="{ props }">
-                                    <LanguageSwitcher variant="chatbox" />
-                                </template>
-                            </v-tooltip>
-                            <!-- 主题切换按钮 -->
-                            <v-tooltip :text="isDark ? tm('modes.lightMode') : tm('modes.darkMode')" v-if="chatboxMode">
-                                <template v-slot:activator="{ props }">
-                                    <v-btn v-bind="props" icon @click="toggleTheme" class="theme-toggle-icon"
-                                        size="small" rounded="sm" style="margin-right: 8px;" variant="text">
-                                        <v-icon>{{ isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny' }}</v-icon>
-                                    </v-btn>
-                                </template>
-                            </v-tooltip>
-                            <!-- router 推送到 /chat -->
-                            <v-tooltip :text="tm('actions.exitFullscreen')" v-if="chatboxMode">
-                                <template v-slot:activator="{ props }">
-                                    <v-icon v-bind="props" @click="router.push(currCid ? `/chat/${currCid}` : '/chat')"
-                                        class="fullscreen-icon">mdi-fullscreen-exit</v-icon>
-                                </template>
-                            </v-tooltip>
-                        </div>
-                    </div>
-                    <v-divider v-if="currCid && getCurrentConversation" class="conversation-divider"></v-divider>
+            <v-list-item
+              class="styled-menu-item"
+              rounded="md"
+              @click="toggleTheme"
+            >
+              <template #prepend>
+                <v-icon size="18">{{
+                  isDark ? "mdi-white-balance-sunny" : "mdi-weather-night"
+                }}</v-icon>
+              </template>
+              <v-list-item-title>{{
+                isDark ? tm("modes.lightMode") : tm("modes.darkMode")
+              }}</v-list-item-title>
+            </v-list-item>
+          </div>
+        </StyledMenu>
+      </div>
+    </v-navigation-drawer>
 
-                    <MessageList v-if="messages && messages.length > 0" :messages="messages" :isDark="isDark"
-                        :isStreaming="isStreaming || isConvRunning" @openImagePreview="openImagePreview"
-                        ref="messageList" />
-                    <div class="welcome-container fade-in" v-else>
-                        <div class="welcome-title">
-                            <span>Hello, I'm</span>
-                            <span class="bot-name">AstrBot ⭐</span>
-                        </div>
-                        <div class="welcome-hint markdown-content">
-                            <span>{{ t('core.common.type') }}</span>
-                            <code>help</code>
-                            <span>{{ tm('shortcuts.help') }} 😊</span>
-                        </div>
-                        <div class="welcome-hint markdown-content">
-                            <span>{{ t('core.common.longPress') }}</span>
-                            <code>Ctrl + B</code>
-                            <span>{{ tm('shortcuts.voiceRecord') }} 🎤</span>
-                        </div>
-                        <div class="welcome-hint markdown-content">
-                            <span>{{ t('core.common.press') }}</span>
-                            <code>Ctrl + V</code>
-                            <span>{{ tm('shortcuts.pasteImage') }} 🏞️</span>
-                        </div>
-                    </div>
+    <main
+      class="chat-main"
+      :class="{
+        'empty-chat': !isProviderWorkspace &&
+          !selectedProject && !loadingMessages && !activeMessages.length,
+      }"
+    >
+      <section v-if="isProviderWorkspace" class="provider-workspace-shell">
+        <ProviderChatCompletionPanel
+          class="provider-workspace-page"
+          :show-border="false"
+        />
+      </section>
 
-                    <!-- 输入区域 -->
-                    <div class="input-area fade-in">
-                        <div
-                            style="width: 85%; max-width: 900px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 24px;">
-                            <textarea id="input-field" v-model="prompt" @keydown="handleInputKeyDown"
-                                :disabled="isStreaming" @click:clear="clearMessage"
-                                placeholder="Ask AstrBot..."
-                                style="width: 100%; resize: none; outline: none; border: 1px solid var(--v-theme-border); border-radius: 12px; padding: 8px 16px; min-height: 40px; font-family: inherit; font-size: 16px; background-color: var(--v-theme-surface);"></textarea>
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; padding: 0px 8px;">
-                                <div style="display: flex; justify-content: flex-start; margin-top: 4px;">
-                                    <!-- 选择提供商和模型 -->
-                                    <ProviderModelSelector ref="providerModelSelector" />
-                                </div>
-                                <div
-                                    style="display: flex; justify-content: flex-end; margin-top: 8px; align-items: center;">
-                                    <input type="file" ref="imageInput" @change="handleFileSelect" accept="image/*"
-                                        style="display: none" multiple />
-                                    <v-progress-circular v-if="isStreaming || isConvRunning" indeterminate size="16"
-                                        class="mr-1" width="1.5" />
-                                    <v-btn @click="triggerImageInput" icon="mdi-plus" variant="text" color="deep-purple"
-                                        class="add-btn" size="small" />
-                                    <v-btn @click="isRecording ? stopRecording() : startRecording()"
-                                        :icon="isRecording ? 'mdi-stop-circle' : 'mdi-microphone'" variant="text"
-                                        :color="isRecording ? 'error' : 'deep-purple'" class="record-btn"
-                                        size="small" />
-                                    <v-btn @click="sendMessage" icon="mdi-send" variant="text" color="deep-purple"
-                                        :disabled="!prompt && stagedImagesName.length === 0 && !stagedAudioUrl"
-                                        class="send-btn" size="small" />
-                                </div>
-                            </div>
+      <ProjectView
+        v-else-if="selectedProject"
+        :project="selectedProject"
+        :sessions="projectSessions"
+        @select-session="selectProjectSession"
+        @edit-session-title="editProjectSessionTitle"
+        @delete-session="deleteProjectSession"
+      >
+        <section class="project-composer-shell">
+          <ChatInput
+            ref="inputRef"
+            v-model:prompt="draft"
+            :staged-images-url="stagedImagesUrl"
+            :staged-audio-url="stagedAudioUrl"
+            :staged-files="stagedNonImageFiles"
+            :disabled="sending"
+            :enable-streaming="enableStreaming"
+            :is-recording="isRecording"
+            :is-running="
+              Boolean(currSessionId && isSessionRunning(currSessionId))
+            "
+            :session-id="currSessionId || null"
+            :current-session="currentSession"
+            :reply-to="chatInputReplyTarget"
+            :send-shortcut="sendShortcut"
+            @send="sendCurrentMessage"
+            @stop="stopCurrentSession"
+            @toggle-streaming="toggleStreaming"
+            @remove-image="removeImage"
+            @remove-audio="removeAudio"
+            @remove-file="removeFile"
+            @start-recording="startRecording"
+            @stop-recording="stopRecording"
+            @paste-image="handlePaste"
+            @file-select="handleFilesSelected"
+            @clear-reply="replyTarget = null"
+          />
+        </section>
+      </ProjectView>
 
-                        </div>
+      <template v-else>
+        <section
+          ref="messagesContainer"
+          class="messages-panel"
+          @scroll="handleMessagesScroll"
+        >
+          <div v-if="loadingMessages" class="center-state">
+            <v-progress-circular indeterminate size="32" width="3" />
+          </div>
 
-                        <!-- 附件预览区 -->
-                        <div class="attachments-preview" v-if="stagedImagesUrl.length > 0 || stagedAudioUrl">
-                            <div v-for="(img, index) in stagedImagesUrl" :key="index" class="image-preview">
-                                <img :src="img" class="preview-image" />
-                                <v-btn @click="removeImage(index)" class="remove-attachment-btn" icon="mdi-close"
-                                    size="small" color="error" variant="text" />
-                            </div>
+          <div v-else-if="sessionProject" class="session-project-breadcrumb">
+            <span>{{ sessionProject.title }}</span>
+            <v-icon size="16">mdi-chevron-right</v-icon>
+            <span>{{ currentSessionTitle }}</span>
+          </div>
 
-                            <div v-if="stagedAudioUrl" class="audio-preview">
-                                <v-chip color="deep-purple-lighten-4" class="audio-chip">
-                                    <v-icon start icon="mdi-microphone" size="small"></v-icon>
-                                    {{ tm('voice.recording') }}
-                                </v-chip>
-                                <v-btn @click="removeAudio" class="remove-attachment-btn" icon="mdi-close" size="small"
-                                    color="error" variant="text" />
-                            </div>
-                        </div>
-                    </div>
-                </div>
+          <div v-else-if="!activeMessages.length" class="welcome-state">
+            <div class="welcome-title">{{ tm("welcome.title") }}</div>
+          </div>
 
-            </div>
+          <div
+            v-if="!loadingMessages && activeMessages.length"
+            class="messages-list-shell"
+          >
+            <ChatMessageList
+              v-model:edit-draft="messageEditDraft"
+              :messages="activeMessages"
+              :is-dark="isDark"
+              :is-streaming="
+                Boolean(currSessionId && isSessionRunning(currSessionId))
+              "
+              :enable-edit="
+                !Boolean(currSessionId && isSessionRunning(currSessionId))
+              "
+              enable-regenerate
+              enable-thread-selection
+              :manage-refs-sidebar="false"
+              :editing-message-id="editingMessage?.id || null"
+              :saving-edit="savingMessageEdit"
+              @open-edit="openMessageEdit"
+              @cancel-edit="cancelMessageEdit"
+              @save-edit="saveMessageEdit"
+              @regenerate="handleRegenerateMessage"
+              @regenerate-with-model="handleRegenerateMessage"
+              @select-bot-text="handleBotTextSelection"
+              @open-thread="openThreadPanel"
+              @open-reasoning="openReasoningPanel"
+              @open-refs="openRefsSidebar"
+            />
+          </div>
+        </section>
+
+        <section class="composer-shell">
+          <ChatInput
+            ref="inputRef"
+            v-model:prompt="draft"
+            :staged-images-url="stagedImagesUrl"
+            :staged-audio-url="stagedAudioUrl"
+            :staged-files="stagedNonImageFiles"
+            :disabled="sending"
+            :enable-streaming="enableStreaming"
+            :is-recording="isRecording"
+            :is-running="
+              Boolean(currSessionId && isSessionRunning(currSessionId))
+            "
+            :session-id="currSessionId || null"
+            :current-session="currentSession"
+            :reply-to="chatInputReplyTarget"
+            :send-shortcut="sendShortcut"
+            @send="sendCurrentMessage"
+            @stop="stopCurrentSession"
+            @toggle-streaming="toggleStreaming"
+            @remove-image="removeImage"
+            @remove-audio="removeAudio"
+            @remove-file="removeFile"
+            @start-recording="startRecording"
+            @stop-recording="stopRecording"
+            @paste-image="handlePaste"
+            @file-select="handleFilesSelected"
+            @clear-reply="replyTarget = null"
+          />
+        </section>
+      </template>
+    </main>
+
+    <div
+      v-if="threadSelection.visible"
+      class="thread-selection-action"
+      :style="{
+        left: `${threadSelection.left}px`,
+        top: `${threadSelection.top}px`,
+      }"
+    >
+      <button
+        class="thread-selection-button"
+        type="button"
+        @click="createThreadFromSelection"
+      >
+        {{ tm("thread.askInThread") }}
+      </button>
+    </div>
+
+    <ProjectDialog
+      v-model="projectDialogOpen"
+      :project="editingProject"
+      @save="saveProject"
+    />
+    <v-dialog v-model="sessionTitleDialogOpen" max-width="420">
+      <v-card>
+        <v-card-title class="text-h6">
+          {{ tm("conversation.editDisplayName") }}
+        </v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="sessionTitleDraft"
+            :label="tm('conversation.displayName')"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            autofocus
+            @keydown.enter="saveSessionTitleDialog"
+          />
         </v-card-text>
-    </v-card>
-    <!-- 编辑对话标题对话框 -->
-    <v-dialog v-model="editTitleDialog" max-width="400">
-        <v-card>
-            <v-card-title class="dialog-title">{{ tm('actions.editTitle') }}</v-card-title>
-            <v-card-text>
-                <v-text-field v-model="editingTitle" :label="tm('conversation.newConversation')" variant="outlined"
-                    hide-details class="mt-2" @keyup.enter="saveTitle" autofocus />
-            </v-card-text>
-            <v-card-actions>
-                <v-spacer></v-spacer>
-                <v-btn text @click="editTitleDialog = false" color="grey-darken-1">{{ t('core.common.cancel') }}</v-btn>
-                <v-btn text @click="saveTitle" color="primary">{{ t('core.common.save') }}</v-btn>
-            </v-card-actions>
-        </v-card>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="sessionTitleDialogOpen = false">
+            {{ t("core.common.cancel") }}
+          </v-btn>
+          <v-btn
+            color="primary"
+            :loading="savingSessionTitle"
+            @click="saveSessionTitleDialog"
+          >
+            {{ t("core.common.save") }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
     </v-dialog>
-
-    <!-- 图片预览对话框 -->
-    <v-dialog v-model="imagePreviewDialog" max-width="90vw" max-height="90vh">
-        <v-card class="image-preview-card" elevation="8">
-            <v-card-title class="d-flex justify-space-between align-center pa-4">
-                <span>{{ t('core.common.imagePreview') }}</span>
-                <v-btn icon="mdi-close" variant="text" @click="imagePreviewDialog = false" />
-            </v-card-title>
-            <v-card-text class="text-center pa-4">
-                <img :src="previewImageUrl" class="preview-image-large" />
-            </v-card-text>
-        </v-card>
-    </v-dialog>
+    <ThreadPanel
+      v-model="threadPanelOpen"
+      :thread="activeThread"
+      :is-dark="isDark"
+      :deleting="deletingThread"
+      @delete="deleteThread"
+    />
+    <ReasoningSidebar
+      v-model="reasoningPanelOpen"
+      :parts="activeReasoningParts"
+      :is-dark="isDark"
+    />
+    <RefsSidebar v-model="refsSidebarOpen" :refs="selectedRefs" />
+  </div>
 </template>
 
-<script>
-import { router } from '@/router';
-import axios from 'axios';
-import { ref } from 'vue';
-import { useCustomizerStore } from '@/stores/customizer';
-import { useI18n, useModuleI18n } from '@/i18n/composables';
-import LanguageSwitcher from '@/components/shared/LanguageSwitcher.vue';
-import ProviderModelSelector from '@/components/chat/ProviderModelSelector.vue';
-import MessageList from '@/components/chat/MessageList.vue';
-import 'highlight.js/styles/github.css';
-import { useToast } from '@/utils/toast';
+<script setup lang="ts">
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  provide,
+  reactive,
+  ref,
+  watch,
+} from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useDisplay } from "vuetify";
+import axios from "axios";
+import StyledMenu from "@/components/shared/StyledMenu.vue";
+import ProjectDialog, {
+  type ProjectFormData,
+} from "@/components/chat/ProjectDialog.vue";
+import ProjectList, { type Project } from "@/components/chat/ProjectList.vue";
+import ProjectView from "@/components/chat/ProjectView.vue";
+import ChatInput from "@/components/chat/ChatInput.vue";
+import ChatMessageList from "@/components/chat/ChatMessageList.vue";
+import type { RegenerateModelSelection } from "@/components/chat/RegenerateMenu.vue";
+import ReasoningSidebar from "@/components/chat/ReasoningSidebar.vue";
+import ThreadPanel from "@/components/chat/ThreadPanel.vue";
+import RefsSidebar from "@/components/chat/message_list_comps/RefsSidebar.vue";
+import { useSessions, type Session } from "@/composables/useSessions";
+import {
+  messageBlocks as buildMessageBlocks,
+  useMessages,
+  type ChatRecord,
+  type ChatThread,
+  type MessagePart,
+  type TransportMode,
+} from "@/composables/useMessages";
+import { useMediaHandling } from "@/composables/useMediaHandling";
+import { useRecording } from "@/composables/useRecording";
+import { useProjects } from "@/composables/useProjects";
+import { useCustomizerStore } from "@/stores/customizer";
+import ProviderChatCompletionPanel from "@/components/provider/ProviderChatCompletionPanel.vue";
+import {
+  useI18n,
+  useLanguageSwitcher,
+  useModuleI18n,
+} from "@/i18n/composables";
+import type { Locale } from "@/i18n/types";
+import { askForConfirmation, useConfirmDialog } from "@/utils/confirmDialog";
+import { useToast } from "@/utils/toast";
 
-export default {
-    name: 'ChatPage',
-    components: {
-        LanguageSwitcher,
-        ProviderModelSelector,
-        MessageList
-    },
-    props: {
-        chatboxMode: {
-            type: Boolean,
-            default: false
-        }
-    }, setup() {
-        const { t } = useI18n();
-        const { tm } = useModuleI18n('features/chat');
+const props = withDefaults(defineProps<{ chatboxMode?: boolean; active?: boolean }>(), {
+  chatboxMode: false,
+  active: true,
+});
 
-        return {
-            t,
-            tm,
-            router,
-            ref
-        };
-    },
-    data() {
-        return {
-            prompt: '',
-            messages: [],
-            conversations: [],
-            selectedConversations: [], // 用于控制左侧列表的选中状态
-            currCid: '',
-            stagedImagesName: [], // 用于存储图片文件名的数组
-            stagedImagesUrl: [], // 用于存储图片的blob URL数组
-            loadingChat: false,
+const route = useRoute();
+const router = useRouter();
+const { lgAndUp } = useDisplay();
+const customizer = useCustomizerStore();
+const { t } = useI18n();
+const { tm } = useModuleI18n("features/chat");
+const confirmDialog = useConfirmDialog();
+const toast = useToast();
+const { languageOptions, currentLanguage, switchLanguage, locale } =
+  useLanguageSwitcher();
+const {
+  sessions,
+  currSessionId,
+  getSessions,
+  newSession,
+  newChat,
+  deleteSession,
+  updateSessionTitle,
+} = useSessions(props.chatboxMode);
+const {
+  projects,
+  selectedProjectId,
+  getProjects,
+  createProject,
+  updateProject,
+  deleteProject: deleteProjectById,
+  addSessionToProject,
+  getProjectSessions,
+} = useProjects();
 
-            inputFieldLabel: '',
+const {
+  stagedFiles,
+  stagedImagesUrl,
+  stagedAudioUrl,
+  stagedNonImageFiles,
+  processAndUploadImage,
+  processAndUploadFile,
+  handlePaste,
+  removeImage,
+  removeAudio,
+  removeFile,
+  clearStaged,
+  cleanupMediaCache,
+} = useMediaHandling();
 
-            isRecording: false,
-            audioChunks: [],
-            stagedAudioUrl: "",
-            mediaRecorder: null,
+type WorkspaceView = "chat" | "providers";
 
-            // Ctrl键长按相关变量
-            ctrlKeyDown: false,
-            ctrlKeyTimer: null,
-            ctrlKeyLongPressThreshold: 300, // 长按阈值，单位毫秒
+const sidebarCollapsed = ref(false);
+const activeWorkspace = ref<WorkspaceView>("chat");
+const projectDialogOpen = ref(false);
+const editingProject = ref<Project | null>(null);
+const sessionTitleDialogOpen = ref(false);
+const sessionTitleDraft = ref("");
+const editingSessionTitleId = ref("");
+const refreshProjectSessionsAfterTitleSave = ref(false);
+const savingSessionTitle = ref(false);
+const messageEditDraft = ref("");
+const editingMessage = ref<ChatRecord | null>(null);
+const savingMessageEdit = ref(false);
+const projectSessions = ref<Session[]>([]);
+const loadingSessions = ref(false);
+const draft = ref("");
+const messagesContainer = ref<HTMLElement | null>(null);
+const inputRef = ref<InstanceType<typeof ChatInput> | null>(null);
+const shouldStickToBottom = ref(true);
+const replyTarget = ref<ChatRecord | null>(null);
+const threadPanelOpen = ref(false);
+const activeThread = ref<ChatThread | null>(null);
+const reasoningPanelOpen = ref(false);
+const activeReasoningTarget = ref<{
+  message: ChatRecord;
+  blockIndex: number;
+} | null>(null);
+const deletingThread = ref(false);
+const refsSidebarOpen = ref(false);
+const selectedRefs = ref<Record<string, unknown> | null>(null);
+const threadSelection = reactive<{
+  visible: boolean;
+  left: number;
+  top: number;
+  message: ChatRecord | null;
+  selectedText: string;
+}>({
+  visible: false,
+  left: 0,
+  top: 0,
+  message: null,
+  selectedText: "",
+});
+const enableStreaming = ref(true);
+const sendShortcut = ref<"enter" | "shift_enter">("enter");
+const {
+  isRecording,
+  startRecording: startRecorder,
+  stopRecording: stopRecorder,
+} = useRecording();
+const chatSidebarDrawer = computed({
+  get: () => lgAndUp.value || customizer.chatSidebarOpen,
+  set: (value: boolean) => {
+    if (!lgAndUp.value) {
+      customizer.SET_CHAT_SIDEBAR(value);
+    }
+  },
+});
+const isSidebarCollapsed = computed(() =>
+  lgAndUp.value ? sidebarCollapsed.value : !customizer.chatSidebarOpen,
+);
+const isProviderWorkspace = computed(
+  () => activeWorkspace.value === "providers",
+);
+const activeReasoningParts = computed<MessagePart[]>(() => {
+  if (!activeReasoningTarget.value) return [];
+  const blocks = buildMessageBlocks(
+    activeReasoningTarget.value.message.content || { type: "bot", message: [] },
+  );
+  const block = blocks[activeReasoningTarget.value.blockIndex];
+  return block?.kind === "thinking" ? block.parts : [];
+});
 
-            mediaCache: {}, // Add a cache to store media blobs
+watch(reasoningPanelOpen, (open) => {
+  if (!open) {
+    activeReasoningTarget.value = null;
+  }
+});
 
-            // 添加对话标题编辑相关变量
-            editTitleDialog: false,
-            editingTitle: '',
-            editingCid: '',
+const {
+  loadingMessages,
+  sending,
+  loadedSessions,
+  sessionProjects,
+  activeMessages,
+  isSessionRunning,
+  isUserMessage,
+  messageParts,
+  loadSessionMessages,
+  createLocalExchange,
+  sendMessageStream,
+  editMessage,
+  continueEditedMessage,
+  regenerateMessage,
+  stopSession,
+} = useMessages({
+  currentSessionId: currSessionId,
+  onSessionsChanged: getSessions,
+  onStreamUpdate: (sessionId) => {
+    if (sessionId === currSessionId.value && shouldStickToBottom.value) {
+      scrollToBottom();
+    }
+  },
+});
 
-            // 侧边栏折叠状态
-            sidebarCollapsed: true,
-            sidebarHovered: false,
-            sidebarHoverTimer: null,
-            sidebarHoverExpanded: false,
-            sidebarHoverDelay: 100, // 悬停延迟，单位毫秒            
-            pendingCid: null, // Store pending conversation ID for route handling
+const transportMode = ref<TransportMode>(
+  (localStorage.getItem("chat.transportMode") as TransportMode) === "websocket"
+    ? "websocket"
+    : "sse",
+);
+const transportOptions: Array<{ value: TransportMode; labelKey: string }> = [
+  { value: "sse", labelKey: "transport.sse" },
+  { value: "websocket", labelKey: "transport.websocket" },
+];
+const currentTransportLabel = computed(() =>
+  tm(
+    transportOptions.find((item) => item.value === transportMode.value)
+      ?.labelKey || "transport.sse",
+  ),
+);
 
-            // 图片预览相关变量
-            imagePreviewDialog: false,
-            previewImageUrl: '',
+watch(transportMode, (mode) => {
+  localStorage.setItem("chat.transportMode", mode);
+});
 
-            isStreaming: false,
-            isConvRunning: false, // Track if the current conversation is running
+const isDark = computed(() => customizer.uiTheme === "PurpleThemeDark");
+const canSend = computed(
+  () =>
+    Boolean(draft.value.trim() || stagedFiles.value.length) && !sending.value,
+);
+const currentSession = computed(
+  () =>
+    sessions.value.find(
+      (session) => session.session_id === currSessionId.value,
+    ) ||
+    projectSessions.value.find(
+      (session) => session.session_id === currSessionId.value,
+    ) ||
+    null,
+);
+const sessionProject = computed(() =>
+  currSessionId.value ? sessionProjects[currSessionId.value] : null,
+);
+const currentSessionTitle = computed(() =>
+  currentSession.value ? sessionTitle(currentSession.value) : "",
+);
+const selectedProject = computed(
+  () =>
+    projects.value.find(
+      (project) => project.project_id === selectedProjectId.value,
+    ) || null,
+);
+const chatInputReplyTarget = computed(() =>
+  replyTarget.value?.id == null
+    ? null
+    : {
+        messageId: replyTarget.value.id,
+        selectedText: replyPreview(replyTarget.value.id, ""),
+      },
+);
 
-            isToastedRunningInfo: false, // To avoid multiple toasts
-            activeSSECount: 0, // Track number of active SSE connections
-        }
-    },
+provide("isDark", isDark);
 
-    computed: {
-        isDark() {
-            return useCustomizerStore().uiTheme === 'PurpleThemeDark';
-        },
-        // Get the current conversation from the conversations array
-        getCurrentConversation() {
-            if (!this.currCid) return null;
-            return this.conversations.find(c => c.cid === this.currCid);
-        }
-    },
+onMounted(async () => {
+  loadingSessions.value = true;
+  try {
+    await Promise.all([getSessions(), getProjects()]);
+    const routeSessionId = getRouteSessionId();
+    if (routeSessionId === "models") {
+      activeWorkspace.value = "providers";
+    } else if (routeSessionId) {
+      await selectSession(routeSessionId, false);
+    }
+  } finally {
+    loadingSessions.value = false;
+  }
+});
 
-    watch: {
-        // Watch for route changes to handle direct navigation to /chat/<cid>
-        '$route': {
-            immediate: true,
-            handler(to, from) {
-                console.log('Route changed:', to.path, 'from:', from?.path);
-                if (from &&
-                    ((from.path.startsWith('/chat') && to.path.startsWith('/chatbox')) ||
-                        (from.path.startsWith('/chatbox') && to.path.startsWith('/chat')))) {
-                }
+onBeforeUnmount(() => {
+  cleanupMediaCache();
+});
 
-                // Check if the route matches /chat/<cid> or /chatbox/<cid> pattern
-                if (to.path.startsWith('/chat/') || to.path.startsWith('/chatbox/')) {
-                    const pathCid = to.path.split('/')[2];
-                    console.log('Path CID:', pathCid);
-                    if (pathCid && pathCid !== this.currCid) {
-                        // If conversations are already loaded
-                        if (this.conversations.length > 0) {
-                            const conversation = this.conversations.find(c => c.cid === pathCid);
-                            if (conversation) {
-                                this.getConversationMessages([pathCid]);
-                            }
-                        } else {
-                            // Store the cid to be used after conversations are loaded
-                            this.pendingCid = pathCid;
-                        }
-                    }
-                }
+watch(
+  () => route.params.conversationId,
+  async () => {
+    const routeSessionId = getRouteSessionId();
+    if (routeSessionId === "models") {
+      activeWorkspace.value = "providers";
+      return;
+    }
+    if (routeSessionId && routeSessionId !== currSessionId.value) {
+      showChatWorkspace();
+      selectedProjectId.value = null;
+      await selectSession(routeSessionId, false);
+    } else if (!routeSessionId && currSessionId.value) {
+      showChatWorkspace();
+      currSessionId.value = "";
+    }
+  },
+);
+
+watch(activeMessages, () => {
+  if (shouldStickToBottom.value) {
+    scrollToBottom();
+  }
+});
+
+function getRouteSessionId() {
+  const raw = route.params.conversationId;
+  return Array.isArray(raw) ? raw[0] : raw || "";
+}
+
+function basePath() {
+  return props.chatboxMode ? "/chatbox" : "/chat";
+}
+
+function closeMobileSidebar() {
+  if (!lgAndUp.value) {
+    customizer.SET_CHAT_SIDEBAR(false);
+  }
+}
+
+function closeSecondaryPanels() {
+  threadSelection.visible = false;
+  threadPanelOpen.value = false;
+  activeThread.value = null;
+  reasoningPanelOpen.value = false;
+  activeReasoningTarget.value = null;
+  refsSidebarOpen.value = false;
+  selectedRefs.value = null;
+}
+
+function showChatWorkspace() {
+  activeWorkspace.value = "chat";
+}
+
+async function openProviderWorkspace() {
+  closeSecondaryPanels();
+  activeWorkspace.value = "providers";
+  const targetPath = `${basePath()}/models`;
+  if (route.path !== targetPath) {
+    await router.push(targetPath);
+  }
+  closeMobileSidebar();
+}
+
+function sessionTitle(session: Session) {
+  return session.display_name?.trim() || tm("conversation.newConversation");
+}
+
+async function startNewChat() {
+  showChatWorkspace();
+  selectedProjectId.value = null;
+  replyTarget.value = null;
+  newChat();
+  closeMobileSidebar();
+  await focusChatInput();
+}
+
+function openCreateProjectDialog() {
+  editingProject.value = null;
+  projectDialogOpen.value = true;
+}
+
+function openEditProjectDialog(project: Project) {
+  editingProject.value = project;
+  projectDialogOpen.value = true;
+}
+
+async function selectProject(projectId: string) {
+  showChatWorkspace();
+  selectedProjectId.value = projectId;
+  currSessionId.value = "";
+  replyTarget.value = null;
+  await router.push(basePath());
+  await loadProjectSessions(projectId);
+  closeMobileSidebar();
+}
+
+async function loadProjectSessions(projectId = selectedProjectId.value) {
+  if (!projectId) {
+    projectSessions.value = [];
+    return;
+  }
+  projectSessions.value = await getProjectSessions(projectId);
+}
+
+async function handleDeleteProject(projectId: string) {
+  await deleteProjectById(projectId);
+  if (selectedProjectId.value === projectId) {
+    selectedProjectId.value = null;
+    projectSessions.value = [];
+  }
+}
+
+function openSessionTitleDialog(
+  sessionId: string,
+  title: string,
+  refreshProjectSessions = false,
+) {
+  editingSessionTitleId.value = sessionId;
+  sessionTitleDraft.value = title;
+  refreshProjectSessionsAfterTitleSave.value = refreshProjectSessions;
+  sessionTitleDialogOpen.value = true;
+}
+
+async function saveSessionTitleDialog() {
+  if (!editingSessionTitleId.value) return;
+
+  savingSessionTitle.value = true;
+  try {
+    const sessionId = editingSessionTitleId.value;
+    const displayName = sessionTitleDraft.value.trim();
+    await axios.post("/api/chat/update_session_display_name", {
+      session_id: sessionId,
+      display_name: displayName,
+    });
+    updateSessionTitle(sessionId, displayName);
+    const projectSession = projectSessions.value.find(
+      (session) => session.session_id === sessionId,
+    );
+    if (projectSession) {
+      projectSession.display_name = displayName;
+    }
+    if (refreshProjectSessionsAfterTitleSave.value) {
+      await loadProjectSessions();
+    }
+    sessionTitleDialogOpen.value = false;
+  } finally {
+    savingSessionTitle.value = false;
+  }
+}
+
+function editSidebarSessionTitle(session: Session) {
+  openSessionTitleDialog(session.session_id, session.display_name || "");
+}
+
+async function deleteSidebarSession(session: Session) {
+  const title = sessionTitle(session);
+  const message = tm("conversation.confirmDelete", { name: title });
+  if (!(await askForConfirmation(message, confirmDialog))) return;
+
+  const wasCurrent = currSessionId.value === session.session_id;
+  await deleteSession(session.session_id);
+  if (wasCurrent) {
+    selectedProjectId.value = null;
+    await router.push(basePath());
+  }
+}
+
+async function selectProjectSession(sessionId: string) {
+  selectedProjectId.value = null;
+  await selectSession(sessionId);
+}
+
+async function editProjectSessionTitle(sessionId: string, title: string) {
+  openSessionTitleDialog(sessionId, title, true);
+}
+
+async function deleteProjectSession(sessionId: string) {
+  await deleteSession(sessionId);
+  await loadProjectSessions();
+}
+
+async function saveProject(formData: ProjectFormData, projectId?: string) {
+  if (projectId) {
+    await updateProject(
+      projectId,
+      formData.title,
+      formData.emoji,
+      formData.description,
+    );
+    return;
+  }
+
+  await createProject(formData.title, formData.emoji, formData.description);
+}
+
+async function selectSession(sessionId: string, pushRoute = true) {
+  showChatWorkspace();
+  selectedProjectId.value = null;
+  currSessionId.value = sessionId;
+  replyTarget.value = null;
+  if (pushRoute && route.path !== `${basePath()}/${sessionId}`) {
+    await router.push(`${basePath()}/${sessionId}`);
+  }
+  if (!loadedSessions[sessionId]) {
+    await loadSessionMessages(sessionId);
+  }
+  scrollToBottom();
+  closeMobileSidebar();
+  await focusChatInput();
+}
+
+async function sendCurrentMessage() {
+  if (!canSend.value) return;
+
+  sending.value = true;
+  try {
+    let sessionId = currSessionId.value;
+    const targetProjectId = selectedProjectId.value;
+    const targetProject = selectedProject.value;
+    if (!sessionId) {
+      sessionId = await newSession();
+      if (targetProjectId) {
+        await addSessionToProject(sessionId, targetProjectId);
+        sessionProjects[sessionId] = targetProject
+          ? {
+              project_id: targetProject.project_id,
+              title: targetProject.title,
+              emoji: targetProject.emoji,
             }
-        },
-
-        // Watch for conversations loaded to handle pending cid
-        conversations: {
-            handler(newConversations) {
-                if (this.pendingCid && newConversations.length > 0) {
-                    const conversation = newConversations.find(c => c.cid === this.pendingCid);
-                    if (conversation) {
-                        // 先设置选中状态，然后加载对话消息
-                        this.selectedConversations = [this.pendingCid];
-                        this.getConversationMessages([this.pendingCid]);
-                        this.pendingCid = null;
-                    }
-                } else {
-                    // 如果没有URL参数指定的对话，且当前没有选中对话，则默认打开第一个对话
-                    if (!this.currCid && newConversations.length > 0) {
-                        const firstConversation = newConversations[0];
-                        this.selectedConversations = [firstConversation.cid];
-                        this.getConversationMessages([firstConversation.cid]);
-                    }
-                }
-            }
-        }
-    },
-
-    mounted() {
-        // Theme is now handled globally by the customizer store.
-        // 从 localStorage 读取侧边栏折叠状态，默认为 true（折叠）
-        const savedCollapsedState = localStorage.getItem('sidebarCollapsed');
-        if (savedCollapsedState !== null) {
-            this.sidebarCollapsed = JSON.parse(savedCollapsedState);
-        } else {
-            this.sidebarCollapsed = true; // 默认折叠状态
-        }
-
-        // 设置输入框标签
-        this.inputFieldLabel = this.tm('input.chatPrompt');
-        this.getConversations();
-        let inputField = document.getElementById('input-field');
-        inputField.addEventListener('paste', this.handlePaste);
-        inputField.addEventListener('keydown', function (e) {
-            if (e.keyCode == 13 && !e.shiftKey) {
-                e.preventDefault();
-                // 检查是否有内容可发送
-                if (this.canSendMessage()) {
-                    this.sendMessage();
-                }
-            }
-        }.bind(this));
-
-        // 添加keyup事件监听
-        document.addEventListener('keyup', this.handleInputKeyUp);
-    },
-
-    beforeUnmount() {
-        // 移除keyup事件监听
-        document.removeEventListener('keyup', this.handleInputKeyUp);
-
-        // 清除悬停定时器
-        if (this.sidebarHoverTimer) {
-            clearTimeout(this.sidebarHoverTimer);
-        }
-
-        // Cleanup blob URLs
-        this.cleanupMediaCache();
-    },
-    methods: {
-        toggleTheme() {
-            const customizer = useCustomizerStore();
-            const newTheme = customizer.uiTheme === 'PurpleTheme' ? 'PurpleThemeDark' : 'PurpleTheme';
-            customizer.SET_UI_THEME(newTheme);
-        },
-        // 切换侧边栏折叠状态
-        toggleSidebar() {
-            if (this.sidebarHoverExpanded) {
-                this.sidebarHoverExpanded = false;
-                return
-            }
-            this.sidebarCollapsed = !this.sidebarCollapsed;
-            // 保存折叠状态到 localStorage
-            localStorage.setItem('sidebarCollapsed', JSON.stringify(this.sidebarCollapsed));
-        },
-
-        // 侧边栏鼠标悬停处理
-        handleSidebarMouseEnter() {
-            if (!this.sidebarCollapsed) return;
-
-            this.sidebarHovered = true;
-
-            // 设置延迟定时器
-            this.sidebarHoverTimer = setTimeout(() => {
-                if (this.sidebarHovered) {
-                    this.sidebarHoverExpanded = true;
-                    this.sidebarCollapsed = false;
-                }
-            }, this.sidebarHoverDelay);
-        },
-
-        handleSidebarMouseLeave() {
-            this.sidebarHovered = false;
-
-            // 清除定时器
-            if (this.sidebarHoverTimer) {
-                clearTimeout(this.sidebarHoverTimer);
-                this.sidebarHoverTimer = null;
-            }
-
-            if (this.sidebarHoverExpanded) {
-                this.sidebarCollapsed = true;
-            }
-            this.sidebarHoverExpanded = false;
-        },
-
-        // 显示编辑对话标题对话框
-        showEditTitleDialog(cid, title) {
-            this.editingCid = cid;
-            this.editingTitle = title || ''; // 如果标题为空，则设置为空字符串
-            this.editTitleDialog = true;
-        },
-
-        // 保存对话标题
-        saveTitle() {
-            if (!this.editingCid) return;
-
-            const trimmedTitle = this.editingTitle.trim();
-            axios.post('/api/chat/rename_conversation', {
-                conversation_id: this.editingCid,
-                title: trimmedTitle
-            })
-                .then(response => {
-                    // 更新本地对话列表中的标题
-                    const conversation = this.conversations.find(c => c.cid === this.editingCid);
-                    if (conversation) {
-                        conversation.title = trimmedTitle;
-                    }
-                    this.editTitleDialog = false;
-                })
-                .catch(err => {
-                    console.error('重命名对话失败:', err);
-                });
-        },
-
-        async getMediaFile(filename) {
-            if (this.mediaCache[filename]) {
-                return this.mediaCache[filename];
-            }
-
-            try {
-                const response = await axios.get('/api/chat/get_file', {
-                    params: { filename },
-                    responseType: 'blob'
-                });
-
-                const blobUrl = URL.createObjectURL(response.data);
-                this.mediaCache[filename] = blobUrl;
-                return blobUrl;
-            } catch (error) {
-                console.error('Error fetching media file:', error);
-                return '';
-            }
-        },
-
-        removeAudio() {
-            this.stagedAudioUrl = null;
-        },
-
-        openImagePreview(imageUrl) {
-            this.previewImageUrl = imageUrl;
-            this.imagePreviewDialog = true;
-        },
-
-        async startRecording() {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            this.mediaRecorder = new MediaRecorder(stream);
-            this.mediaRecorder.ondataavailable = (event) => {
-                this.audioChunks.push(event.data);
-            };
-            this.mediaRecorder.start();
-            this.isRecording = true;
-            this.inputFieldLabel = this.tm('input.recordingPrompt');
-        },
-
-        async stopRecording() {
-            this.isRecording = false;
-            this.inputFieldLabel = this.tm('input.chatPrompt');
-            this.mediaRecorder.stop();
-            this.mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(this.audioChunks, { type: 'audio/wav' });
-                this.audioChunks = [];
-
-                this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-
-                const formData = new FormData();
-                formData.append('file', audioBlob);
-
-                try {
-                    const response = await axios.post('/api/chat/post_file', formData, {
-                        headers: {
-                            'Content-Type': 'multipart/form-data'
-                        }
-                    });
-
-                    const audio = response.data.data.filename;
-                    console.log('Audio uploaded:', audio);
-
-                    this.stagedAudioUrl = audio; // Store just the filename
-                } catch (err) {
-                    console.error('Error uploading audio:', err);
-                }
-            };
-        },
-
-        async processAndUploadImage(file) {
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                const response = await axios.post('/api/chat/post_image', formData, {
-                    headers: {
-                        'Content-Type': 'multipart/form-data'
-                    }
-                });
-
-                const img = response.data.data.filename;
-                this.stagedImagesName.push(img); // Store just the filename
-                this.stagedImagesUrl.push(URL.createObjectURL(file)); // Create a blob URL for immediate display
-
-            } catch (err) {
-                console.error('Error uploading image:', err);
-            }
-        },
-
-        async handlePaste(event) {
-            console.log('Pasting image...');
-            const items = event.clipboardData.items;
-            for (let i = 0; i < items.length; i++) {
-                if (items[i].type.indexOf('image') !== -1) {
-                    const file = items[i].getAsFile();
-                    this.processAndUploadImage(file);
-                }
-            }
-        },
-
-        removeImage(index) {
-            // Revoke the blob URL to prevent memory leaks
-            const urlToRevoke = this.stagedImagesUrl[index];
-            if (urlToRevoke && urlToRevoke.startsWith('blob:')) {
-                URL.revokeObjectURL(urlToRevoke);
-            }
-
-            this.stagedImagesName.splice(index, 1);
-            this.stagedImagesUrl.splice(index, 1);
-        },
-
-        clearMessage() {
-            this.prompt = '';
-        },
-
-        triggerImageInput() {
-            this.$refs.imageInput.click();
-        },
-
-        handleFileSelect(event) {
-            const files = event.target.files;
-            if (files) {
-                for (const file of files) {
-                    this.processAndUploadImage(file);
-                }
-            }
-            // Reset the input value to allow selecting the same file again
-            event.target.value = '';
-        },
-        getConversations() {
-            axios.get('/api/chat/conversations').then(response => {
-                this.conversations = response.data.data;
-
-                // If there's a pending conversation ID from the route
-                if (this.pendingCid) {
-                    const conversation = this.conversations.find(c => c.cid === this.pendingCid);
-                    if (conversation) {
-                        this.getConversationMessages([this.pendingCid]);
-                        this.pendingCid = null;
-                    }
-                } else {
-                    // 如果没有URL参数指定的对话，且当前没有选中对话，则默认打开第一个对话
-                    if (!this.currCid && this.conversations.length > 0) {
-                        const firstConversation = this.conversations[0];
-                        this.selectedConversations = [firstConversation.cid];
-                        this.getConversationMessages([firstConversation.cid]);
-                    }
-                }
-            }).catch(err => {
-                if (err.response.status === 401) {
-                    this.$router.push('/auth/login?redirect=/chatbox');
-                }
-                console.error(err);
-            });
-        },
-        getConversationMessages(cid) {
-            if (!cid[0])
-                return;
-
-            // Update the URL to reflect the selected conversation
-            if (this.$route.path !== `/chat/${cid[0]}` && this.$route.path !== `/chatbox/${cid[0]}`) {
-                if (this.$route.path.startsWith('/chatbox')) {
-                    this.$router.push(`/chatbox/${cid[0]}`);
-                } else {
-                    this.$router.push(`/chat/${cid[0]}`);
-                }
-                return
-            }
-
-            axios.get('/api/chat/get_conversation?conversation_id=' + cid[0]).then(async response => {
-                this.currCid = cid[0];
-                // Update the selected conversation in the sidebar
-                this.selectedConversations = [cid[0]];
-                let history = response.data.data.history;
-                this.isConvRunning = response.data.data.is_running || false;
-
-                if (this.isConvRunning) {
-                    if (!this.isToastedRunningInfo) {
-                        useToast().info("该对话正在运行中。", { timeout: 5000 });
-                        this.isToastedRunningInfo = true;
-                    }
-
-                    // 如果对话还在运行，3秒后重新获取消息
-                    setTimeout(() => {
-                        this.getConversationMessages([this.currCid]);
-                    }, 3000);
-                }
-
-                // 滚动到底部
-                this.$nextTick(() => {
-                    this.$refs.messageList.scrollToBottom();
-                });
-
-                for (let i = 0; i < history.length; i++) {
-                    let content = history[i].content;
-                    if (content.message.startsWith('[IMAGE]')) {
-                        let img = content.message.replace('[IMAGE]', '');
-                        const imageUrl = await this.getMediaFile(img);
-                        if (!content.embedded_images) {
-                            content.embedded_images = [];
-                        }
-                        content.embedded_images.push(imageUrl);
-                        content.message = ''; // 清空message，避免显示标记文本
-                    }
-
-                    if (content.message.startsWith('[RECORD]')) {
-                        let audio = content.message.replace('[RECORD]', '');
-                        const audioUrl = await this.getMediaFile(audio);
-                        content.embedded_audio = audioUrl;
-                        content.message = ''; // 清空message，避免显示标记文本
-                    }
-
-                    if (content.image_url && content.image_url.length > 0) {
-                        for (let j = 0; j < content.image_url.length; j++) {
-                            content.image_url[j] = await this.getMediaFile(content.image_url[j]);
-                        }
-                    }
-
-                    if (content.audio_url) {
-                        content.audio_url = await this.getMediaFile(content.audio_url);
-                    }
-                }
-                this.messages = history;
-            }).catch(err => {
-                console.error(err);
-            });
-        },
-        async newConversation() {
-            return axios.get('/api/chat/new_conversation').then(response => {
-                const cid = response.data.data.conversation_id;
-                this.currCid = cid;
-                // Update the URL to reflect the new conversation
-                if (this.$route.path.startsWith('/chatbox')) {
-                    this.$router.push(`/chatbox/${cid}`);
-                } else {
-                    this.$router.push(`/chat/${cid}`);
-                }
-                this.getConversations();
-                return cid;
-            }).catch(err => {
-                console.error(err);
-                throw err;
-            });
-        },
-
-        newC() {
-            this.currCid = '';
-            this.selectedConversations = []; // 清除选中状态
-            this.messages = [];
-            if (this.$route.path.startsWith('/chatbox')) {
-                this.$router.push('/chatbox');
-            } else {
-                this.$router.push('/chat');
-            }
-        },
-
-        formatDate(timestamp) {
-            const date = new Date(timestamp * 1000); // 假设时间戳是以秒为单位
-            const options = {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false
-            };
-            // 使用当前语言环境的locale
-            const locale = this.t('core.common.locale') || 'zh-CN';
-            return date.toLocaleString(locale, options).replace(/\//g, '-').replace(/, /g, ' ');
-        },
-
-        deleteConversation(cid) {
-            axios.get('/api/chat/delete_conversation?conversation_id=' + cid).then(response => {
-                this.getConversations();
-                this.currCid = '';
-                this.selectedConversations = []; // 清除选中状态
-                this.messages = [];
-            }).catch(err => {
-                console.error(err);
-            });
-        },
-
-        // 检查是否可以发送消息
-        canSendMessage() {
-            return (this.prompt && this.prompt.trim()) ||
-                this.stagedImagesName.length > 0 ||
-                this.stagedAudioUrl;
-        },
-
-        async sendMessage() {
-            // 检查是否有内容可发送
-            if (!this.canSendMessage()) {
-                console.log('没有内容可发送');
-                return;
-            }
-
-            if (this.currCid == '') {
-                const cid = await this.newConversation();
-                // URL is already updated in newConversation method
-            }
-
-            // 保存当前要发送的数据到临时变量
-            const promptToSend = this.prompt.trim();
-            const imageNamesToSend = [...this.stagedImagesName];
-            const audioNameToSend = this.stagedAudioUrl;
-
-            // 立即清空输入和附件预览
-            this.prompt = '';
-            this.stagedImagesName = [];
-            this.stagedImagesUrl = [];
-            this.stagedAudioUrl = "";
-
-            // Create a message object with actual URLs for display
-            const userMessage = {
-                type: 'user',
-                message: promptToSend,
-                image_url: [],
-                audio_url: null
-            };
-
-            // Convert image filenames to blob URLs for display
-            if (imageNamesToSend.length > 0) {
-                const imagePromises = imageNamesToSend.map(name => {
-                    if (!name.startsWith('blob:')) {
-                        return this.getMediaFile(name);
-                    }
-                    return Promise.resolve(name);
-                });
-                userMessage.image_url = await Promise.all(imagePromises);
-            }
-
-            // Convert audio filename to blob URL for display
-            if (audioNameToSend) {
-                if (!audioNameToSend.startsWith('blob:')) {
-                    userMessage.audio_url = await this.getMediaFile(audioNameToSend);
-                } else {
-                    userMessage.audio_url = audioNameToSend;
-                }
-            }
-
-            this.messages.push({
-                "content": userMessage,
-            });
-            this.loadingChat = true
-
-            // 从ProviderModelSelector组件获取当前选择
-            const selection = this.$refs.providerModelSelector?.getCurrentSelection();
-            const selectedProviderId = selection?.providerId || '';
-            const selectedModelName = selection?.modelName || '';
-
-            try {
-                this.activeSSECount++;
-                if (this.activeSSECount === 1) {
-                    this.isConvRunning = true;
-                }
-                const response = await fetch('/api/chat/send', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + localStorage.getItem('token')
-                    },
-                    body: JSON.stringify({
-                        message: promptToSend,
-                        conversation_id: this.currCid,
-                        image_url: imageNamesToSend,
-                        audio_url: audioNameToSend ? [audioNameToSend] : [],
-                        selected_provider: selectedProviderId,
-                        selected_model: selectedModelName
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let in_streaming = false;
-                let message_obj = null;
-
-                this.isStreaming = true
-
-                while (true) {
-                    try {
-                        const { done, value } = await reader.read();
-                        if (done) {
-                            console.log('SSE stream completed');
-                            break;
-                        }
-
-                        const chunk = decoder.decode(value, { stream: true });
-                        const lines = chunk.split('\n\n');
-
-                        for (let i = 0; i < lines.length; i++) {
-                            let line = lines[i].trim();
-
-                            if (!line) {
-                                continue;
-                            }
-
-                            // Parse SSE data
-                            let chunk_json;
-                            try {
-                                chunk_json = JSON.parse(line.replace('data: ', ''));
-                            } catch (parseError) {
-                                console.warn('JSON解析失败:', line, parseError);
-                                continue;
-                            }
-
-                            // 检查解析后的数据是否有效
-                            if (!chunk_json || typeof chunk_json !== 'object' || !chunk_json.hasOwnProperty('type')) {
-                                console.warn('无效的数据对象:', chunk_json);
-                                continue;
-                            }
-
-                            if (chunk_json.type === 'error') {
-                                console.error('Error received:', chunk_json.data);
-                                continue;
-                            }
-
-                            if (chunk_json.type === 'image') {
-                                let img = chunk_json.data.replace('[IMAGE]', '');
-                                const imageUrl = await this.getMediaFile(img);
-                                let bot_resp = {
-                                    type: 'bot',
-                                    message: '',
-                                    embedded_images: [imageUrl]
-                                }
-                                this.messages.push({
-                                    "content": bot_resp
-                                });
-                            } else if (chunk_json.type === 'record') {
-                                let audio = chunk_json.data.replace('[RECORD]', '');
-                                const audioUrl = await this.getMediaFile(audio);
-                                let bot_resp = {
-                                    type: 'bot',
-                                    message: '',
-                                    embedded_audio: audioUrl
-                                }
-                                this.messages.push({
-                                    "content": bot_resp
-                                });
-                            } else if (chunk_json.type === 'plain') {
-                                if (!in_streaming) {
-                                    message_obj = {
-                                        type: 'bot',
-                                        message: this.ref(chunk_json.data),
-                                    }
-                                    this.messages.push({
-                                        "content": message_obj
-                                    });
-                                    in_streaming = true;
-                                } else {
-                                    message_obj.message.value += chunk_json.data;
-                                }
-                            } else if (chunk_json.type === 'update_title') {
-                                // 更新对话标题
-                                const conversation = this.conversations.find(c => c.cid === chunk_json.cid);
-                                if (conversation) {
-                                    conversation.title = chunk_json.data;
-                                }
-                            }
-                            if ((chunk_json.type === 'break' && chunk_json.streaming) || !chunk_json.streaming) {
-                                // break means a segment end
-                                in_streaming = false;
-                                // 当SSE传入streaming=false时，恢复输入框
-                                if (!chunk_json.streaming) {
-                                    this.isStreaming = false;
-                                }
-                            }
-                        }
-                    } catch (readError) {
-                        console.error('SSE读取错误:', readError);
-                        break;
-                    }
-                }
-
-                // Input and attachments are already cleared
-                this.loadingChat = false;
-
-                // get the latest conversations
-                this.getConversations();
-
-            } catch (err) {
-                console.error('发送消息失败:', err);
-                this.loadingChat = false;
-            } finally {
-                this.isStreaming = false;
-                this.activeSSECount--;
-                if (this.activeSSECount === 0) {
-                    this.isConvRunning = false;
-                }
-            }
-        },
-
-        handleInputKeyDown(e) {
-            if (e.ctrlKey && e.keyCode === 66) { // Ctrl+B组合键
-                e.preventDefault(); // 防止默认行为
-
-                // 防止重复触发
-                if (this.ctrlKeyDown) return;
-
-                this.ctrlKeyDown = true;
-
-                // 设置定时器识别长按
-                this.ctrlKeyTimer = setTimeout(() => {
-                    if (this.ctrlKeyDown && !this.isRecording) {
-                        this.startRecording();
-                    }
-                }, this.ctrlKeyLongPressThreshold);
-            }
-        },
-        handleInputKeyUp(e) {
-            if (e.keyCode === 66) { // B键释放
-                this.ctrlKeyDown = false;
-
-                // 清除定时器
-                if (this.ctrlKeyTimer) {
-                    clearTimeout(this.ctrlKeyTimer);
-                    this.ctrlKeyTimer = null;
-                }
-
-                // 如果正在录音，停止录音
-                if (this.isRecording) {
-                    this.stopRecording();
-                }
-            }
-        },
-
-        cleanupMediaCache() {
-            Object.values(this.mediaCache).forEach(url => {
-                if (url.startsWith('blob:')) {
-                    URL.revokeObjectURL(url);
-                }
-            });
-            this.mediaCache = {};
-        },
-    },
+          : null;
+        await loadProjectSessions(targetProjectId);
+        selectedProjectId.value = null;
+      }
+    }
+
+    const text = draft.value.trim();
+    const messageId = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const outgoingParts = buildOutgoingParts(text);
+    const selection = inputRef.value?.getCurrentSelection();
+    const { userRecord, botRecord } = createLocalExchange({
+      sessionId,
+      messageId,
+      parts: outgoingParts,
+    });
+    updateTitleFromText(sessionId, text);
+
+    draft.value = "";
+    replyTarget.value = null;
+    clearStaged({ revokeUrls: false });
+    scrollToBottom();
+
+    sendMessageStream({
+      sessionId,
+      messageId,
+      parts: outgoingParts,
+      transport: transportMode.value,
+      enableStreaming: enableStreaming.value,
+      selectedProvider: selection?.providerId || "",
+      selectedModel: selection?.modelName || "",
+      userRecord,
+      botRecord,
+    });
+  } catch (error) {
+    console.error("Failed to send message:", error);
+  } finally {
+    sending.value = false;
+    await focusChatInput();
+  }
+}
+
+function buildOutgoingParts(text: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  if (replyTarget.value?.id != null) {
+    parts.push({
+      type: "reply",
+      message_id: replyTarget.value.id,
+      selected_text: "",
+    });
+  }
+  if (text) {
+    parts.push({ type: "plain", text });
+  }
+  stagedFiles.value.forEach((file) => {
+    parts.push({
+      type: file.type,
+      attachment_id: file.attachment_id,
+      filename: file.filename,
+      embedded_url: file.url,
+    });
+  });
+  return parts;
+}
+
+function updateTitleFromText(sessionId: string, text: string) {
+  const session = sessions.value.find((item) => item.session_id === sessionId);
+  if (!session || session.display_name || !text) return;
+  updateSessionTitle(sessionId, text.slice(0, 40));
+}
+
+function replyPreview(messageId?: string | number, fallback?: string) {
+  if (fallback) return truncate(fallback, 80);
+  const found = activeMessages.value.find(
+    (message) => String(message.id) === String(messageId),
+  );
+  const text = found ? plainTextFromMessage(found) : "";
+  return text ? truncate(text, 80) : tm("reply.replyTo");
+}
+
+function plainTextFromMessage(message: ChatRecord) {
+  return messageParts(message)
+    .filter((part) => part.type === "plain" && part.text)
+    .map((part) => part.text)
+    .join("\n");
+}
+
+function truncate(value: string, max: number) {
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function scrollToMessage(messageId?: string | number) {
+  if (!messageId) return;
+  const index = activeMessages.value.findIndex(
+    (message) => String(message.id) === String(messageId),
+  );
+  if (index < 0) return;
+  const rows = messagesContainer.value?.querySelectorAll(".message-row");
+  rows?.[index]?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function openMessageEdit(message: ChatRecord) {
+  messageEditDraft.value = plainTextFromMessage(message);
+  editingMessage.value = message;
+  nextTick(() => scrollToMessage(message.id));
+}
+
+function cancelMessageEdit() {
+  editingMessage.value = null;
+  messageEditDraft.value = "";
+}
+
+async function saveMessageEdit() {
+  if (!currSessionId.value || !editingMessage.value) return;
+  savingMessageEdit.value = true;
+  try {
+    const target = editingMessage.value;
+    const result = await editMessage(
+      currSessionId.value,
+      target,
+      messageEditDraft.value,
+    );
+    cancelMessageEdit();
+
+    if (result.needsRegenerate && result.truncatedAfterMessage) {
+      const selection = inputRef.value?.getCurrentSelection();
+      continueEditedMessage({
+        sessionId: currSessionId.value,
+        sourceRecord: target,
+        enableStreaming: enableStreaming.value,
+        selectedProvider: selection?.providerId || "",
+        selectedModel: selection?.modelName || "",
+      });
+      scrollToBottom();
+    } else if (result.needsRegenerate) {
+      const index = activeMessages.value.findIndex(
+        (message) => String(message.id) === String(target.id),
+      );
+      const nextBot = activeMessages.value
+        .slice(index + 1)
+        .find((message) => !isUserMessage(message));
+      if (nextBot) {
+        await handleRegenerateMessage(nextBot);
+      }
+    }
+  } catch (error) {
+    console.error("Failed to edit message:", error);
+  } finally {
+    savingMessageEdit.value = false;
+  }
+}
+
+async function handleRegenerateMessage(
+  message: ChatRecord,
+  selection?: RegenerateModelSelection,
+) {
+  if (!currSessionId.value || isUserMessage(message)) return;
+  message.threads = [];
+  await regenerateMessage(
+    currSessionId.value,
+    message,
+    selection?.providerId || "",
+    selection?.modelName || "",
+  );
+}
+
+function handleBotTextSelection(event: MouseEvent, message: ChatRecord) {
+  if (message.id == null || String(message.id).startsWith("local-")) return;
+  const container = event.currentTarget as HTMLElement | null;
+  window.setTimeout(() => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim() || "";
+    if (!selection || !selectedText) {
+      threadSelection.visible = false;
+      return;
+    }
+    if (
+      !container ||
+      !container.contains(selection.anchorNode) ||
+      !container.contains(selection.focusNode)
+    ) {
+      threadSelection.visible = false;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    threadSelection.message = message;
+    threadSelection.selectedText = selectedText;
+    threadSelection.left = Math.min(
+      window.innerWidth - 180,
+      Math.max(12, rect.left + rect.width / 2 - 70),
+    );
+    threadSelection.top = Math.max(12, rect.top - 42);
+    threadSelection.visible = true;
+  }, 0);
+}
+
+async function createThreadFromSelection() {
+  const message = threadSelection.message;
+  if (!currSessionId.value || !message?.id || !threadSelection.selectedText) return;
+  try {
+    const response = await axios.post("/api/chat/thread/create", {
+      session_id: currSessionId.value,
+      parent_message_id: message.id,
+      selected_text: threadSelection.selectedText,
+    });
+    if (response.data?.status !== "ok") {
+      toast.error(response.data?.message || tm("thread.createFailed"));
+      return;
+    }
+    const thread = response.data?.data as ChatThread | undefined;
+    if (!thread) {
+      toast.error(tm("thread.createFailed"));
+      return;
+    }
+    message.threads = message.threads || [];
+    if (!message.threads.some((item) => item.thread_id === thread.thread_id)) {
+      message.threads.push(thread);
+    }
+    openThreadPanel(thread);
+    window.getSelection()?.removeAllRanges();
+  } catch (error) {
+    toast.error(
+      axios.isAxiosError(error)
+        ? error.response?.data?.message || error.message
+        : tm("thread.createFailed"),
+    );
+    console.error("Failed to create thread:", error);
+  } finally {
+    threadSelection.visible = false;
+  }
+}
+
+function openThreadPanel(thread: ChatThread) {
+  reasoningPanelOpen.value = false;
+  activeReasoningTarget.value = null;
+  refsSidebarOpen.value = false;
+  activeThread.value = thread;
+  threadPanelOpen.value = true;
+}
+
+function openRefsSidebar(refs: unknown) {
+  threadPanelOpen.value = false;
+  activeThread.value = null;
+  reasoningPanelOpen.value = false;
+  activeReasoningTarget.value = null;
+  selectedRefs.value =
+    refs && typeof refs === "object" ? (refs as Record<string, unknown>) : null;
+  refsSidebarOpen.value = true;
+}
+
+function openReasoningPanel(payload: {
+  message: ChatRecord;
+  blockIndex: number;
+}) {
+  threadPanelOpen.value = false;
+  activeThread.value = null;
+  refsSidebarOpen.value = false;
+  selectedRefs.value = null;
+  activeReasoningTarget.value = payload;
+  reasoningPanelOpen.value = true;
+}
+
+async function deleteThread(thread: ChatThread) {
+  if (deletingThread.value) return;
+  if (!(await askForConfirmation(tm("thread.confirmDelete"), confirmDialog))) return;
+  deletingThread.value = true;
+  try {
+    await axios.post("/api/chat/thread/delete", {
+      thread_id: thread.thread_id,
+    });
+    removeThreadFromMessages(thread.thread_id);
+    if (activeThread.value?.thread_id === thread.thread_id) {
+      threadPanelOpen.value = false;
+      activeThread.value = null;
+    }
+  } catch (error) {
+    console.error("Failed to delete thread:", error);
+  } finally {
+    deletingThread.value = false;
+  }
+}
+
+function removeThreadFromMessages(threadId: string) {
+  for (const message of activeMessages.value) {
+    if (!message.threads?.length) continue;
+    message.threads = message.threads.filter(
+      (thread) => thread.thread_id !== threadId,
+    );
+  }
+}
+
+async function handleFilesSelected(files: FileList) {
+  const selectedFiles = Array.from(files || []);
+  for (const file of selectedFiles) {
+    if (file.type.startsWith("image/")) {
+      await processAndUploadImage(file);
+    } else {
+      await processAndUploadFile(file);
+    }
+  }
+}
+
+function toggleStreaming() {
+  enableStreaming.value = !enableStreaming.value;
+}
+
+async function startRecording() {
+  try {
+    await startRecorder();
+  } catch (error) {
+    console.error("Failed to start recording:", error);
+    toast.error(tm("voice.error"));
+  }
+}
+
+async function stopRecording() {
+  try {
+    const audioFile = await stopRecorder();
+    const uploaded = await processAndUploadFile(audioFile);
+    if (!uploaded) {
+      toast.error(tm("voice.error"));
+    }
+  } catch (error) {
+    console.error("Failed to stop recording:", error);
+    toast.error(tm("voice.error"));
+  }
+}
+
+function handleMessagesScroll() {
+  threadSelection.visible = false;
+  const container = messagesContainer.value;
+  if (!container) return;
+  const distance =
+    container.scrollHeight - container.scrollTop - container.clientHeight;
+  shouldStickToBottom.value = distance < 80;
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    const container = messagesContainer.value;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    shouldStickToBottom.value = true;
+  });
+}
+
+async function focusChatInput() {
+  await nextTick();
+  window.requestAnimationFrame(() => {
+    inputRef.value?.focusInput();
+  });
+}
+
+async function stopCurrentSession() {
+  if (!currSessionId.value) return;
+  try {
+    await stopSession(currSessionId.value);
+  } catch (error) {
+    console.error("Failed to stop session:", error);
+  }
+}
+
+function toggleTheme() {
+  customizer.SET_UI_THEME(isDark.value ? "PurpleTheme" : "PurpleThemeDark");
 }
 </script>
 
-<style>
-/* 基础动画 */
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+<style scoped>
+.chat-ui {
+  --chat-sidebar-bg: #fbfbfb;
+  --chat-session-active-bg: #efefef;
+  --chat-page-bg: rgb(var(--v-theme-background));
+  --chat-border: rgba(var(--v-border-color), 0.16);
+  --chat-muted: rgba(var(--v-theme-on-surface), 0.62);
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--chat-page-bg);
+  color: rgb(var(--v-theme-on-surface));
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    "Open Sans",
+    "Helvetica Neue",
+    sans-serif;
 }
 
-@keyframes pulse {
-    0% {
-        transform: scale(1);
-    }
-
-    50% {
-        transform: scale(1.05);
-    }
-
-    100% {
-        transform: scale(1);
-    }
+.chat-ui.is-dark {
+  --chat-sidebar-bg: #2d2d2d;
+  --chat-session-active-bg: rgba(255, 255, 255, 0.08);
+  --chat-border: rgba(255, 255, 255, 0.1);
 }
 
-@keyframes slideIn {
-    from {
-        transform: translateX(20px);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
+.chat-sidebar {
+  height: 100%;
+  background: var(--chat-sidebar-bg);
 }
 
-/* 添加淡入动画 */
-@keyframes fadeInContent {
-    from {
-        opacity: 0;
-    }
-
-    to {
-        opacity: 1;
-    }
+.chat-sidebar.collapsed {
+  background: transparent;
 }
 
-/* 欢迎页样式 */
-.welcome-container {
-    height: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-direction: column;
+.chat-sidebar :deep(.v-navigation-drawer__content) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sidebar-top {
+  padding: 12px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+}
+
+.brand-row {
+  justify-content: flex-start;
+  min-height: 36px;
+  margin-bottom: 8px;
+}
+
+.sidebar-toggle,
+.new-chat-btn,
+.settings-btn {
+  color: var(--chat-muted);
+  border-radius: 8px;
+}
+
+.sidebar-action-icon {
+  color: currentcolor;
+}
+
+.sidebar-toggle {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+}
+
+.new-chat-btn,
+.settings-btn {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 8px;
+  text-transform: none;
+  font-weight: 500;
+}
+
+.sidebar-provider-btn {
+  margin-bottom: 8px;
+}
+
+.new-chat-btn:not(.icon-only),
+.settings-btn:not(.icon-only) {
+  padding-inline: 12px;
+}
+
+.new-chat-btn.icon-only,
+.settings-btn.icon-only {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  justify-content: center;
+}
+
+.chat-sidebar.collapsed .brand-row,
+.chat-sidebar.collapsed .sidebar-footer {
+  display: flex;
+  justify-content: center;
+}
+
+.sidebar-toggle:hover,
+.new-chat-btn:hover,
+.settings-btn:hover {
+  background: var(--chat-session-active-bg);
+}
+
+.sidebar-workspace-btn--active {
+  background: var(--chat-session-active-bg);
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.chevron-collapsed {
+  transform: rotate(180deg);
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-item {
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-right: 68px;
+  position: relative;
+  box-sizing: border-box;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-item:hover,
+.session-item.active {
+  background: var(--chat-session-active-bg);
+}
+
+.session-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.session-progress {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  flex-shrink: 0;
+  transition: right 0.16s ease;
+}
+
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  visibility: hidden;
+}
+
+.session-item:hover .session-actions,
+.session-item:focus-within .session-actions {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.session-item:hover .session-progress,
+.session-item:focus-within .session-progress {
+  right: 62px;
+}
+
+.session-action-btn {
+  color: var(--chat-muted);
+}
+
+.session-action-btn:hover {
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.empty-sessions {
+  padding: 12px;
+  color: var(--chat-muted);
+  font-size: 13px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 10px 12px 14px;
+}
+
+.settings-menu-content {
+  min-width: 230px;
+  padding: 6px;
+}
+
+.settings-menu-value {
+  color: var(--chat-muted);
+  font-size: 12px;
+  margin-right: 4px;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.language-flag {
+  display: inline-block;
+  width: 20px;
+  margin-right: 8px;
+}
+
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.chat-main.empty-chat {
+  justify-content: center;
+}
+
+.provider-workspace-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.provider-workspace-page {
+  height: 100%;
+  min-height: 0;
+}
+
+.messages-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px max(24px, calc((100% - 980px) / 2)) 18px;
+}
+
+.empty-chat .messages-panel {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+  padding: 0 max(24px, calc((100% - 980px) / 2)) 20px;
+}
+
+.center-state,
+.welcome-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.empty-chat .welcome-state {
+  height: auto;
 }
 
 .welcome-title {
-    font-size: 28px;
-    margin-bottom: 16px;
+  font-size: 28px;
+  font-weight: 800;
 }
 
-.bot-name {
-    font-weight: 700;
-    margin-left: 8px;
-    color: var(--v-theme-secondary);
+.welcome-subtitle {
+  margin-top: 8px;
+  color: var(--chat-muted);
+  font-size: 16px;
 }
 
-.welcome-hint {
-    margin-top: 8px;
-    color: rgb(var(--v-theme-secondaryText));
-    font-size: 14px;
+.session-project-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(760px, 82%);
+  margin-bottom: 18px;
+  color: var(--chat-muted);
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.welcome-hint code {
-    background-color: rgb(var(--v-theme-codeBg));
-    padding: 2px 6px;
-    margin: 0 4px;
-    border-radius: 4px;
-    font-family: 'Fira Code', monospace;
-    font-size: 13px;
+.session-project-breadcrumb span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-    transition: opacity 0.3s ease;
+.thread-selection-action {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: auto;
 }
 
-.fade-enter-from,
-.fade-leave-to {
-    opacity: 0;
+.thread-selection-button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.14);
+  border-radius: 999px;
+  background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-on-surface));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
 }
 
-.chat-page-card {
-    width: 100%;
-    height: 100%;
-    max-height: 100%;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
-    overflow: hidden;
+.composer-shell {
+  position: relative;
+  z-index: 1;
+  background: var(--chat-page-bg);
+  padding: 0 0 18px;
 }
 
-.chat-page-container {
-    width: 100%;
-    height: 100%;
-    max-height: 100%;
+.composer-shell::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 0;
+  top: -36px;
+  height: 36px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--v-theme-background), 0),
+    var(--chat-page-bg)
+  );
+}
+
+.composer-shell :deep(.input-area) {
+  border-top: 0;
+}
+
+.empty-chat .composer-shell {
+  padding-bottom: 0;
+}
+
+.empty-chat .composer-shell::before {
+  display: none;
+}
+
+kbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  font: inherit;
+}
+
+:deep(.hr-node) {
+    margin-top: 1.25rem;
+    margin-bottom: 1.25rem;
+    opacity: 0.5;
+    border-top-width: .3px;
+}
+
+:deep(.paragraph-node) {
+    margin: .5rem 0;
+    line-height: 1.7;
+}
+
+:deep(.list-node) {
+    margin-top: .5rem;
+    margin-bottom: .5rem;
+}
+
+@media (max-width: 760px) {
+  .messages-panel {
+    padding: 18px 14px;
+  }
+
+  .composer-shell,
+  .project-composer-shell {
     padding: 0;
-    overflow: hidden;
-}
-
-.chat-layout {
-    height: 100%;
-    max-height: 100%;
-    display: flex;
-    overflow: hidden;
-}
-
-.sidebar-panel {
-    max-width: 270px;
-    min-width: 240px;
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-    border-right: 1px solid rgba(0, 0, 0, 0.05);
-    height: 100%;
-    max-height: 100%;
-    position: relative;
-    transition: all 0.3s ease;
-    overflow: hidden;
-}
-
-/* 侧边栏折叠状态 */
-.sidebar-collapsed {
-    max-width: 75px;
-    min-width: 75px;
-    transition: all 0.3s ease;
-}
-
-/* 当悬停展开时 */
-.sidebar-collapsed.sidebar-hovered {
-    max-width: 270px;
-    min-width: 240px;
-    transition: all 0.3s ease;
-}
-
-/* 侧边栏折叠按钮 */
-.sidebar-collapse-btn-container {
-    margin: 16px;
-    margin-bottom: 0px;
-    z-index: 10;
-}
-
-.sidebar-collapse-btn {
-    opacity: 0.6;
-    max-height: none;
-    overflow-y: visible;
-    padding: 0;
-}
-
-.conversation-item {
-    margin-bottom: 4px;
-    border-radius: 8px !important;
-    transition: all 0.2s ease;
-    height: auto !important;
-    min-height: 56px;
-    padding: 8px 16px !important;
-    position: relative;
-}
-
-.conversation-item:hover {
-    background-color: rgba(103, 58, 183, 0.05);
-}
-
-.conversation-item:hover .conversation-actions {
-    opacity: 1;
-    visibility: visible;
-}
-
-.conversation-actions {
-    display: flex;
-    gap: 4px;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.2s ease;
-}
-
-.edit-title-btn,
-.delete-conversation-btn {
-    opacity: 0.7;
-    transition: opacity 0.2s ease;
-}
-
-.edit-title-btn:hover,
-.delete-conversation-btn:hover {
-    opacity: 1;
-}
-
-.conversation-title {
-    font-weight: 500;
-    font-size: 14px;
-    line-height: 1.3;
-    margin-bottom: 2px;
-    transition: opacity 0.25s ease;
-}
-
-.timestamp {
-    font-size: 11px;
-    color: var(--v-theme-secondaryText);
-    line-height: 1;
-    transition: opacity 0.25s ease;
-}
-
-.sidebar-section-title {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--v-theme-secondaryText);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 12px;
-    padding-left: 4px;
-    transition: opacity 0.25s ease;
-    white-space: nowrap;
-}
-
-.status-chips {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 8px;
-    margin-bottom: 8px;
-    transition: opacity 0.25s ease;
-}
-
-.status-chips .v-chip {
-    flex: 1 1 0;
-    justify-content: center;
-    opacity: 0.7;
-}
-
-.status-chip {
-    font-size: 12px;
-    height: 24px !important;
-}
-
-.no-conversations {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 150px;
-    opacity: 0.6;
-    gap: 12px;
-}
-
-.no-conversations-text {
-    font-size: 14px;
-    color: var(--v-theme-secondaryText);
-    transition: opacity 0.25s ease;
-}
-
-.chat-content-panel {
-    height: 100%;
-    max-height: 100%;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-/* 输入区域样式 */
-.input-area {
-    padding: 16px;
-    background-color: var(--v-theme-surface);
-    position: relative;
-    border-top: 1px solid var(--v-theme-border);
-    flex-shrink: 0;
-    /* 防止输入区域被压缩 */
-}
-
-/* 附件预览区 */
-.attachments-preview {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-    max-width: 900px;
-    margin: 8px auto 0;
-    flex-wrap: wrap;
-}
-
-.image-preview,
-.audio-preview {
-    position: relative;
-    display: inline-flex;
-}
-
-.preview-image {
-    width: 60px;
-    height: 60px;
-    object-fit: cover;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.audio-chip {
-    height: 36px;
-    border-radius: 18px;
-}
-
-.remove-attachment-btn {
-    position: absolute;
-    top: -8px;
-    right: -8px;
-    opacity: 0.8;
-    transition: opacity 0.2s;
-}
-
-.remove-attachment-btn:hover {
-    opacity: 1;
-}
-
-/* 动画类 */
-.fade-in {
-    animation: fadeIn 0.3s ease-in-out;
-}
-
-/* 对话框标题样式 */
-.dialog-title {
-    font-size: 18px;
-    font-weight: 500;
-    padding-bottom: 8px;
-}
-
-/* 对话标题和时间样式 */
-.conversation-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px;
-    padding-left: 16px;
-    border-bottom: 1px solid var(--v-theme-border);
-    width: 100%;
-    padding-right: 32px;
-    flex-shrink: 0;
+  }
 }
 </style>

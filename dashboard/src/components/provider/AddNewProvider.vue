@@ -1,11 +1,11 @@
 <template>
-    <v-dialog v-model="showDialog" max-width="1100px" min-height="95%">
+    <v-dialog v-model="showDialog" max-width="1000px" >
         <v-card :title="tm('dialogs.addProvider.title')">
             <v-card-text style="overflow-y: auto;">
                 <v-tabs v-model="activeProviderTab" grow>
-                    <v-tab value="chat_completion" class="font-weight-medium px-3">
-                        <v-icon start>mdi-message-text</v-icon>
-                        {{ tm('dialogs.addProvider.tabs.basic') }}
+                    <v-tab value="agent_runner" class="font-weight-medium px-3">
+                        <v-icon start>mdi-cogs</v-icon>
+                        {{ tm('dialogs.addProvider.tabs.agentRunner') }}
                     </v-tab>
                     <v-tab value="speech_to_text" class="font-weight-medium px-3">
                         <v-icon start>mdi-microphone-message</v-icon>
@@ -27,7 +27,7 @@
 
                 <v-window v-model="activeProviderTab" class="mt-4">
                     <v-window-item
-                        v-for="tabType in ['chat_completion', 'speech_to_text', 'text_to_speech', 'embedding', 'rerank']"
+                        v-for="tabType in ['chat_completion', 'agent_runner', 'speech_to_text', 'text_to_speech', 'embedding', 'rerank']"
                         :key="tabType" :value="tabType">
                         <v-row class="mt-1">
                             <v-col v-for="(template, name) in getTemplatesByType(tabType)" :key="name" cols="12" sm="6"
@@ -36,7 +36,7 @@
                                     @click="selectProviderTemplate(name)">
                                     <div class="provider-card-content">
                                         <div class="provider-card-text">
-                                            <v-card-title class="provider-card-title">接入 {{ name }}</v-card-title>
+                                            <v-card-title class="provider-card-title">{{ name }}</v-card-title>
                                             <v-card-text
                                                 class="text-caption text-medium-emphasis provider-card-description">
                                                 {{ getProviderDescription(template, name) }}
@@ -54,7 +54,7 @@
                             </v-col>
                             <v-col v-if="Object.keys(getTemplatesByType(tabType)).length === 0" cols="12">
                                 <v-alert type="info" variant="tonal">
-                                    {{ tm('dialogs.addProvider.noTemplates', { type: getTabTypeName(tabType) }) }}
+                                    {{ tm('dialogs.addProvider.noTemplates') }}
                                 </v-alert>
                             </v-col>
                         </v-row>
@@ -73,6 +73,8 @@
 import { useModuleI18n } from '@/i18n/composables';
 import { getProviderIcon, getProviderDescription } from '@/utils/providerUtils';
 
+const AVAILABLE_PROVIDER_TABS = ['agent_runner', 'speech_to_text', 'text_to_speech', 'embedding', 'rerank'];
+
 export default {
     name: 'AddNewProvider',
     props: {
@@ -83,6 +85,10 @@ export default {
         metadata: {
             type: Object,
             default: () => ({})
+        },
+        currentProviderType: {
+            type: String,
+            default: 'agent_runner'
         }
     },
     emits: ['update:show', 'select-template'],
@@ -92,7 +98,7 @@ export default {
     },
     data() {
         return {
-            activeProviderTab: 'chat_completion'
+            activeProviderTab: 'agent_runner'
         };
     },
     computed: {
@@ -104,28 +110,33 @@ export default {
                 this.$emit('update:show', value);
             }
         },
-
-        // 翻译消息的计算属性
-        messages() {
-            return {
-                tabTypes: {
-                    'chat_completion': this.tm('providers.tabs.chatCompletion'),
-                    'speech_to_text': this.tm('providers.tabs.speechToText'),
-                    'text_to_speech': this.tm('providers.tabs.textToSpeech'),
-                    'embedding': this.tm('providers.tabs.embedding'),
-                    'rerank': this.tm('providers.tabs.rerank')
-                }
-            };
+    },
+    watch: {
+        show(value) {
+            if (value) {
+                this.syncActiveProviderTab();
+            }
+        },
+        currentProviderType() {
+            if (this.showDialog) {
+                this.syncActiveProviderTab();
+            }
         }
     },
     methods: {
+        syncActiveProviderTab() {
+            this.activeProviderTab = AVAILABLE_PROVIDER_TABS.includes(this.currentProviderType)
+                ? this.currentProviderType
+                : 'agent_runner';
+        },
+
         closeDialog() {
             this.showDialog = false;
         },
 
         // 按提供商类型获取模板列表
         getTemplatesByType(type) {
-            const templates = this.metadata['provider_group']?.metadata?.provider?.config_template || {};
+            const templates = this.metadata.provider.config_template || {};
             const filtered = {};
 
             for (const [name, template] of Object.entries(templates)) {
@@ -139,11 +150,6 @@ export default {
 
         // 从工具函数导入
         getProviderIcon,
-
-        // 获取Tab类型的中文名称
-        getTabTypeName(tabType) {
-            return this.messages.tabTypes[tabType] || tabType;
-        },
 
         // 获取提供商简介
         getProviderDescription(template, name) {

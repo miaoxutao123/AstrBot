@@ -2,12 +2,11 @@ html {
   overflow-y: auto;
 }
 .v-main {
-  margin-right: 20px;
+  margin: 0;
 }
-@media (max-width: 1279px) {
-  .v-main {
-    margin: 0 10px;
-  }
+
+.top-header {
+  border-bottom: 1px solid rgba(var(--v-theme-borderLight), 0.5);
 }
 .spacer {
   padding: 100px 0;
@@ -20,8 +19,8 @@ html {
 
 .page-wrapper {
   min-height: calc(100vh - 100px);
-  padding: 15px;
-  border-radius: $border-radius-root;
+  padding: 8px;
+  // border-radius: $border-radius-root;
   background: rgb(var(--v-theme-containerBg));
 }
 $sizes: (
@@ -80,12 +79,8 @@ $sizes: (
 // font family
 
 body {
-  .Poppins {
-    font-family: 'Poppins', sans-serif !important;
-  }
-
-  .Inter {
-    font-family: 'Inter', sans-serif !important;
+  .Outfit {
+    font-family: $body-font-family !important;
   }
 }
 

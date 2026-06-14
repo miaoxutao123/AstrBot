@@ -1,12 +1,16 @@
 import warnings
 
-from astrbot.core.star import StarMetadata, star_map
+from astrbot.core.star.star import StarMetadata, star_map
 
 _warned_register_star = False
 
 
 def register_star(
-    name: str, author: str, desc: str, version: str, repo: str | None = None
+    name: str,
+    author: str,
+    desc: str,
+    version: str,
+    repo: str | None = None,
 ):
     """注册一个插件(Star)。
 
@@ -29,8 +33,8 @@ def register_star(
         ...
 
     帮助信息会被自动提取。使用 `/plugin <插件名> 可以查看帮助信息。`
-    """
 
+    """
     global _warned_register_star
     if not _warned_register_star:
         _warned_register_star = True

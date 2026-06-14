@@ -1,102 +1,143 @@
 <script setup lang="ts">
-import {ref, useCssModule} from 'vue';
+import { ref } from 'vue';
 import { useAuthStore } from '@/stores/auth';
-import { Form } from 'vee-validate';
-import md5 from 'js-md5';
-import {useCustomizerStore} from "@/stores/customizer";
 import { useModuleI18n } from '@/i18n/composables';
+import AuthStageAccount from './stages/AuthStageAccount.vue';
+import AuthStageTotp from './stages/AuthStageTotp.vue';
+import AuthStageRecovery from './stages/AuthStageRecovery.vue';
 
 const { tm: t } = useModuleI18n('features/auth');
+const authStore = useAuthStore();
 
-const valid = ref(false);
-const show1 = ref(false);
-const password = ref('');
 const username = ref('');
+const password = ref('');
+const totpCode = ref('');
+const trustTotpDevice = ref(false);
+const recoveryCode = ref('');
 const loading = ref(false);
+const apiError = ref('');
+const stage = ref<'account' | 'totp' | 'recovery'>('account');
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-async function validate(values: any, { setErrors }: any) {
-  loading.value = true;
-  
-  // md5加密
-  let password_ = password.value;
-  if (password.value != '') {
-    // @ts-ignore
-    password_ = md5(password.value);
-  }
-
-  const authStore = useAuthStore();
-  // @ts-ignore
-  authStore.returnUrl = new URLSearchParams(window.location.search).get('redirect');
-  return authStore.login(username.value, password_).then((res) => {
-    console.log(res);
-    loading.value = false;
-  }).catch((err) => {
-    setErrors({ apiError: err });
-    loading.value = false;
-  });
+function resetTotpStage() {
+  totpCode.value = '';
+  trustTotpDevice.value = false;
 }
 
+function goToAccountStage() {
+  stage.value = 'account';
+  apiError.value = '';
+  resetTotpStage();
+}
+
+function goToTotpStage() {
+  stage.value = 'totp';
+  apiError.value = '';
+}
+
+function goToRecoveryStage() {
+  stage.value = 'recovery';
+  apiError.value = '';
+  recoveryCode.value = '';
+}
+
+async function submitAccountStage() {
+  if (!username.value || !password.value) {
+    return;
+  }
+  loading.value = true;
+  apiError.value = '';
+  try {
+    // @ts-ignore
+    authStore.returnUrl = new URLSearchParams(window.location.search).get('redirect');
+    const res = await authStore.login(username.value, password.value);
+    if (res === 'totp_required') {
+      goToTotpStage();
+    }
+  } catch (err) {
+    apiError.value = String(err || '') || 'Login failed';
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function submitTotpStage() {
+  if (!totpCode.value) {
+    return;
+  }
+  loading.value = true;
+  apiError.value = '';
+  try {
+    await authStore.login(
+      username.value,
+      password.value,
+      totpCode.value,
+      trustTotpDevice.value,
+    );
+  } catch (err) {
+    apiError.value = String(err || '') || 'Verification failed';
+  } finally {
+    loading.value = false;
+  }
+}
+
+defineExpose({ stage });
+
+async function submitRecoveryStage() {
+  if (!recoveryCode.value) {
+    return;
+  }
+  loading.value = true;
+  apiError.value = '';
+  try {
+    await authStore.login(username.value, password.value, recoveryCode.value);
+  } catch (err) {
+    apiError.value = String(err || '') || 'Recovery login failed';
+  } finally {
+    loading.value = false;
+  }
+}
 </script>
 
 <template>
-  <Form @submit="validate" class="mt-4 login-form" v-slot="{ errors, isSubmitting }">
-    <v-text-field 
-      v-model="username" 
-      :label="t('username')" 
-      class="mb-6 input-field" 
-      required 
-      density="comfortable"
-      hide-details="auto" 
-      variant="outlined"
-      :style="{color: useCustomizerStore().uiTheme === 'PurpleTheme' ? '#000000dd' : '#ffffff'}"
-      prepend-inner-icon="mdi-account"
-      :disabled="loading"
-    ></v-text-field>
-    
-    <v-text-field 
-      v-model="password" 
-      :label="t('password')" 
-      required 
-      density="comfortable" 
-      variant="outlined"
-      :style="{color: useCustomizerStore().uiTheme === 'PurpleTheme' ? '#000000dd' : '#ffffff'}"
-      hide-details="auto" 
-      :append-icon="show1 ? 'mdi-eye' : 'mdi-eye-off'"
-      :type="show1 ? 'text' : 'password'" 
-      @click:append="show1 = !show1" 
-      class="pwd-input"
-      prepend-inner-icon="mdi-lock"
-      :disabled="loading"
-    ></v-text-field>
-    
-    <v-btn 
-      color="secondary" 
-      :loading="isSubmitting || loading" 
-      block 
-      class="login-btn mt-8" 
-      variant="flat" 
-      size="large" 
-      :disabled="valid"
-      type="submit"
-      elevation="2"
+  <div class="mt-4 login-form">
+    <AuthStageAccount
+      v-if="stage === 'account'"
+      :username="username"
+      :password="password"
+      :loading="loading"
+      @update:username="(value) => (username = value)"
+      @update:password="(value) => (password = value)"
+      @submit="submitAccountStage"
+    />
 
-    >
-      <span class="login-btn-text">{{ t('login') }}</span>
-    </v-btn>
-    
-    <div v-if="errors.apiError" class="mt-4 error-container">
-      <v-alert 
-        color="error" 
-        variant="tonal" 
-        density="comfortable"
-        icon="mdi-alert-circle"
-        border="start"
-      >
-        {{ errors.apiError }}
+    <AuthStageTotp
+      v-else-if="stage === 'totp'"
+      :username="username"
+      :code="totpCode"
+      :trust-device="trustTotpDevice"
+      :loading="loading"
+      @update:code="(value) => (totpCode = value)"
+      @update:trust-device="(value) => (trustTotpDevice = value)"
+      @submit="submitTotpStage"
+      @back="goToAccountStage"
+      @use-recovery="goToRecoveryStage"
+    />
+
+    <AuthStageRecovery
+      v-else
+      :code="recoveryCode"
+      :loading="loading"
+      @update:code="(value) => (recoveryCode = value)"
+      @submit="submitRecoveryStage"
+      @back="goToTotpStage"
+    />
+
+    <div v-if="apiError" class="mt-4 error-container">
+      <v-alert color="error" variant="tonal" icon="mdi-alert-circle" border="start">
+        {{ apiError }}
       </v-alert>
     </div>
-  </Form>
+  </div>
 </template>
 
 <style lang="scss">
@@ -105,24 +146,25 @@ async function validate(values: any, { setErrors }: any) {
     font-weight: 500;
   }
 
-  .input-field, .pwd-input {
+  .input-field,
+  .pwd-input {
     .v-field__field {
       padding-top: 5px;
       padding-bottom: 5px;
     }
-    
+
     .v-field__outline {
       opacity: 0.7;
     }
-    
+
     &:hover .v-field__outline {
       opacity: 0.9;
     }
-    
+
     .v-field--focused .v-field__outline {
       opacity: 1;
     }
-    
+
     .v-field__prepend-inner {
       padding-right: 8px;
       opacity: 0.7;
@@ -138,44 +180,49 @@ async function validate(values: any, { setErrors }: any) {
       top: 50%;
       transform: translateY(-50%);
       opacity: 0.7;
-      
+
       &:hover {
         opacity: 1;
       }
     }
   }
-  
+
   .login-btn {
     margin-top: 12px;
     height: 48px;
     transition: all 0.3s ease;
     letter-spacing: 0.5px;
     border-radius: 8px !important;
-    
+
     &:hover {
       transform: translateY(-2px);
       box-shadow: 0 5px 15px rgba(94, 53, 177, 0.2) !important;
     }
-    
+
     .login-btn-text {
       font-size: 1.05rem;
       font-weight: 500;
     }
   }
-  
-  .hint-text {
-    color: var(--v-theme-secondaryText);
-    padding-left: 5px;
-  }
-  
+
   .error-container {
     .v-alert {
       border-left-width: 4px !important;
     }
   }
-}
 
-.custom-divider {
-  border-color: rgba(0, 0, 0, 0.08) !important;
+  .account-stage-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 4px;
+  }
+
+  .account-stage-user {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(var(--v-theme-on-surface), 0.85);
+  }
+
 }
 </style>

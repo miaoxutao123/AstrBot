@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import enum
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Callable, Awaitable, Any, List, Dict, TypeVar, Generic
+from typing import Any, Generic, Literal, TypeVar, overload
+
 from .filter import HandlerFilter
 from .star import star_map
 
@@ -9,11 +12,11 @@ T = TypeVar("T", bound="StarHandlerMetadata")
 
 
 class StarHandlerRegistry(Generic[T]):
-    def __init__(self):
-        self.star_handlers_map: Dict[str, StarHandlerMetadata] = {}
-        self._handlers: List[StarHandlerMetadata] = []
+    def __init__(self) -> None:
+        self.star_handlers_map: dict[str, StarHandlerMetadata] = {}
+        self._handlers: list[StarHandlerMetadata] = []
 
-    def append(self, handler: StarHandlerMetadata):
+    def append(self, handler: StarHandlerMetadata) -> None:
         """添加一个 Handler，并保持按优先级有序"""
         if "priority" not in handler.extras_configs:
             handler.extras_configs["priority"] = 0
@@ -22,20 +25,140 @@ class StarHandlerRegistry(Generic[T]):
         self._handlers.append(handler)
         self._handlers.sort(key=lambda h: -h.extras_configs["priority"])
 
-    def _print_handlers(self):
+    def _print_handlers(self) -> None:
         for handler in self._handlers:
             print(handler.handler_full_name)
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnAstrBotLoadedEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnPlatformLoadedEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.AdapterMessageEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[
+        StarHandlerMetadata[Callable[..., Awaitable[Any] | AsyncGenerator[Any]]]
+    ]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnLLMRequestEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnLLMResponseEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnAgentBeginEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnAgentDoneEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnDecoratingResultEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnCallingFuncToolEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[
+        StarHandlerMetadata[Callable[..., Awaitable[Any] | AsyncGenerator[Any]]]
+    ]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnAfterMessageSentEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnPluginErrorEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnPluginLoadedEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: Literal[EventType.OnPluginUnloadedEvent],
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[StarHandlerMetadata[Callable[..., Awaitable[Any]]]]: ...
+
+    @overload
+    def get_handlers_by_event_type(
+        self,
+        event_type: EventType,
+        only_activated=True,
+        plugins_name: list[str] | None = None,
+    ) -> list[
+        StarHandlerMetadata[Callable[..., Awaitable[Any] | AsyncGenerator[Any]]]
+    ]: ...
 
     def get_handlers_by_event_type(
         self,
         event_type: EventType,
         only_activated=True,
         plugins_name: list[str] | None = None,
-    ) -> List[StarHandlerMetadata]:
+    ) -> list[StarHandlerMetadata]:
         handlers = []
         for handler in self._handlers:
             # 过滤事件类型
             if handler.event_type != event_type:
+                continue
+            if not handler.enabled:
                 continue
             # 过滤启用状态
             if only_activated:
@@ -53,6 +176,8 @@ class StarHandlerRegistry(Generic[T]):
                     not in (
                         EventType.OnAstrBotLoadedEvent,
                         EventType.OnPlatformLoadedEvent,
+                        EventType.OnPluginLoadedEvent,
+                        EventType.OnPluginUnloadedEvent,
                     )
                     and not plugin.reserved
                 ):
@@ -64,26 +189,27 @@ class StarHandlerRegistry(Generic[T]):
         return self.star_handlers_map.get(full_name, None)
 
     def get_handlers_by_module_name(
-        self, module_name: str
-    ) -> List[StarHandlerMetadata]:
+        self,
+        module_name: str,
+    ) -> list[StarHandlerMetadata]:
         return [
             handler
             for handler in self._handlers
             if handler.handler_module_path == module_name
         ]
 
-    def clear(self):
+    def clear(self) -> None:
         self.star_handlers_map.clear()
         self._handlers.clear()
 
-    def remove(self, handler: StarHandlerMetadata):
+    def remove(self, handler: StarHandlerMetadata) -> None:
         self.star_handlers_map.pop(handler.handler_full_name, None)
         self._handlers = [h for h in self._handlers if h != handler]
 
     def __iter__(self):
         return iter(self._handlers)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._handlers)
 
 
@@ -100,15 +226,26 @@ class EventType(enum.Enum):
     OnPlatformLoadedEvent = enum.auto()  # 平台加载完成
 
     AdapterMessageEvent = enum.auto()  # 收到适配器发来的消息
+    OnWaitingLLMRequestEvent = enum.auto()  # 等待调用 LLM（在获取锁之前，仅通知）
     OnLLMRequestEvent = enum.auto()  # 收到 LLM 请求（可以是用户也可以是插件）
     OnLLMResponseEvent = enum.auto()  # LLM 响应后
+    OnAgentBeginEvent = enum.auto()  # Agent 开始运行
+    OnAgentDoneEvent = enum.auto()  # Agent 运行完成
     OnDecoratingResultEvent = enum.auto()  # 发送消息前
     OnCallingFuncToolEvent = enum.auto()  # 调用函数工具
+    OnUsingLLMToolEvent = enum.auto()  # 使用 LLM 工具
+    OnLLMToolRespondEvent = enum.auto()  # 调用函数工具后
     OnAfterMessageSentEvent = enum.auto()  # 发送消息后
+    OnPluginErrorEvent = enum.auto()  # 插件处理消息异常时
+    OnPluginLoadedEvent = enum.auto()  # 插件加载完成
+    OnPluginUnloadedEvent = enum.auto()  # 插件卸载完成
+
+
+H = TypeVar("H", bound=Callable[..., Any])
 
 
 @dataclass
-class StarHandlerMetadata:
+class StarHandlerMetadata(Generic[H]):
     """描述一个 Star 所注册的某一个 Handler。"""
 
     event_type: EventType
@@ -123,10 +260,10 @@ class StarHandlerMetadata:
     handler_module_path: str
     """Handler 所在的模块路径。"""
 
-    handler: Callable[..., Awaitable[Any]]
+    handler: H
     """Handler 的函数对象，应当是一个异步函数"""
 
-    event_filters: List[HandlerFilter]
+    event_filters: list[HandlerFilter]
     """一个适配器消息事件过滤器，用于描述这个 Handler 能够处理、应该处理的适配器消息事件"""
 
     desc: str = ""
@@ -135,8 +272,11 @@ class StarHandlerMetadata:
     extras_configs: dict = field(default_factory=dict)
     """插件注册的一些其他的信息, 如 priority 等"""
 
+    enabled: bool = True
+
     def __lt__(self, other: StarHandlerMetadata):
         """定义小于运算符以支持优先队列"""
         return self.extras_configs.get("priority", 0) < other.extras_configs.get(
-            "priority", 0
+            "priority",
+            0,
         )

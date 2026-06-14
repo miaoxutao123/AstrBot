@@ -1,12 +1,13 @@
-"""
-企业微信智能机器人 HTTP 服务器
+"""企业微信智能机器人 HTTP 服务器
 处理企业微信智能机器人的 HTTP 回调请求
 """
 
 import asyncio
-from typing import Dict, Any, Optional, Callable
+from collections.abc import Callable
+from typing import Any
 
 import quart
+
 from astrbot.api import logger
 
 from .wecomai_api import WecomAIBotAPIClient
@@ -21,10 +22,8 @@ class WecomAIBotServer:
         host: str,
         port: int,
         api_client: WecomAIBotAPIClient,
-        message_handler: Optional[
-            Callable[[Dict[str, Any], Dict[str, str]], Any]
-        ] = None,
-    ):
+        message_handler: Callable[[dict[str, Any], dict[str, str]], Any] | None = None,
+    ) -> None:
         """初始化服务器
 
         Args:
@@ -32,6 +31,7 @@ class WecomAIBotServer:
             port: 监听端口
             api_client: API客户端实例
             message_handler: 消息处理回调函数
+
         """
         self.host = host
         self.port = port
@@ -43,9 +43,8 @@ class WecomAIBotServer:
 
         self.shutdown_event = asyncio.Event()
 
-    def _setup_routes(self):
+    def _setup_routes(self) -> None:
         """设置 Quart 路由"""
-
         # 使用 Quart 的 add_url_rule 方法添加路由
         self.app.add_url_rule(
             "/webhook/wecom-ai-bot",
@@ -60,8 +59,19 @@ class WecomAIBotServer:
         )
 
     async def verify_url(self):
-        """验证回调 URL"""
-        args = quart.request.args
+        """内部服务器的 GET 验证入口"""
+        return await self.handle_verify(quart.request)
+
+    async def handle_verify(self, request):
+        """处理 URL 验证请求，可被统一 webhook 入口复用
+
+        Args:
+            request: Quart 请求对象
+
+        Returns:
+            验证响应元组 (content, status_code, headers)
+        """
+        args = request.args
         msg_signature = args.get("msg_signature")
         timestamp = args.get("timestamp")
         nonce = args.get("nonce")
@@ -82,8 +92,19 @@ class WecomAIBotServer:
         return result, 200, {"Content-Type": "text/plain"}
 
     async def handle_message(self):
-        """处理消息回调"""
-        args = quart.request.args
+        """内部服务器的 POST 消息回调入口"""
+        return await self.handle_callback(quart.request)
+
+    async def handle_callback(self, request):
+        """处理消息回调，可被统一 webhook 入口复用
+
+        Args:
+            request: Quart 请求对象
+
+        Returns:
+            响应元组 (content, status_code, headers)
+        """
+        args = request.args
         msg_signature = args.get("msg_signature")
         timestamp = args.get("timestamp")
         nonce = args.get("nonce")
@@ -98,12 +119,12 @@ class WecomAIBotServer:
         assert nonce is not None
 
         logger.debug(
-            f"收到消息回调，msg_signature={msg_signature}, timestamp={timestamp}, nonce={nonce}"
+            f"收到消息回调，msg_signature={msg_signature}, timestamp={timestamp}, nonce={nonce}",
         )
 
         try:
             # 获取请求体
-            post_data = await quart.request.get_data()
+            post_data = await request.get_data()
 
             # 确保 post_data 是 bytes 类型
             if isinstance(post_data, str):
@@ -111,7 +132,10 @@ class WecomAIBotServer:
 
             # 解密消息
             ret_code, message_data = await self.api_client.decrypt_message(
-                post_data, msg_signature, timestamp, nonce
+                post_data,
+                msg_signature,
+                timestamp,
+                nonce,
             )
 
             if ret_code != WecomAIBotConstants.SUCCESS or not message_data:
@@ -123,7 +147,8 @@ class WecomAIBotServer:
             if self.message_handler:
                 try:
                     response = await self.message_handler(
-                        message_data, {"nonce": nonce, "timestamp": timestamp}
+                        message_data,
+                        {"nonce": nonce, "timestamp": timestamp},
                     )
                 except Exception as e:
                     logger.error("消息处理器执行异常: %s", e)
@@ -131,14 +156,13 @@ class WecomAIBotServer:
 
             if response:
                 return response, 200, {"Content-Type": "text/plain"}
-            else:
-                return "success", 200, {"Content-Type": "text/plain"}
+            return "success", 200, {"Content-Type": "text/plain"}
 
         except Exception as e:
             logger.error("处理消息时发生异常: %s", e)
             return "内部服务器错误", 500
 
-    async def start_server(self):
+    async def start_server(self) -> None:
         """启动服务器"""
         logger.info("启动企业微信智能机器人服务器，监听 %s:%d", self.host, self.port)
 
@@ -152,11 +176,11 @@ class WecomAIBotServer:
             logger.error("服务器运行异常: %s", e)
             raise
 
-    async def shutdown_trigger(self):
+    async def shutdown_trigger(self) -> None:
         """关闭触发器"""
         await self.shutdown_event.wait()
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """关闭服务器"""
         logger.info("企业微信智能机器人服务器正在关闭...")
         self.shutdown_event.set()

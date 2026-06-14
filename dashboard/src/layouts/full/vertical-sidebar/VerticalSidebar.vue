@@ -1,70 +1,173 @@
 <script setup>
-import { ref, shallowRef } from 'vue';
+import { ref, shallowRef, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useTheme } from 'vuetify';
 import { useCustomizerStore } from '../../../stores/customizer';
 import { useI18n } from '@/i18n/composables';
-import sidebarItems from './sidebarItem';
+import sidebarItems, { MORE_GROUP_KEY } from './sidebarItem';
 import NavItem from './NavItem.vue';
+import { applySidebarCustomization } from '@/utils/sidebarCustomization';
+import ChangelogDialog from '@/components/shared/ChangelogDialog.vue';
+import { usePluginSidebarItems } from '@/composables/usePluginSidebarItems';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const customizer = useCustomizerStore();
-const sidebarMenu = shallowRef(sidebarItems);
+const theme = useTheme();
+const { pluginItems } = usePluginSidebarItems();
+
+function buildSidebarMenu() {
+  const base = applySidebarCustomization(sidebarItems);
+  if (!pluginItems.value?.children?.length) return base;
+
+  const result = [];
+
+  for (const item of base) {
+    if (item.title === MORE_GROUP_KEY) {
+      result.push(pluginItems.value);
+      result.push(item);
+    } else {
+      result.push(item);
+    }
+  }
+
+  if (!base.some((item) => item.title === MORE_GROUP_KEY)) {
+    result.push(pluginItems.value);
+  }
+
+  return result;
+}
+
+function collectGroupValues(items, values = new Set()) {
+  items.forEach((item) => {
+    if (item?.children && item.title) {
+      values.add(item.title);
+      collectGroupValues(item.children, values);
+    }
+  });
+  return values;
+}
+
+function sanitizeOpenedItems(items, menuItems) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const groupValues = collectGroupValues(menuItems);
+  return items.filter((item) => typeof item === 'string' && groupValues.has(item));
+}
+
+function getInitialOpenedItems(menuItems) {
+  try {
+    const stored = JSON.parse(localStorage.getItem('sidebar_openedItems') || '[]');
+    return sanitizeOpenedItems(stored, menuItems);
+  } catch {
+    return [];
+  }
+}
+
+const sidebarMenu = shallowRef(buildSidebarMenu());
+
+// 侧边栏分组展开状态持久化
+const openedItems = ref(getInitialOpenedItems(sidebarMenu.value));
+watch(openedItems, (val) => {
+  localStorage.setItem('sidebar_openedItems', JSON.stringify(sanitizeOpenedItems(val, sidebarMenu.value)));
+}, { deep: true });
+
+// 当插件项变化时（如插件启用/停用），刷新菜单
+watch(pluginItems, () => {
+  sidebarMenu.value = buildSidebarMenu();
+  openedItems.value = sanitizeOpenedItems(openedItems.value, sidebarMenu.value);
+});
+
+function refreshSidebarMenu() {
+  sidebarMenu.value = buildSidebarMenu();
+  openedItems.value = sanitizeOpenedItems(openedItems.value, sidebarMenu.value);
+}
+
+// Apply customization on mount and listen for storage changes
+const handleStorageChange = (e) => {
+  if (e.key === 'astrbot_sidebar_customization') {
+    refreshSidebarMenu();
+  }
+};
+
+const handleCustomEvent = () => {
+  refreshSidebarMenu();
+};
+
+onMounted(() => {
+  window.addEventListener('storage', handleStorageChange);
+  window.addEventListener('sidebar-customization-changed', handleCustomEvent);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('storage', handleStorageChange);
+  window.removeEventListener('sidebar-customization-changed', handleCustomEvent);
+});
 
 const showIframe = ref(false);
 const starCount = ref(null);
+
+// 更新日志对话框
+const changelogDialog = ref(false);
 
 const sidebarWidth = ref(235);
 const minSidebarWidth = 200;
 const maxSidebarWidth = 300;
 const isResizing = ref(false);
 
-const iframeStyle = ref({
-  position: 'fixed',
-  bottom: '16px',
-  right: '16px',
-  width: '490px',
-  height: '640px',
-  minWidth: '300px',
-  minHeight: '200px',
-  background: 'white',
-  resize: 'both',
-  overflow: 'auto',
-  zIndex: '10000000',
-  borderRadius: '12px',
-  boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.1)',
-});
+const isDark = computed(() => customizer.uiTheme === 'PurpleThemeDark');
+const themeColors = computed(() => theme.current.value.colors);
+const iframeBackground = computed(() => isDark.value ? themeColors.value.surface || 'white' : 'white');
+const dragHeaderBackground = computed(() => isDark.value ? themeColors.value.mcpCardBg || themeColors.value.surface || 'white' : '#f0f0f0');
+const frameBorder = computed(() => `1px solid ${isDark.value ? (themeColors.value.borderLight || '#ccc') : '#ccc'}`);
 
-if (window.innerWidth < 768) {
-  iframeStyle.value = {
-    position: 'fixed',
-    top: '10%',
-    left: '0%',
-    width: '100%',
-    height: '80%',
-    minWidth: '300px',
-    minHeight: '200px',
-    background: 'white',
-    resize: 'both',
-    overflow: 'auto',
-    zIndex: '1002',
-    borderRadius: '12px',
-    boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.1)',
-  };
+const isMobile = window.innerWidth < 768;
+if (isMobile) {
   customizer.Sidebar_drawer = false;
 }
 
-const dragHeaderStyle = {
+const dragPos = ref({ left: '', top: '' });
+
+const iframeStyle = computed(() => {
+  const base = isMobile
+    ? { position: 'fixed', top: '10%', left: '0%', width: '100%', height: '80%', zIndex: '1002' }
+    : { position: 'fixed', bottom: '16px', right: '16px', width: '490px', height: '640px', zIndex: '10000000' };
+  const pos = dragPos.value.left ? { left: dragPos.value.left, top: dragPos.value.top, bottom: 'auto', right: 'auto' } : {};
+  return {
+    ...base,
+    ...pos,
+    minWidth: '300px',
+    minHeight: '200px',
+    background: iframeBackground.value,
+    resize: 'both',
+    overflow: 'auto',
+    borderRadius: '12px',
+    boxShadow: isDark.value ? '0px 4px 16px rgba(0, 0, 0, 0.5)' : '0px 4px 12px rgba(0, 0, 0, 0.1)',
+  };
+});
+
+const iframeInnerStyle = computed(() => ({
+  width: '100%',
+  height: 'calc(100% - 66px)',
+  border: 'none',
+  borderBottomLeftRadius: '12px',
+  borderBottomRightRadius: '12px',
+  filter: isDark.value ? 'invert(0.88) hue-rotate(180deg)' : 'none',
+}));
+
+const dragHeaderStyle = computed(() => ({
   width: '100%',
   padding: '8px',
-  background: '#f0f0f0',
-  borderBottom: '1px solid #ccc',
+  background: dragHeaderBackground.value,
+  borderBottom: frameBorder.value,
   borderTopLeftRadius: '8px',
   borderTopRightRadius: '8px',
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
   cursor: 'move'
-};
+}));
 
 function toggleIframe() {
   showIframe.value = !showIframe.value;
@@ -72,9 +175,16 @@ function toggleIframe() {
 
 function openIframeLink(url) {
   if (typeof window !== 'undefined') {
-    let url_ = url || "https://astrbot.app";
+    let url_ = url || "https://docs.astrbot.app";
     window.open(url_, "_blank");
   }
+}
+
+function openFaqLink() {
+  const faqUrl = locale.value === 'en-US'
+    ? 'https://docs.astrbot.app/en/faq.html'
+    : 'https://docs.astrbot.app/faq.html';
+  openIframeLink(faqUrl);
 }
 
 let offsetX = 0;
@@ -135,9 +245,8 @@ function moveAt(clientX, clientY) {
   const dm = document.getElementById('draggable-iframe');
   const newLeft = clamp(clientX - offsetX, 0, window.innerWidth - dm.offsetWidth);
   const newTop = clamp(clientY - offsetY, 0, window.innerHeight - dm.offsetHeight);
-  // 将拖拽后的位置同步到响应式样式变量中
-  iframeStyle.value.left = newLeft + 'px';
-  iframeStyle.value.top = newTop + 'px';
+  // Sync dragged position to reactive variable
+  dragPos.value = { left: newLeft + 'px', top: newTop + 'px' };
 }
 
 function endDrag() {
@@ -153,26 +262,31 @@ function startSidebarResize(event) {
   isResizing.value = true;
   document.body.style.userSelect = 'none';
   document.body.style.cursor = 'ew-resize';
-  
+
+  // 拖拽时禁用 iframe 的 pointer-events，防止 iframe 截获 mousemove 事件导致拖拽卡住
+  const iframes = document.querySelectorAll('.plugin-page-frame');
+  iframes.forEach((el) => { el.style.pointerEvents = 'none'; });
+
   const startX = event.clientX;
   const startWidth = sidebarWidth.value;
-  
+
   function onMouseMoveResize(event) {
     if (!isResizing.value) return;
-    
+
     const deltaX = event.clientX - startX;
     const newWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, startWidth + deltaX));
     sidebarWidth.value = newWidth;
   }
-  
+
   function onMouseUpResize() {
     isResizing.value = false;
     document.body.style.userSelect = '';
     document.body.style.cursor = '';
+    iframes.forEach((el) => { el.style.pointerEvents = ''; });
     document.removeEventListener('mousemove', onMouseMoveResize);
     document.removeEventListener('mouseup', onMouseUpResize);
   }
-  
+
   document.addEventListener('mousemove', onMouseMoveResize);
   document.addEventListener('mouseup', onMouseUpResize);
 }
@@ -196,6 +310,11 @@ async function fetchStarCount() {
 
 fetchStarCount();
 
+// 打开更新日志对话框
+function openChangelogDialog() {
+  changelogDialog.value = true;
+}
+
 </script>
 
 <template>
@@ -210,19 +329,29 @@ fetchStarCount();
     :rail="customizer.mini_sidebar"
   >
     <div class="sidebar-container">
-      <v-list class="pa-4 listitem flex-grow-1">
-        <template v-for="(item, i) in sidebarMenu" :key="i">
+      <v-list :class="['pa-4', 'listitem', 'flex-grow-1', { 'hidden-scrollbar': customizer.mini_sidebar }]" v-model:opened="openedItems" :open-strategy="'multiple'">
+        <template v-for="(item, i) in sidebarMenu" :key="item.title || item.to || `sidebar-item-${i}`">
           <NavItem :item="item" class="leftPadding" />
         </template>
       </v-list>
       <div class="sidebar-footer" v-if="!customizer.mini_sidebar">
-        <v-btn style="margin-bottom: 8px;" size="small" variant="tonal" color="primary" to="/settings">
-          🔧 {{ t('core.navigation.settings') }}
+        <v-btn class="sidebar-footer-btn" size="small" variant="tonal" color="primary" to="/settings" prepend-icon="mdi-cog">
+          {{ t('core.navigation.settings') }}
         </v-btn>
-        <v-btn style="margin-bottom: 8px;" size="small" variant="plain" @click="toggleIframe">
+        <v-btn class="sidebar-footer-btn" size="small" variant="text" prepend-icon="mdi-note-text-outline"
+          @click="openChangelogDialog">
+          {{ t('core.navigation.changelog') }}
+        </v-btn>
+        <v-btn class="sidebar-footer-btn" size="small" variant="text" prepend-icon="mdi-book-open-variant"
+          @click="toggleIframe">
           {{ t('core.navigation.documentation') }}
         </v-btn>
-        <v-btn style="margin-bottom: 8px;" size="small" variant="plain" @click="openIframeLink('https://github.com/AstrBotDevs/AstrBot')">
+        <v-btn class="sidebar-footer-btn" size="small" variant="text" prepend-icon="mdi-frequently-asked-questions"
+          @click="openFaqLink">
+          {{ t('core.navigation.faq') }}
+        </v-btn>
+        <v-btn class="sidebar-footer-btn" size="small" variant="text" prepend-icon="mdi-github"
+          @click="openIframeLink('https://github.com/AstrBotDevs/AstrBot')">
           {{ t('core.navigation.github') }}
            <v-chip
             v-if="starCount"
@@ -258,9 +387,9 @@ fetchStarCount();
       <div style="display: flex; gap: 8px;">
         <v-btn
           icon
-          @click.stop="openIframeLink('https://astrbot.app')"
+          @click.stop="openIframeLink('https://docs.astrbot.app')"
           @mousedown.stop
-          style="border-radius: 8px; border: 1px solid #ccc;"
+          :style="{ borderRadius: '8px', border: frameBorder }"
         >
           <v-icon icon="mdi-open-in-new" />
         </v-btn>
@@ -268,17 +397,20 @@ fetchStarCount();
           icon
           @click.stop="toggleIframe"
           @mousedown.stop
-          style="border-radius: 8px; border: 1px solid #ccc;"
+          :style="{ borderRadius: '8px', border: frameBorder }"
         >
           <v-icon icon="mdi-close" />
         </v-btn>
       </div>
     </div>
     <iframe
-      src="https://astrbot.app"
-      style="width: 100%; height: calc(100% - 56px); border: none; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;"
-    ></iframe>
+      src="https://docs.astrbot.app"
+      :style="iframeInnerStyle"
+      ></iframe>
   </div>
+
+  <!-- 更新日志对话框 -->
+  <ChangelogDialog v-model="changelogDialog" />
 </template>
 
 <style scoped>

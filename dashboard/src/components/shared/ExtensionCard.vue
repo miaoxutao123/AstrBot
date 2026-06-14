@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, inject } from 'vue';
+import { ref, computed, watch, useAttrs } from "vue";
 import { useCustomizerStore } from "@/stores/customizer";
-import { useModuleI18n } from '@/i18n/composables';
+import { useModuleI18n } from "@/i18n/composables";
+import UninstallConfirmDialog from "./UninstallConfirmDialog.vue";
+import PluginPlatformChip from "./PluginPlatformChip.vue";
+import StyledMenu from "./StyledMenu.vue";
+import defaultPluginIcon from "@/assets/images/plugin_icon.png";
+import { usePluginI18n } from "@/utils/pluginI18n";
 
 const props = defineProps({
   extension: {
@@ -16,212 +21,514 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  isPinned: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 // 定义要发送到父组件的事件
 const emit = defineEmits([
-  'configure',
-  'update',
-  'reload',
-  'install',
-  'uninstall',
-  'toggle-activation',
-  'view-handlers',
-  'view-readme'
+  "configure",
+  "update",
+  "reload",
+  "uninstall",
+  "toggle-activation",
+  "view-handlers",
+  "view-readme",
+  "view-changelog",
+  "toggle-pin",
+  "open-webui",
 ]);
 
-const reveal = ref(false);
+const hasPages = computed(() => {
+  return Array.isArray(props.extension?.pages) && props.extension.pages.length > 0;
+});
+
+const showUninstallDialog = ref(false);
+
+const attrs = useAttrs();
 
 // 国际化
-const { tm } = useModuleI18n('features/extension');
+const { tm } = useModuleI18n("features/extension");
+const { pluginName, pluginDesc } = usePluginI18n();
+
+const supportPlatforms = computed(() => {
+  const platforms = props.extension?.support_platforms;
+  if (!Array.isArray(platforms)) {
+    return [];
+  }
+  return platforms.filter((item) => typeof item === "string");
+});
+
+const astrbotVersionRequirement = computed(() => {
+  const versionSpec = props.extension?.astrbot_version;
+  return typeof versionSpec === "string" && versionSpec.trim().length
+    ? versionSpec.trim()
+    : "";
+});
+
+const logoLoadFailed = ref(false);
+
+const logoSrc = computed(() => {
+  const logo = props.extension?.logo;
+  if (logoLoadFailed.value) {
+    return defaultPluginIcon;
+  }
+  return typeof logo === "string" && logo.trim().length
+    ? logo
+    : defaultPluginIcon;
+});
+
+const localizedName = computed(() => pluginName(props.extension));
+
+const localizedDesc = computed(() => pluginDesc(props.extension));
+
+watch(
+  () => props.extension?.logo,
+  () => {
+    logoLoadFailed.value = false;
+  },
+);
 
 // 操作函数
 const configure = () => {
-  emit('configure', props.extension);
+  emit("configure", props.extension);
 };
 
 const updateExtension = () => {
-  emit('update', props.extension);
+  emit("update", props.extension);
 };
 
 const reloadExtension = () => {
-  emit('reload', props.extension);
-};
-
-const $confirm = inject("$confirm");
-
-const installExtension = async () => {
-  emit('install', props.extension);
+  emit("reload", props.extension);
 };
 
 const uninstallExtension = async () => {
-  if (typeof $confirm !== "function") {
-    console.error(tm("card.errors.confirmNotRegistered"));
-    return;
-  }
+  showUninstallDialog.value = true;
+};
 
-  const confirmed = await $confirm({
-    title: tm("dialogs.uninstall.title"),
-    message: tm("dialogs.uninstall.message"),
-  });
-
-  if (confirmed) {
-    emit("uninstall", props.extension);
-  }
+const handleUninstallConfirm = (options: {
+  deleteConfig: boolean;
+  deleteData: boolean;
+}) => {
+  emit("uninstall", props.extension, options);
 };
 
 const toggleActivation = () => {
-  emit('toggle-activation', props.extension);
+  emit("toggle-activation", props.extension);
 };
 
 const viewHandlers = () => {
-  emit('view-handlers', props.extension);
+  emit("view-handlers", props.extension);
 };
 
 const viewReadme = () => {
-  emit('view-readme', props.extension);
+  emit("view-readme", props.extension);
 };
+
+const viewChangelog = () => {
+  emit("view-changelog", props.extension);
+};
+
+const togglePin = () => {
+  emit("toggle-pin", props.extension);
+};
+
+const openWebui = () => {
+  emit("open-webui", props.extension);
+};
+
 </script>
 
 <template>
-  <v-card class="mx-auto d-flex flex-column" elevation="2" :style="{
-    position: 'relative',
-    backgroundColor: useCustomizerStore().uiTheme === 'PurpleTheme' ? marketMode ? '#f8f0dd' : '#ffffff' : '#282833',
-    color: useCustomizerStore().uiTheme === 'PurpleTheme' ? '#000000dd' : '#ffffff'
-  }">
-    <v-card-text style="padding: 16px; padding-bottom: 0px; display: flex; gap: 16px; width: 100%;">
-
-      <div v-if="extension?.icon">
-        <v-avatar size="65">
-          <v-img :src="extension.icon"
-            :alt="extension.name" cover></v-img>
-        </v-avatar>
-      </div>
-
-      <div style="width: 100%;">
-        <!-- Top-right three-dot menu -->
-        <div style="position: absolute; right: 8px; top: 8px; z-index: 5;">
-          <v-menu offset-y>
-            <template v-slot:activator="{ props: menuProps }">
-              <v-btn v-bind="menuProps" icon variant="text" aria-label="more">
-                <v-icon icon="mdi-dots-vertical"></v-icon>
-              </v-btn>
-            </template>
-
-            <v-list>
-              <v-list-item @click="viewReadme">
-                <v-list-item-title>📄 {{ tm('buttons.viewDocs') }}</v-list-item-title>
-              </v-list-item>
-
-              <v-list-item v-if="marketMode && !extension?.installed" @click="installExtension">
-                <v-list-item-title>
-                  {{ tm('buttons.install') }}</v-list-item-title>
-              </v-list-item>
-
-              <v-list-item v-if="marketMode && extension?.installed">
-                <v-list-item-title class="text--disabled">{{ tm('status.installed') }}</v-list-item-title>
-              </v-list-item>
-
-              <!-- Divider between market actions and plugin actions -->
-              <v-divider v-if="!marketMode" />
-
-              <template v-if="!marketMode">
-                <v-list-item @click="configure">
-                  <v-list-item-title>
-                    {{ tm('card.actions.pluginConfig') }}</v-list-item-title>
-                </v-list-item>
-
-                <v-list-item @click="uninstallExtension">
-                  <v-list-item-title class="text-error">{{ tm('card.actions.uninstallPlugin') }}</v-list-item-title>
-                </v-list-item>
-
-                <v-list-item @click="reloadExtension">
-                  <v-list-item-title>{{ tm('card.actions.reloadPlugin') }}</v-list-item-title>
-                </v-list-item>
-
-                <v-list-item @click="toggleActivation">
-                  <v-list-item-title>
-                    {{ extension.activated ? tm('buttons.disable') : tm('buttons.enable') }}{{
-                      tm('card.actions.togglePlugin') }}
-                  </v-list-item-title>
-                </v-list-item>
-
-                <v-list-item @click="viewHandlers">
-                  <v-list-item-title>{{ tm('card.actions.viewHandlers') }} ({{ extension.handlers.length
-                    }})</v-list-item-title>
-                </v-list-item>
-
-                <v-list-item @click="updateExtension" :disabled="!extension?.has_update">
-                  <v-list-item-title>
-                    {{ tm('card.actions.updateTo') }} {{ extension.online_version || extension.version }}
-                  </v-list-item-title>
-                </v-list-item>
-              </template>
-            </v-list>
-          </v-menu>
+  <v-card
+    v-bind="attrs"
+    class="extension-card mx-auto d-flex flex-column h-100"
+    elevation="0"
+    height="100%"
+    :ripple="false"
+    variant="outlined"
+    :style="{
+      position: 'relative',
+      backgroundColor:
+        useCustomizerStore().uiTheme === 'PurpleTheme'
+          ? marketMode
+            ? '#f8f0dd'
+            : '#ffffff'
+          : marketMode
+            ? '#3a3425'
+            : '#282833',
+      color:
+        useCustomizerStore().uiTheme === 'PurpleTheme'
+          ? '#000000dd'
+          : '#ffffffdd',
+    }"
+  >
+    <v-card-text class="extension-card-text">
+      <div class="extension-content-row">
+        <div class="extension-image-container">
+          <img
+            :src="logoSrc"
+            :alt="extension.name"
+            class="extension-logo"
+            @error="logoLoadFailed = true"
+          />
         </div>
 
-        <div style="width: 100%; margin-bottom: 24px;">
-          <!-- 最多一行 -->
-          <div class="text-caption" style="color: gray; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 36px;">
-            {{ extension.author }} / {{ extension.name }}
-          </div>
-          <p class="text-h3 font-weight-black" :class="{ 'text-h4': $vuetify.display.xs }">
-            {{ extension.name }}
-            <v-tooltip location="top" v-if="extension?.has_update && !marketMode">
-              <template v-slot:activator="{ props: tooltipProps }">
-                <v-icon v-bind="tooltipProps" color="warning" class="ml-2" icon="mdi-update" size="small"></v-icon>
-              </template>
-              <span>{{ tm("card.status.hasUpdate") }}: {{ extension.online_version }}</span>
-            </v-tooltip>
-            <v-tooltip location="top" v-if="!extension.activated && !marketMode">
-              <template v-slot:activator="{ props: tooltipProps }">
-                <v-icon v-bind="tooltipProps" color="error" class="ml-2" icon="mdi-cancel" size="small"></v-icon>
-              </template>
-              <span>{{ tm("card.status.disabled") }}</span>
-            </v-tooltip>
-          </p>
+        <div class="extension-meta-group">
+          <div class="extension-title-row">
+            <p
+              class="text-h3 font-weight-black extension-title"
+              :class="{ 'text-h4': $vuetify.display.xs }"
+            >
+              <v-tooltip
+                location="top"
+                :text="
+                  localizedName?.length &&
+                  localizedName !== extension.name
+                    ? `${localizedName} (${extension.name})`
+                    : extension.name
+                "
+              >
+                <template v-slot:activator="{ props: titleTooltipProps }">
+                  <span v-bind="titleTooltipProps" class="extension-title__text">{{
+                    localizedName
+                  }}</span>
+                </template>
+              </v-tooltip>
+              <span v-if="extension.version" class="extension-version">
+                {{ extension.version }}
+              </span>
+              <v-chip
+                v-if="extension.reserved"
+                color="primary"
+                size="x-small"
+                class="extension-system-chip"
+              >
+                {{ tm("status.system") }}
+              </v-chip>
+              <v-tooltip
+                location="top"
+                v-if="extension?.has_update && !marketMode"
+              >
+                <template v-slot:activator="{ props: tooltipProps }">
+                  <v-icon
+                    v-bind="tooltipProps"
+                    color="warning"
+                    class="ml-2"
+                    icon="mdi-update"
+                    size="small"
+                    style="cursor: pointer"
+                    @click.stop="updateExtension"
+                  ></v-icon>
+                </template>
+                <span
+                  >{{ tm("card.status.hasUpdate") }}:
+                  {{ extension.online_version }}</span
+                >
+              </v-tooltip>
+            </p>
 
-          <div class="mt-1 d-flex flex-wrap">
-            <v-chip color="primary" label size="small">
-              <v-icon icon="mdi-source-branch" start></v-icon>
-              {{ extension.version }}
-            </v-chip>
-            <v-chip v-if="extension?.has_update" color="warning" label size="small" class="ml-2">
+            <template v-if="!marketMode">
+              <v-tooltip location="left">
+                <template v-slot:activator="{ props: tooltipProps }">
+                  <div class="extension-switch-wrap" @click.stop>
+                    <div
+                      v-bind="tooltipProps"
+                      style="display: inline-flex; align-items: center"
+                    >
+                      <v-switch
+                        :model-value="extension.activated"
+                        color="success"
+                        density="compact"
+                        hide-details
+                        inset
+                        @update:model-value="toggleActivation"
+                      ></v-switch>
+                    </div>
+                  </div>
+                </template>
+                <span>{{
+                  extension.activated ? tm("buttons.disable") : tm("buttons.enable")
+                }}</span>
+              </v-tooltip>
+            </template>
+          </div>
+
+          <div class="extension-chip-group d-flex flex-wrap">
+            <v-chip
+              v-if="extension?.has_update"
+              color="warning"
+              label
+              size="small"
+              style="cursor: pointer"
+              @click.stop="updateExtension"
+            >
               <v-icon icon="mdi-arrow-up-bold" start></v-icon>
               {{ extension.online_version }}
             </v-chip>
-            <v-chip color="primary" label size="small" class="ml-2" v-if="extension.handlers?.length">
-              <v-icon icon="mdi-cogs" start></v-icon>
-              {{ extension.handlers?.length }}{{ tm("card.status.handlersCount") }}
+            <v-chip
+              v-for="tag in extension.tags"
+              :key="tag"
+              :color="tag === 'danger' ? 'error' : 'primary'"
+              label
+              size="small"
+            >
+              {{ tag === "danger" ? tm("tags.danger") : tag }}
             </v-chip>
-            <v-chip v-for="tag in extension.tags" :key="tag" :color="tag === 'danger' ? 'error' : 'primary'" label
-              size="small" class="ml-2">
-              {{ tag === 'danger' ? tm('tags.danger') : tag }}
+            <PluginPlatformChip :platforms="supportPlatforms" />
+            <v-chip
+              v-if="astrbotVersionRequirement"
+              color="secondary"
+              variant="outlined"
+              label
+              size="small"
+            >
+              AstrBot: {{ astrbotVersionRequirement }}
             </v-chip>
           </div>
 
-          <div class="mt-2" :class="{ 'text-caption': $vuetify.display.xs }" style="overflow-y: auto; height: 60px;">
-            {{ extension.desc }}
+          <div
+            class="extension-desc"
+            :class="{ 'text-caption': $vuetify.display.xs }"
+          >
+            {{ localizedDesc }}
           </div>
         </div>
       </div>
-
     </v-card-text>
+
+    <v-card-actions class="extension-actions">
+      <template v-if="!marketMode">
+        <v-spacer></v-spacer>
+        <v-tooltip location="top">
+          <template v-slot:activator="{ props: pinTooltipProps }">
+            <v-btn
+              v-bind="pinTooltipProps"
+              :aria-label="isPinned ? tm('buttons.unpin') : tm('buttons.pin')"
+              :color="isPinned ? 'primary' : 'secondary'"
+              :icon="isPinned ? 'mdi-pin' : 'mdi-pin-outline'"
+              size="small"
+              variant="tonal"
+              class="extension-pin-btn"
+              @click.stop="togglePin"
+            ></v-btn>
+          </template>
+          <span>{{ isPinned ? tm("buttons.unpin") : tm("buttons.pin") }}</span>
+        </v-tooltip>
+
+        <v-tooltip location="top" :text="tm('buttons.viewDocs')">
+          <template v-slot:activator="{ props: actionProps }">
+            <v-btn
+              v-bind="actionProps"
+              icon="mdi-book-open-page-variant"
+              size="small"
+              variant="tonal"
+              color="info"
+              @click.stop="viewReadme"
+            ></v-btn>
+          </template>
+        </v-tooltip>
+
+        <v-tooltip v-if="hasPages" location="top" :text="tm('buttons.openWebui')">
+          <template v-slot:activator="{ props: actionProps }">
+            <v-btn
+              v-bind="actionProps"
+              icon="mdi-monitor-dashboard"
+              size="small"
+              variant="tonal"
+              color="primary"
+              :disabled="!extension.activated"
+              @click.stop="openWebui"
+            ></v-btn>
+          </template>
+        </v-tooltip>
+
+        <v-tooltip location="top" :text="tm('card.actions.pluginConfig')">
+          <template v-slot:activator="{ props: actionProps }">
+            <v-btn
+              v-bind="actionProps"
+              icon="mdi-cog"
+              size="small"
+              variant="tonal"
+              color="primary"
+              @click.stop="configure"
+            ></v-btn>
+          </template>
+        </v-tooltip>
+
+        <v-tooltip location="top" :text="tm('card.actions.reloadPlugin')">
+          <template v-slot:activator="{ props: actionProps }">
+            <v-btn
+              v-bind="actionProps"
+              icon="mdi-refresh"
+              size="small"
+              variant="tonal"
+              color="primary"
+              @click.stop="reloadExtension"
+            ></v-btn>
+          </template>
+        </v-tooltip>
+
+        <StyledMenu location="top end" offset="8">
+          <template #activator="{ props: menuProps }">
+            <v-btn
+              v-bind="menuProps"
+              icon="mdi-dots-horizontal"
+              size="small"
+              variant="tonal"
+              color="secondary"
+              @click.stop
+            ></v-btn>
+          </template>
+
+          <v-list-item class="styled-menu-item" prepend-icon="mdi-information" @click.stop="viewHandlers">
+            <v-list-item-title>{{ tm("buttons.viewInfo") }}</v-list-item-title>
+          </v-list-item>
+
+          <v-list-item class="styled-menu-item" prepend-icon="mdi-update" @click.stop="updateExtension">
+            <v-list-item-title>{{
+              extension.has_update
+                ? tm("card.actions.updateTo") + " " + extension.online_version
+                : tm("card.actions.reinstall")
+            }}</v-list-item-title>
+          </v-list-item>
+
+          <v-list-item class="styled-menu-item" prepend-icon="mdi-delete" @click.stop="uninstallExtension">
+            <v-list-item-title class="text-error">{{ tm("card.actions.uninstallPlugin") }}</v-list-item-title>
+          </v-list-item>
+        </StyledMenu>
+      </template>
+      <template v-else>
+        <v-btn color="primary" size="small" @click.stop="viewReadme">
+          {{ tm("buttons.viewDocs") }}
+        </v-btn>
+      </template>
+    </v-card-actions>
   </v-card>
 
+  <!-- 卸载确认对话框 -->
+  <UninstallConfirmDialog
+    v-model="showUninstallDialog"
+    @confirm="handleUninstallConfirm"
+  />
 </template>
 
 <style scoped>
+.extension-card-text {
+  padding: 12px 14px 8px;
+  width: 100%;
+}
+
+.extension-card {
+  cursor: pointer;
+}
+
 .extension-image-container {
   display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.extension-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.extension-content-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.extension-meta-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.extension-chip-group {
+  gap: 6px;
+}
+
+.extension-desc {
+  margin-top: 6px;
+  font-size: 90%;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.extension-title {
+  display: flex;
   align-items: center;
-  margin-left: 12px;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
+
+.extension-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.extension-title__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-version {
+  color: rgba(var(--v-theme-on-surface), 0.48);
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+.extension-system-chip {
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.extension-switch-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.extension-pin-btn {
+  flex-shrink: 0;
+}
+
+.extension-switch-wrap :deep(.v-switch) {
+  margin: 0;
 }
 
 @media (max-width: 600px) {
-  .extension-image-container {
-    margin-left: 8px;
+  .extension-content-row {
+    gap: 10px;
   }
+
+  .extension-logo {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+.extension-actions {
+  margin-top: auto;
+  gap: 6px;
+  justify-content: flex-end;
+  min-height: 42px;
+  padding: 0 12px 10px;
 }
 </style>

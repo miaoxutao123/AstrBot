@@ -3,13 +3,13 @@ from astrbot.core.astrbot_config_mgr import AstrBotConfigManager
 from astrbot.core.umop_config_router import UmopConfigRouter
 
 
-async def migrate_45_to_46(acm: AstrBotConfigManager, ucr: UmopConfigRouter):
+async def migrate_45_to_46(acm: AstrBotConfigManager, ucr: UmopConfigRouter) -> None:
     abconf_data = acm.abconf_data
 
     if not isinstance(abconf_data, dict):
         # should be unreachable
         logger.warning(
-            f"migrate_45_to_46: abconf_data is not a dict (type={type(abconf_data)}). Value: {abconf_data!r}"
+            f"migrate_45_to_46: abconf_data is not a dict (type={type(abconf_data)}). Value: {abconf_data!r}",
         )
         return
 

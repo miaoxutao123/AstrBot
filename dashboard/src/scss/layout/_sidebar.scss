@@ -1,6 +1,7 @@
 /*This is for the logo*/
 .leftSidebar {
   border: 0px;
+  border-right: 1px solid rgba(var(--v-theme-borderLight), 0.45);
   box-shadow: none !important;
 }
 .listitem {
@@ -16,6 +17,9 @@
       color: rgb(var(--v-theme-secondary));
     }
   }
+  .v-list-item--density-default.v-list-item--one-line {
+    min-height: 40px;
+  }
 }
 
 // 深色主题下的侧边栏悬停和选中样式
@@ -24,36 +28,33 @@
     .v-list-group__items .v-list-item,
     .v-list-item {
       &:hover {
-        color: #b794f6 !important;
+        color: rgb(var(--v-theme-primary)) !important;
         
         .v-list-item-title {
-          color: #b794f6 !important;
+          color: rgb(var(--v-theme-primary)) !important;
         }
         
         .v-icon {
-          color: #b794f6 !important;
+          color: rgb(var(--v-theme-primary)) !important;
         }
       }
       
       // 选中状态的样式
       &.v-list-item--active {
-        color: #b794f6 !important;
+        color: rgb(var(--v-theme-primary)) !important;
         
         .v-list-item-title {
-          color: #b794f6 !important;
+          color: rgb(var(--v-theme-primary)) !important;
         }
         
         .v-icon {
-          color: #b794f6 !important;
+          color: rgb(var(--v-theme-primary)) !important;
         }
       }
     }
   }
   .v-list-item--density-default.v-list-item--one-line {
-    min-height: 42px;
-  }
-  .leftPadding {
-    margin-left: 4px;
+    min-height: 40px;
   }
 }
 .v-navigation-drawer--rail {
@@ -112,6 +113,11 @@
         width: 100%;
         max-width: 180px;
         margin-bottom: 8px !important;
+      }
+
+      .sidebar-footer-btn {
+        justify-content: flex-start;
+        text-align: left;
       }
     }
   }

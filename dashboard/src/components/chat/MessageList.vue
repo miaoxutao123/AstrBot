@@ -1,774 +1,829 @@
 <template>
-    <div class="messages-container" ref="messageContainer">
-        <!-- 聊天消息列表 -->
-        <div class="message-list">
-            <div class="message-item fade-in" v-for="(msg, index) in messages" :key="index">
-                <!-- 用户消息 -->
-                <div v-if="msg.content.type == 'user'" class="user-message">
-                    <div class="message-bubble user-bubble" :class="{ 'has-audio': msg.content.audio_url }"
-                        :style="{ backgroundColor: isDark ? '#2d2e30' : '#e7ebf4' }">
-                        <pre
-                            style="font-family: inherit; white-space: pre-wrap; word-wrap: break-word;">{{ msg.content.message }}</pre>
-
-                        <!-- 图片附件 -->
-                        <div class="image-attachments" v-if="msg.content.image_url && msg.content.image_url.length > 0">
-                            <div v-for="(img, index) in msg.content.image_url" :key="index" class="image-attachment">
-                                <img :src="img" class="attached-image" @click="$emit('openImagePreview', img)" />
-                            </div>
-                        </div>
-
-                        <!-- 音频附件 -->
-                        <div class="audio-attachment" v-if="msg.content.audio_url && msg.content.audio_url.length > 0">
-                            <audio controls class="audio-player">
-                                <source :src="msg.content.audio_url" type="audio/wav">
-                                {{ t('messages.errors.browser.audioNotSupported') }}
-                            </audio>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Bot Messages -->
-                <div v-else class="bot-message">
-
-                    <v-avatar class="bot-avatar" size="36">
-                        <v-progress-circular :index="index" v-if="isStreaming && index === messages.length - 1" indeterminate size="28"
-                            width="2"></v-progress-circular>
-                        <span v-else-if="messages[index - 1]?.content.type !== 'bot'" class="text-h2">✨</span>
-                    </v-avatar>
-                    <div class="bot-message-content">
-                        <div class="message-bubble bot-bubble">
-                            <!-- Text -->
-                            <div v-if="msg.content.message && msg.content.message.trim()"
-                                v-html="md.render(msg.content.message)" class="markdown-content"></div>
-
-                            <!-- Image -->
-                            <div class="embedded-images"
-                                v-if="msg.content.embedded_images && msg.content.embedded_images.length > 0">
-                                <div v-for="(img, imgIndex) in msg.content.embedded_images" :key="imgIndex"
-                                    class="embedded-image">
-                                    <img :src="img" class="bot-embedded-image"
-                                        @click="$emit('openImagePreview', img)" />
-                                </div>
-                            </div>
-
-                            <!-- Audio -->
-                            <div class="embedded-audio" v-if="msg.content.embedded_audio">
-                                <audio controls class="audio-player">
-                                    <source :src="msg.content.embedded_audio" type="audio/wav">
-                                    {{ t('messages.errors.browser.audioNotSupported') }}
-                                </audio>
-                            </div>
-                        </div>
-                        <div class="message-actions">
-                            <v-btn :icon="getCopyIcon(index)" size="small" variant="text" class="copy-message-btn"
-                                :class="{ 'copy-success': isCopySuccess(index) }"
-                                @click="copyBotMessage(msg.content.message, index)" :title="t('core.common.copy')" />
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+  <div
+    ref="messageListRoot"
+    class="message-list-root"
+    :class="{ 'is-dark': isDark }"
+  >
+    <div v-if="isLoadingMessages" class="center-state">
+      <v-progress-circular indeterminate size="32" width="3" />
     </div>
+
+    <div v-else class="messages-list">
+      <div
+        v-for="(msg, msgIndex) in messages"
+        :key="msg.id || `${msgIndex}-${msg.created_at || ''}`"
+        class="message-row"
+        :class="isUserMessage(msg) ? 'from-user' : 'from-bot'"
+      >
+        <v-avatar v-if="!isUserMessage(msg)" class="bot-avatar" size="48">
+          <v-progress-circular
+            v-if="isMessageStreaming(msgIndex)"
+            indeterminate
+            size="22"
+            width="2"
+          />
+          <span v-else class="bot-avatar-symbol" aria-hidden="true">✦</span>
+        </v-avatar>
+
+        <div class="message-stack">
+          <div
+            class="message-bubble"
+            :class="{ user: isUserMessage(msg), bot: !isUserMessage(msg) }"
+          >
+            <div v-if="messageContent(msg).isLoading" class="loading-message">
+              <span>{{ tm("message.loading") }}</span>
+            </div>
+
+            <template v-else>
+              <template
+                v-for="(block, blockIndex) in renderBlocks(msg)"
+                :key="`${msgIndex}-block-${blockIndex}-${block.kind}`"
+              >
+                <ReasoningBlock
+                  v-if="block.kind === 'thinking'"
+                  :parts="block.parts"
+                  :is-dark="isDark"
+                  :initial-expanded="false"
+                  :is-streaming="isMessageStreaming(msgIndex)"
+                  :has-non-reasoning-content="
+                    hasFollowingContentBlock(msg, blockIndex)
+                  "
+                />
+
+                <template v-else>
+                  <template
+                    v-for="(part, partIndex) in block.parts"
+                    :key="`${msgIndex}-${blockIndex}-${partIndex}-${part.type}`"
+                  >
+                    <button
+                      v-if="part.type === 'reply'"
+                      class="reply-quote"
+                      type="button"
+                      @click="scrollToMessage(part.message_id)"
+                    >
+                      <v-icon size="15">mdi-reply</v-icon>
+                      <span>{{
+                        replyPreview(part.message_id, part.selected_text)
+                      }}</span>
+                    </button>
+
+                    <div
+                      v-else-if="part.type === 'plain' && isUserMessage(msg)"
+                      class="plain-content"
+                    >
+                      {{ part.text || "" }}
+                    </div>
+
+                    <MarkdownMessagePart
+                      v-else-if="part.type === 'plain'"
+                      :content="part.text || ''"
+                      :refs="resolvedMessageRefs(msg)"
+                      :is-dark="isDark"
+                      :custom-html-tags="customMarkdownTags"
+                      :is-streaming="isMessageStreaming(msgIndex)"
+                    />
+
+                    <button
+                      v-else-if="part.type === 'image'"
+                      class="image-part"
+                      type="button"
+                      @click="openImage(partUrl(part))"
+                    >
+                      <img :src="partUrl(part)" :alt="part.filename || 'image'" />
+                    </button>
+
+                    <audio
+                      v-else-if="part.type === 'record'"
+                      class="audio-part"
+                      controls
+                      :src="partUrl(part)"
+                    />
+
+                    <video
+                      v-else-if="part.type === 'video'"
+                      class="video-part"
+                      controls
+                      :src="partUrl(part)"
+                    />
+
+                    <div v-else-if="part.type === 'file'" class="file-part">
+                      <v-icon size="20">mdi-file-document-outline</v-icon>
+                      <span>{{ part.filename || "file" }}</span>
+                      <v-btn
+                        icon="mdi-download"
+                        size="x-small"
+                        variant="text"
+                        :loading="
+                          downloadingFiles.has(
+                            part.attachment_id || part.filename || '',
+                          )
+                        "
+                        @click="downloadPart(part)"
+                      />
+                    </div>
+
+                    <div
+                      v-else-if="part.type === 'tool_call'"
+                      class="tool-call-block"
+                    >
+                      <template
+                        v-for="tool in part.tool_calls || []"
+                        :key="tool.id || tool.name"
+                      >
+                        <ToolCallItem
+                          v-if="isIPythonToolCall(tool)"
+                          :is-dark="isDark"
+                        >
+                          <template #label>
+                            <v-icon size="16">mdi-code-json</v-icon>
+                            <span>{{ tool.name || "python" }}</span>
+                            <span class="tool-call-inline-status">
+                              {{ toolCallStatusText(tool) }}
+                            </span>
+                          </template>
+                          <template #details>
+                            <IPythonToolBlock
+                              :tool-call="normalizeToolCall(tool)"
+                              :is-dark="isDark"
+                              :show-header="false"
+                              :force-expanded="true"
+                            />
+                          </template>
+                        </ToolCallItem>
+                        <ToolCallCard
+                          v-else
+                          :tool-call="normalizeToolCall(tool)"
+                          :is-dark="isDark"
+                        />
+                      </template>
+                    </div>
+
+                    <div v-else class="unknown-part">
+                      {{ formatJson(part) }}
+                    </div>
+                  </template>
+                </template>
+              </template>
+            </template>
+          </div>
+
+          <div v-if="showMessageMeta(msg, msgIndex)" class="message-meta">
+            <span v-if="msg.created_at">{{ formatTime(msg.created_at) }}</span>
+            <v-btn
+              v-if="!isUserMessage(msg)"
+              icon="mdi-content-copy"
+              size="x-small"
+              variant="text"
+              @click="copyMessage(msg)"
+            />
+            <v-menu v-if="messageContent(msg).agentStats" location="bottom">
+              <template #activator="{ props: statsProps }">
+                <v-btn
+                  v-bind="statsProps"
+                  icon="mdi-information-outline"
+                  size="x-small"
+                  variant="text"
+                />
+              </template>
+              <v-card class="stats-card" elevation="4">
+                <div
+                  v-if="cachedInputTokens(messageContent(msg).agentStats) > 0"
+                  class="stats-row"
+                >
+                  <span>{{ tm("stats.cachedTokens") }}</span>
+                  <strong>{{
+                    cachedInputTokens(messageContent(msg).agentStats)
+                  }}</strong>
+                </div>
+                <div class="stats-row">
+                  <span>{{ tm("stats.inputTokens") }}</span>
+                  <strong>{{
+                    inputTokens(messageContent(msg).agentStats)
+                  }}</strong>
+                </div>
+                <div class="stats-row">
+                  <span>{{ tm("stats.outputTokens") }}</span>
+                  <strong>{{
+                    outputTokens(messageContent(msg).agentStats)
+                  }}</strong>
+                </div>
+                <div
+                  v-if="agentTtft(messageContent(msg).agentStats)"
+                  class="stats-row"
+                >
+                  <span>{{ tm("stats.ttft") }}</span>
+                  <strong>{{
+                    agentTtft(messageContent(msg).agentStats)
+                  }}</strong>
+                </div>
+                <div class="stats-row">
+                  <span>{{ tm("stats.duration") }}</span>
+                  <strong>{{
+                    agentDuration(messageContent(msg).agentStats)
+                  }}</strong>
+                </div>
+              </v-card>
+            </v-menu>
+            <div v-if="messageRefs(msg).length" class="message-meta-refs">
+              <ActionRef
+                :refs="resolvedMessageRefs(msg)"
+                @open-refs="openRefsSidebar"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <RefsSidebar v-model="refsSidebarOpen" :refs="selectedRefs" />
+
+    <v-overlay
+      v-model="imagePreview.visible"
+      class="image-preview-overlay"
+      scrim="rgba(0, 0, 0, 0.86)"
+      @click="closeImage"
+    >
+      <img
+        class="preview-image"
+        :src="imagePreview.url"
+        alt="preview"
+        @click.stop
+      />
+    </v-overlay>
+  </div>
 </template>
 
-<script>
-import { useI18n, useModuleI18n } from '@/i18n/composables';
-import MarkdownIt from 'markdown-it';
-import hljs from 'highlight.js';
-import 'highlight.js/styles/github.css';
+<script setup lang="ts">
+import { computed, nextTick, reactive, ref } from "vue";
+import axios from "axios";
+import { setCustomComponents } from "markstream-vue";
+import "markstream-vue/index.css";
+import IPythonToolBlock from "@/components/chat/message_list_comps/IPythonToolBlock.vue";
+import MarkdownMessagePart from "@/components/chat/message_list_comps/MarkdownMessagePart.vue";
+import ReasoningBlock from "@/components/chat/message_list_comps/ReasoningBlock.vue";
+import RefNode from "@/components/chat/message_list_comps/RefNode.vue";
+import RefsSidebar from "@/components/chat/message_list_comps/RefsSidebar.vue";
+import ToolCallCard from "@/components/chat/message_list_comps/ToolCallCard.vue";
+import ToolCallItem from "@/components/chat/message_list_comps/ToolCallItem.vue";
+import ActionRef from "@/components/chat/message_list_comps/ActionRef.vue";
+import ThemeAwareMarkdownCodeBlock from "@/components/shared/ThemeAwareMarkdownCodeBlock.vue";
+import {
+  displayParts as displayMessageParts,
+  messageBlocks as buildMessageBlocks,
+  type MessageDisplayBlock,
+} from "@/composables/useMessages";
+import type {
+  ChatContent,
+  ChatRecord,
+  MessagePart,
+} from "@/composables/useMessages";
+import { useModuleI18n } from "@/i18n/composables";
+import { copyToClipboard } from "@/utils/clipboard";
 
-const md = new MarkdownIt({
-    html: false,
-    breaks: true,
-    linkify: true,
-    highlight: function (code, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-            try {
-                return hljs.highlight(code, { language: lang }).value;
-            } catch (err) {
-                console.error('Highlight error:', err);
-            }
-        }
-        return hljs.highlightAuto(code).value;
-    }
+const props = withDefaults(
+  defineProps<{
+    messages: ChatRecord[];
+    isDark?: boolean;
+    isStreaming?: boolean;
+    isLoadingMessages?: boolean;
+  }>(),
+  {
+    isDark: false,
+    isStreaming: false,
+    isLoadingMessages: false,
+  },
+);
+
+setCustomComponents("chat-message", {
+  ref: RefNode,
+  code_block: ThemeAwareMarkdownCodeBlock,
 });
 
-export default {
-    name: 'MessageList',
-    props: {
-        messages: {
-            type: Array,
-            required: true
-        },
-        isDark: {
-            type: Boolean,
-            default: false
-        },
-        isStreaming: {
-            type: Boolean,
-            default: false
-        }
-    },
-    emits: ['openImagePreview'],
-    setup() {
-        const { t } = useI18n();
-        const { tm } = useModuleI18n('features/chat');
+const { tm } = useModuleI18n("features/chat");
+const customMarkdownTags = ["ref"];
+const downloadingFiles = ref(new Set<string>());
+const messageListRoot = ref<HTMLElement | null>(null);
+const imagePreview = reactive({ visible: false, url: "" });
+const refsSidebarOpen = ref(false);
+const selectedRefs = ref<Record<string, unknown> | null>(null);
 
-        return {
-            t,
-            tm,
-            md
-        };
-    },
-    data() {
-        return {
-            copiedMessages: new Set(),
-            isUserNearBottom: true,
-            scrollThreshold: 1,
-            scrollTimer: null
-        };
-    },
-    mounted() {
-        this.initCodeCopyButtons();
-        this.initImageClickEvents();
-        this.addScrollListener();
-        this.scrollToBottom();
-    },
-    updated() {
-        this.initCodeCopyButtons();
-        this.initImageClickEvents();
-        if (this.isUserNearBottom) {
-            this.scrollToBottom();
-        }
-    },
-    methods: {
-        // 复制代码到剪贴板
-        copyCodeToClipboard(code) {
-            navigator.clipboard.writeText(code).then(() => {
-                console.log('代码已复制到剪贴板');
-            }).catch(err => {
-                console.error('复制失败:', err);
-                // 如果现代API失败，使用传统方法
-                const textArea = document.createElement('textarea');
-                textArea.value = code;
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    console.log('代码已复制到剪贴板 (fallback)');
-                } catch (fallbackErr) {
-                    console.error('复制失败 (fallback):', fallbackErr);
-                }
-                document.body.removeChild(textArea);
-            });
-        },
+const messages = computed(() => props.messages || []);
 
-        // 复制bot消息到剪贴板
-        copyBotMessage(message, messageIndex) {
-            // 获取对应的消息对象
-            const msgObj = this.messages[messageIndex].content;
-            let textToCopy = '';
+function isUserMessage(message: ChatRecord) {
+  return messageContent(message).type === "user";
+}
 
-            // 如果有文本消息，添加到复制内容中
-            if (message && message.trim()) {
-                // 移除HTML标签，获取纯文本
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = message;
-                textToCopy = tempDiv.textContent || tempDiv.innerText || message;
-            }
+function messageContent(message: ChatRecord): ChatContent {
+  return message.content || { type: "bot", message: [] };
+}
 
-            // 如果有内嵌图片，添加说明
-            if (msgObj && msgObj.embedded_images && msgObj.embedded_images.length > 0) {
-                if (textToCopy) textToCopy += '\n\n';
-                textToCopy += `[包含 ${msgObj.embedded_images.length} 张图片]`;
-            }
+function messageParts(message: ChatRecord): MessagePart[] {
+  return displayMessageParts(messageContent(message));
+}
 
-            // 如果有内嵌音频，添加说明
-            if (msgObj && msgObj.embedded_audio) {
-                if (textToCopy) textToCopy += '\n\n';
-                textToCopy += '[包含音频内容]';
-            }
+function isMessageStreaming(messageIndex: number) {
+  return props.isStreaming && messageIndex === messages.value.length - 1;
+}
 
-            // 如果没有任何内容，使用默认文本
-            if (!textToCopy.trim()) {
-                textToCopy = '[媒体内容]';
-            }
+function hasNonReasoningContent(message: ChatRecord) {
+  return renderBlocks(message).some((block) => block.kind === "content");
+}
 
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                console.log('消息已复制到剪贴板');
-                this.showCopySuccess(messageIndex);
-            }).catch(err => {
-                console.error('复制失败:', err);
-                // 如果现代API失败，使用传统方法
-                const textArea = document.createElement('textarea');
-                textArea.value = textToCopy;
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    console.log('消息已复制到剪贴板 (fallback)');
-                    this.showCopySuccess(messageIndex);
-                } catch (fallbackErr) {
-                    console.error('复制失败 (fallback):', fallbackErr);
-                }
-                document.body.removeChild(textArea);
-            });
-        },
+function renderBlocks(message: ChatRecord): MessageDisplayBlock[] {
+  if (isUserMessage(message)) {
+    const parts = messageParts(message);
+    return parts.length ? [{ kind: "content", parts }] : [];
+  }
+  return buildMessageBlocks(messageContent(message));
+}
 
-        // 显示复制成功提示
-        showCopySuccess(messageIndex) {
-            this.copiedMessages.add(messageIndex);
+function hasFollowingContentBlock(message: ChatRecord, blockIndex: number) {
+  return renderBlocks(message)
+    .slice(blockIndex + 1)
+    .some((block) => block.kind === "content");
+}
 
-            // 2秒后移除成功状态
-            setTimeout(() => {
-                this.copiedMessages.delete(messageIndex);
-            }, 2000);
-        },
+function partUrl(part: MessagePart) {
+  if (part.embedded_url) return part.embedded_url;
+  if (part.embedded_file?.url) return part.embedded_file.url;
+  if (part.attachment_id) {
+    return `/api/chat/get_attachment?attachment_id=${encodeURIComponent(
+      part.attachment_id,
+    )}`;
+  }
+  if (part.filename) {
+    return `/api/chat/get_file?filename=${encodeURIComponent(part.filename)}`;
+  }
+  return "";
+}
 
-        // 获取复制按钮图标
-        getCopyIcon(messageIndex) {
-            return this.copiedMessages.has(messageIndex) ? 'mdi-check' : 'mdi-content-copy';
-        },
+function formatJson(value: unknown) {
+  if (typeof value === "string") {
+    const parsed = parseJsonSafe(value);
+    if (parsed !== value) return JSON.stringify(parsed, null, 2);
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
 
-        // 检查是否为复制成功状态
-        isCopySuccess(messageIndex) {
-            return this.copiedMessages.has(messageIndex);
-        },
+function replyPreview(messageId?: string | number, fallback?: string) {
+  if (fallback) return truncate(fallback, 80);
+  const found = messages.value.find(
+    (message) => String(message.id) === String(messageId),
+  );
+  const text = found ? plainTextFromMessage(found) : "";
+  return text ? truncate(text, 80) : tm("reply.replyTo");
+}
 
-        // 获取复制图标SVG
-        getCopyIconSvg() {
-            return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
-        },
+function plainTextFromMessage(message: ChatRecord) {
+  return messageParts(message)
+    .filter((part) => part.type === "plain" && part.text)
+    .map((part) => part.text)
+    .join("\n");
+}
 
-        // 获取成功图标SVG
-        getSuccessIconSvg() {
-            return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"></polyline></svg>';
-        },
+function truncate(value: string, max: number) {
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
 
-        // 初始化代码块复制按钮
-        initCodeCopyButtons() {
-            this.$nextTick(() => {
-                const codeBlocks = this.$refs.messageContainer?.querySelectorAll('pre code') || [];
-                codeBlocks.forEach((codeBlock, index) => {
-                    const pre = codeBlock.parentElement;
-                    if (pre && !pre.querySelector('.copy-code-btn')) {
-                        const button = document.createElement('button');
-                        button.className = 'copy-code-btn';
-                        button.innerHTML = this.getCopyIconSvg();
-                        button.title = '复制代码';
-                        button.addEventListener('click', () => {
-                            this.copyCodeToClipboard(codeBlock.textContent);
-                            // 显示复制成功提示
-                            button.innerHTML = this.getSuccessIconSvg();
-                            button.style.color = '#4caf50';
-                            setTimeout(() => {
-                                button.innerHTML = this.getCopyIconSvg();
-                                button.style.color = '';
-                            }, 2000);
-                        });
-                        pre.style.position = 'relative';
-                        pre.appendChild(button);
-                    }
-                });
-            });
-        },
+function scrollToMessage(messageId?: string | number) {
+  if (!messageId) return;
+  const index = messages.value.findIndex(
+    (message) => String(message.id) === String(messageId),
+  );
+  if (index < 0) return;
+  nextTick(() => {
+    const rows = messageListRoot.value?.querySelectorAll(".message-row");
+    rows?.[index]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
 
-        initImageClickEvents() {
-            this.$nextTick(() => {
-                // 查找所有动态生成的图片（在markdown-content中）
-                const images = document.querySelectorAll('.markdown-content img');
-                images.forEach((img) => {
-                    if (!img.hasAttribute('data-click-enabled')) {
-                        img.style.cursor = 'pointer';
-                        img.setAttribute('data-click-enabled', 'true');
-                        img.onclick = () => this.$emit('openImagePreview', img.src);
-                    }
-                });
-            });
-        },
+function showMessageMeta(message: ChatRecord, msgIndex: number) {
+  return !messageContent(message).isLoading && !isMessageStreaming(msgIndex);
+}
 
-        scrollToBottom() {
-            this.$nextTick(() => {
-                const container = this.$refs.messageContainer;
-                if (container) {
-                    container.scrollTop = container.scrollHeight;
-                    this.isUserNearBottom = true; // 程序滚动到底部后标记用户在底部
-                }
-            });
-        },
+function messageRefs(message: ChatRecord) {
+  return resolvedMessageRefs(message).used;
+}
 
-        // 添加滚动事件监听器
-        addScrollListener() {
-            const container = this.$refs.messageContainer;
-            if (container) {
-                container.addEventListener('scroll', this.throttledHandleScroll);
-            }
-        },
+function resolvedMessageRefs(message: ChatRecord) {
+  return normalizeRefs(messageContent(message).refs);
+}
 
-        // 节流处理滚动事件
-        throttledHandleScroll() {
-            if (this.scrollTimer) return;
+function normalizeRefs(refs: unknown) {
+  if (!refs) return { used: [] as Array<Record<string, unknown>> };
+  const refsValue = refs as { used?: unknown };
+  const used = Array.isArray(refsValue.used)
+    ? refsValue.used
+    : Array.isArray(refs)
+    ? refs
+    : [];
 
-            this.scrollTimer = setTimeout(() => {
-                this.handleScroll();
-                this.scrollTimer = null;
-            }, 50); // 50ms 节流
-        },
+  return {
+    used: normalizeRefItems(used),
+  };
+}
 
-        // 处理滚动事件
-        handleScroll() {
-            const container = this.$refs.messageContainer;
-            if (container) {
-                const { scrollTop, scrollHeight, clientHeight } = container;
-                const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+function normalizeRefItems(items: unknown[]) {
+  return items
+    .map((item: any) => ({
+      index: item?.index,
+      title: item?.title || item?.url || tm("refs.title"),
+      url: item?.url,
+      snippet: item?.snippet,
+      favicon: item?.favicon,
+    }))
+    .filter((item) => item.url);
+}
 
-                // 判断用户是否在底部附近
-                this.isUserNearBottom = distanceFromBottom <= this.scrollThreshold;
-            }
-        },
+function openRefsSidebar(refs: unknown) {
+  selectedRefs.value =
+    refs && typeof refs === "object" ? (refs as Record<string, unknown>) : null;
+  refsSidebarOpen.value = true;
+}
 
-        // 组件销毁时移除监听器
-        beforeUnmount() {
-            const container = this.$refs.messageContainer;
-            if (container) {
-                container.removeEventListener('scroll', this.throttledHandleScroll);
-            }
-            // 清理定时器
-            if (this.scrollTimer) {
-                clearTimeout(this.scrollTimer);
-                this.scrollTimer = null;
-            }
-        }
-    }
+function normalizeToolCall(tool: Record<string, unknown>) {
+  const normalized = { ...tool };
+  normalized.args = parseJsonSafe(
+    normalized.args ?? normalized.arguments ?? {},
+  );
+  normalized.result = parseJsonSafe(normalized.result);
+  normalized.ts = normalized.ts ?? Date.now() / 1000;
+  if (normalized.result && typeof normalized.result === "object") {
+    normalized.result = JSON.stringify(normalized.result, null, 2);
+  }
+  return normalized;
+}
+
+function isIPythonToolCall(tool: Record<string, unknown>) {
+  const name = String(tool.name || "").toLowerCase();
+  return name.includes("python") || name.includes("ipython");
+}
+
+function toolCallStatusText(tool: Record<string, unknown>) {
+  if (tool.finished_ts) return tm("toolStatus.done");
+  return tm("toolStatus.running");
+}
+
+function parseJsonSafe(value: unknown) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+async function copyMessage(message: ChatRecord) {
+  const text = plainTextFromMessage(message);
+  if (!text) return;
+  await copyToClipboard(text, { container: messageListRoot.value });
+}
+
+async function downloadPart(part: MessagePart) {
+  const key = part.attachment_id || part.filename || "";
+  if (!key) return;
+  downloadingFiles.value = new Set(downloadingFiles.value).add(key);
+  try {
+    const response = await axios.get(partUrl(part), { responseType: "blob" });
+    const url = URL.createObjectURL(response.data);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = part.filename || "file";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  } finally {
+    const next = new Set(downloadingFiles.value);
+    next.delete(key);
+    downloadingFiles.value = next;
+  }
+}
+
+function openImage(url: string) {
+  if (!url) return;
+  imagePreview.url = url;
+  imagePreview.visible = true;
+}
+
+function closeImage() {
+  imagePreview.visible = false;
+  imagePreview.url = "";
+}
+
+function formatTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function inputTokens(stats: any) {
+  const usage = stats?.token_usage || {};
+  return usage.input_other || 0;
+}
+
+function outputTokens(stats: any) {
+  return stats?.token_usage?.output || 0;
+}
+
+function cachedInputTokens(stats: any) {
+  return stats?.token_usage?.input_cached || 0;
+}
+
+function agentDuration(stats: any) {
+  const directDuration = readPositiveNumber(stats, [
+    "duration",
+    "total_duration",
+  ]);
+  if (directDuration !== null) return formatDuration(directDuration);
+
+  const startTime = readPositiveNumber(stats, ["start_time"]);
+  const endTime = readPositiveNumber(stats, ["end_time"]);
+  if (startTime === null || endTime === null || endTime < startTime) return "-";
+  return formatDuration(endTime - startTime);
+}
+
+function agentTtft(stats: any) {
+  const ttft = readPositiveNumber(stats, [
+    "time_to_first_token",
+    "ttft",
+    "first_token_latency",
+  ]);
+  if (ttft === null) return "";
+  return formatDuration(ttft);
+}
+
+function readPositiveNumber(source: any, keys: string[]) {
+  for (const key of keys) {
+    const value = Number(source?.[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+function formatDuration(seconds: number) {
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${restSeconds}s`;
 }
 </script>
 
 <style scoped>
-/* 基础动画 */
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+.message-list-root {
+  --chat-border: rgba(var(--v-border-color), 0.16);
+  --chat-muted: rgba(var(--v-theme-on-surface), 0.62);
+  width: 100%;
+  min-height: 0;
+  color: rgb(var(--v-theme-on-surface));
 }
 
-.messages-container {
-    height: 100%;
-    max-height: 100%;
-    overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
+.message-list-root.is-dark {
+  --chat-border: rgba(255, 255, 255, 0.1);
 }
 
-/* 消息列表样式 */
-.message-list {
-    max-width: 900px;
-    margin: 0 auto;
-    width: 100%;
+.center-state {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
 }
 
-.message-item {
-    margin-bottom: 24px;
-    animation: fadeIn 0.3s ease-out;
+.messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
 }
 
-.user-message {
-    display: flex;
-    justify-content: flex-end;
-    align-items: flex-start;
-    gap: 12px;
+.message-row {
+  display: flex;
+  gap: 10px;
+  max-width: 100%;
 }
 
-.bot-message {
-    display: flex;
-    justify-content: flex-start;
-    align-items: flex-start;
-    gap: 12px;
+.message-row.from-user {
+  justify-content: flex-end;
 }
 
-.bot-message-content {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    max-width: 80%;
-    position: relative;
+.message-stack {
+  max-width: min(760px, 82%);
 }
 
-.message-actions {
-    display: flex;
-    gap: 4px;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    margin-left: 8px;
+.from-user .message-stack {
+  align-items: flex-end;
+  max-width: 60%;
 }
 
-.bot-message:hover .message-actions {
-    opacity: 1;
+.bot-avatar {
+  margin-top: 2px;
+  color: rgb(var(--v-theme-primary));
+  user-select: none;
 }
 
-.copy-message-btn {
-    opacity: 0.6;
-    transition: all 0.2s ease;
-    color: var(--v-theme-secondary);
-}
-
-.copy-message-btn:hover {
-    opacity: 1;
-    background-color: rgba(103, 58, 183, 0.1);
-}
-
-.copy-message-btn.copy-success {
-    color: #4caf50;
-    opacity: 1;
-}
-
-.copy-message-btn.copy-success:hover {
-    color: #4caf50;
-    background-color: rgba(76, 175, 80, 0.1);
+.bot-avatar-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  line-height: 0;
+  margin-top: -2px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .message-bubble {
-    padding: 2px 16px;
-    border-radius: 12px;
+  max-width: 100%;
+  border-radius: 8px;
+  padding: 10px 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
-.user-bubble {
-    color: var(--v-theme-primaryText);
-    padding: 12px 18px;
-    font-size: 15px;
-    max-width: 60%;
-    border-radius: 1.5rem;
+.message-bubble.user {
+  color: var(--v-theme-primaryText);
+  padding: 12px 18px;
+  font-size: 15px;
+  border-radius: 1.5rem;
+  background: rgba(var(--v-theme-primary), 0.12);
 }
 
-.bot-bubble {
-    border: 1px solid var(--v-theme-border);
-    color: var(--v-theme-primaryText);
-    font-size: 15px;
-    max-width: 100%;
+.message-bubble.bot {
+  background: transparent;
+  padding-left: 0;
 }
 
-.user-avatar,
-.bot-avatar {
-    align-self: flex-start;
-    margin-top: 6px;
+.plain-content {
+  white-space: pre-wrap;
 }
 
-/* 附件样式 */
-.image-attachments {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-    flex-wrap: wrap;
+.loading-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--chat-muted);
 }
 
-.image-attachment {
-    position: relative;
-    display: inline-block;
+.reply-quote {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 8px;
+  background: rgba(var(--v-theme-primary), 0.08);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 
-.attached-image {
-    width: 120px;
-    height: 120px;
-    object-fit: cover;
-    border-radius: 12px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    transition: transform 0.2s ease;
+.image-part {
+  display: block;
+  border: 0;
+  padding: 0;
+  margin-top: 8px;
+  background: transparent;
+  cursor: zoom-in;
 }
 
-.audio-attachment {
-    margin-top: 8px;
-    min-width: 250px;
+.image-part img {
+  max-width: min(420px, 100%);
+  max-height: 360px;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
-/* 包含音频的消息气泡最小宽度 */
-.message-bubble.has-audio {
-    min-width: 280px;
+.audio-part,
+.video-part {
+  display: block;
+  max-width: 100%;
+  margin-top: 8px;
 }
 
-.audio-player {
-    width: 100%;
-    height: 36px;
-    border-radius: 18px;
+.video-part {
+  max-height: 360px;
+  border-radius: 8px;
 }
 
-.embedded-images {
-    margin-top: 8px;
-    display: flex;
+.file-part {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+}
+
+.file-part span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-block {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-call-inline-status {
+  color: var(--chat-muted);
+  font-size: 12px;
+}
+
+.unknown-part {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  color: var(--chat-muted);
+  font-size: 12px;
+}
+
+.message-meta-refs {
+  display: flex;
+  align-items: center;
+}
+
+.from-user .message-meta {
+  justify-content: flex-end;
+}
+
+.stats-card {
+  min-width: 150px;
+  padding: 8px 10px;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.stats-row span {
+  color: var(--chat-muted);
+}
+
+.stats-row strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.image-preview-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-image {
+  max-width: min(92vw, 1200px);
+  max-height: 88vh;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+@media (max-width: 760px) {
+  .message-stack,
+  .from-user .message-stack {
+    max-width: 88%;
+  }
+
+  .message-row.from-bot {
     flex-direction: column;
-    gap: 8px;
-}
+    gap: 2px;
+  }
 
-.embedded-image {
-    display: flex;
-    justify-content: flex-start;
-}
-
-.bot-embedded-image {
-    max-width: 80%;
-    width: auto;
-    height: auto;
-    border-radius: 8px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    cursor: pointer;
-    transition: transform 0.2s ease;
-}
-
-.bot-embedded-image:hover {
-    transform: scale(1.02);
-}
-
-.embedded-audio {
-    width: 300px;
-    margin-top: 8px;
-}
-
-.embedded-audio .audio-player {
-    width: 100%;
-    max-width: 300px;
-}
-
-/* 动画类 */
-.fade-in {
-    animation: fadeIn 0.3s ease-in-out;
-}
-</style>
-
-<style>
-/* Markdown内容样式 - 需要全局样式 */
-.markdown-content {
-    font-family: inherit;
-    line-height: 1.6;
-}
-
-.markdown-content h1,
-.markdown-content h2,
-.markdown-content h3,
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 {
-    margin-top: 16px;
-    margin-bottom: 10px;
-    font-weight: 600;
-    color: var(--v-theme-primaryText);
-}
-
-.markdown-content h1 {
-    font-size: 1.8em;
-    border-bottom: 1px solid var(--v-theme-border);
-    padding-bottom: 6px;
-}
-
-.markdown-content h2 {
-    font-size: 1.5em;
-}
-
-.markdown-content h3 {
-    font-size: 1.3em;
-}
-
-.markdown-content li {
-    margin-left: 16px;
-    margin-bottom: 4px;
-}
-
-.markdown-content p {
-    margin-top: .5rem;
-    margin-bottom: .5rem;
-}
-
-.markdown-content pre {
-    background-color: var(--v-theme-surface);
-    padding: 12px;
-    border-radius: 6px;
-    overflow-x: auto;
-    margin: 12px 0;
-    position: relative;
-}
-
-.markdown-content code {
-    background-color: rgb(var(--v-theme-codeBg));
-    padding: 2px 4px;
-    border-radius: 4px;
-    font-family: 'Fira Code', monospace;
-    font-size: 0.9em;
-    color: var(--v-theme-code);
-}
-
-/* 代码块中的code标签样式 */
-.markdown-content pre code {
-    background-color: transparent;
-    padding: 0;
-    border-radius: 0;
-    font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 0.85em;
-    color: inherit;
-    display: block;
-    overflow-x: auto;
-    line-height: 1.5;
-}
-
-/* 自定义代码高亮样式 */
-.markdown-content pre {
-    border: 1px solid var(--v-theme-border);
-    background-color: rgb(var(--v-theme-preBg));
-    border-radius: 16px;
-    padding: 16px;
-}
-
-/* 确保highlight.js的样式正确应用 */
-.markdown-content pre code.hljs {
-    background: transparent !important;
-    color: inherit;
-}
-
-/* 亮色主题下的代码高亮 */
-.v-theme--light .markdown-content pre {
-    background-color: #f6f8fa;
-}
-
-/* 暗色主题下的代码块样式 */
-.v-theme--dark .markdown-content pre {
-    background-color: #0d1117 !important;
-    border-color: rgba(255, 255, 255, 0.1);
-}
-
-.v-theme--dark .markdown-content pre code {
-    color: #e6edf3 !important;
-}
-
-/* 暗色主题下的highlight.js样式覆盖 */
-.v-theme--dark .hljs {
-    background: #0d1117 !important;
-    color: #e6edf3 !important;
-}
-
-.v-theme--dark .hljs-keyword,
-.v-theme--dark .hljs-selector-tag,
-.v-theme--dark .hljs-built_in,
-.v-theme--dark .hljs-name,
-.v-theme--dark .hljs-tag {
-    color: #ff7b72 !important;
-}
-
-.v-theme--dark .hljs-string,
-.v-theme--dark .hljs-title,
-.v-theme--dark .hljs-section,
-.v-theme--dark .hljs-attribute,
-.v-theme--dark .hljs-literal,
-.v-theme--dark .hljs-template-tag,
-.v-theme--dark .hljs-template-variable,
-.v-theme--dark .hljs-type,
-.v-theme--dark .hljs-addition {
-    color: #a5d6ff !important;
-}
-
-.v-theme--dark .hljs-comment,
-.v-theme--dark .hljs-quote,
-.v-theme--dark .hljs-deletion,
-.v-theme--dark .hljs-meta {
-    color: #8b949e !important;
-}
-
-.v-theme--dark .hljs-number,
-.v-theme--dark .hljs-regexp,
-.v-theme--dark .hljs-symbol,
-.v-theme--dark .hljs-variable,
-.v-theme--dark .hljs-template-variable,
-.v-theme--dark .hljs-link,
-.v-theme--dark .hljs-selector-attr,
-.v-theme--dark .hljs-selector-pseudo {
-    color: #79c0ff !important;
-}
-
-.v-theme--dark .hljs-function,
-.v-theme--dark .hljs-class,
-.v-theme--dark .hljs-title.class_ {
-    color: #d2a8ff !important;
-}
-
-/* 复制按钮样式 */
-.copy-code-btn {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 4px;
-    padding: 6px;
-    cursor: pointer;
-    opacity: 0;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #666;
-    font-size: 12px;
-    z-index: 10;
-    backdrop-filter: blur(4px);
-}
-
-.copy-code-btn:hover {
-    background: rgba(255, 255, 255, 1);
-    color: #333;
-    transform: scale(1.05);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.copy-code-btn:active {
-    transform: scale(0.95);
-}
-
-.markdown-content pre:hover .copy-code-btn {
-    opacity: 1;
-}
-
-.v-theme--dark .copy-code-btn {
-    background: rgba(45, 45, 45, 0.9);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #ccc;
-}
-
-.v-theme--dark .copy-code-btn:hover {
-    background: rgba(45, 45, 45, 1);
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.markdown-content img {
+  .message-row.from-bot .message-stack {
     max-width: 100%;
-    border-radius: 8px;
-    margin: 10px 0;
-}
+  }
 
-.markdown-content blockquote {
-    border-left: 4px solid var(--v-theme-secondary);
-    padding-left: 16px;
-    color: var(--v-theme-secondaryText);
-    margin: 16px 0;
-}
-
-.markdown-content table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 16px 0;
-}
-
-.markdown-content th,
-.markdown-content td {
-    border: 1px solid var(--v-theme-background);
-    padding: 8px 12px;
-    text-align: left;
-}
-
-.markdown-content th {
-    background-color: var(--v-theme-containerBg);
+  .message-row.from-bot .bot-avatar {
+    display: none;
+  }
 }
 </style>

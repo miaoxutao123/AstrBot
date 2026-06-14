@@ -1,17 +1,18 @@
-import random
 import asyncio
 import math
+import random
+from collections.abc import AsyncGenerator
+
 import astrbot.core.message.components as Comp
-from typing import Union, AsyncGenerator
-from ..stage import register_stage, Stage
-from ..context import PipelineContext, call_event_hook
-from astrbot.core.platform.astr_message_event import AstrMessageEvent
-from astrbot.core.message.message_event_result import MessageChain, ResultContentType
 from astrbot.core import logger
 from astrbot.core.message.components import BaseMessageComponent, ComponentType
+from astrbot.core.message.message_event_result import MessageChain, ResultContentType
+from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star.star_handler import EventType
 from astrbot.core.utils.path_util import path_Mapping
-from astrbot.core.utils.session_lock import session_lock_manager
+
+from ..context import PipelineContext, call_event_hook
+from ..stage import Stage, register_stage
 
 
 @register_stage
@@ -19,7 +20,7 @@ class RespondStage(Stage):
     # 组件类型到其非空判断函数的映射
     _component_validators = {
         Comp.Plain: lambda comp: bool(
-            comp.text and comp.text.strip()
+            comp.text and comp.text.strip(),
         ),  # 纯文本消息需要strip
         Comp.Face: lambda comp: comp.id is not None,  # QQ表情
         Comp.Record: lambda comp: bool(comp.file),  # 语音
@@ -27,14 +28,28 @@ class RespondStage(Stage):
         Comp.At: lambda comp: bool(comp.qq) or bool(comp.name),  # @
         Comp.Image: lambda comp: bool(comp.file),  # 图片
         Comp.Reply: lambda comp: bool(comp.id) and comp.sender_id is not None,  # 回复
-        Comp.Poke: lambda comp: comp.id != 0 and comp.qq != 0,  # 戳一戳
+        Comp.Poke: lambda comp: comp.target_id() is not None,  # 戳一戳
         Comp.Node: lambda comp: bool(comp.content),  # 转发节点
         Comp.Nodes: lambda comp: bool(comp.nodes),  # 多个转发节点
         Comp.File: lambda comp: bool(comp.file_ or comp.url),
-        Comp.WechatEmoji: lambda comp: comp.md5 is not None,  # 微信表情
+        Comp.Json: lambda comp: bool(comp.data),  # Json 卡片
+        Comp.Share: lambda comp: bool(comp.url) or bool(comp.title),
+        Comp.Music: lambda comp: (
+            (comp.id and comp._type and comp._type != "custom")
+            or (comp._type == "custom" and comp.url and comp.audio and comp.title)
+        ),  # 音乐分享
+        Comp.Forward: lambda comp: bool(comp.id),  # 合并转发
+        Comp.Location: lambda comp: bool(
+            comp.lat is not None and comp.lon is not None
+        ),  # 位置
+        Comp.Contact: lambda comp: bool(comp._type and comp.id),  # 推荐好友 or 群
+        Comp.Shake: lambda _: True,  # 窗口抖动（戳一戳）
+        Comp.Dice: lambda _: True,  # 掷骰子魔法表情
+        Comp.RPS: lambda _: True,  # 猜拳魔法表情
+        Comp.Unknown: lambda comp: bool(comp.text and comp.text.strip()),
     }
 
-    async def initialize(self, ctx: PipelineContext):
+    async def initialize(self, ctx: PipelineContext) -> None:
         self.ctx = ctx
         self.config = ctx.astrbot_config
         self.platform_settings: dict = self.config.get("platform_settings", {})
@@ -58,18 +73,19 @@ class RespondStage(Stage):
             "segmented_reply"
         ]["interval_method"]
         self.log_base = float(
-            ctx.astrbot_config["platform_settings"]["segmented_reply"]["log_base"]
+            ctx.astrbot_config["platform_settings"]["segmented_reply"]["log_base"],
         )
-        interval_str: str = ctx.astrbot_config["platform_settings"]["segmented_reply"][
-            "interval"
-        ]
-        interval_str_ls = interval_str.replace(" ", "").split(",")
-        try:
-            self.interval = [float(t) for t in interval_str_ls]
-        except BaseException as e:
-            logger.error(f"解析分段回复的间隔时间失败。{e}")
-            self.interval = [1.5, 3.5]
-        logger.info(f"分段回复间隔时间：{self.interval}")
+        self.interval = [1.5, 3.5]
+        if self.enable_seg:
+            interval_str: str = ctx.astrbot_config["platform_settings"][
+                "segmented_reply"
+            ]["interval"]
+            interval_str_ls = interval_str.replace(" ", "").split(",")
+            try:
+                self.interval = [float(t) for t in interval_str_ls]
+            except BaseException as e:
+                logger.error(f"解析分段回复的间隔时间失败。{e}")
+            logger.info(f"分段回复间隔时间：{self.interval}")
 
     async def _word_cnt(self, text: str) -> int:
         """分段回复 统计字数"""
@@ -86,17 +102,16 @@ class RespondStage(Stage):
                 wc = await self._word_cnt(comp.text)
                 i = math.log(wc + 1, self.log_base)
                 return random.uniform(i, i + 0.5)
-            else:
-                return random.uniform(1, 1.75)
-        else:
-            # random
-            return random.uniform(self.interval[0], self.interval[1])
+            return random.uniform(1, 1.75)
+        # random
+        return random.uniform(self.interval[0], self.interval[1])
 
-    async def _is_empty_message_chain(self, chain: list[BaseMessageComponent]):
+    async def _is_empty_message_chain(self, chain: list[BaseMessageComponent]) -> bool:
         """检查消息链是否为空
 
         Args:
             chain (list[BaseMessageComponent]): 包含消息对象的列表
+
         """
         if not chain:
             return True
@@ -117,7 +132,9 @@ class RespondStage(Stage):
         if not self.enable_seg:
             return False
 
-        if self.only_llm_result and not event.get_result().is_llm_result():
+        if (result := event.get_result()) is None:
+            return False
+        if self.only_llm_result and not result.is_model_result():
             return False
 
         if event.get_platform_name() in [
@@ -150,16 +167,21 @@ class RespondStage(Stage):
         return extracted
 
     async def process(
-        self, event: AstrMessageEvent
-    ) -> Union[None, AsyncGenerator[None, None]]:
+        self,
+        event: AstrMessageEvent,
+    ) -> None | AsyncGenerator[None, None]:
         result = event.get_result()
         if result is None:
             return
+        if event.get_extra("_streaming_finished", False):
+            # prevent some plugin make result content type to LLM_RESULT after streaming finished, lead to send again
+            return
         if result.result_content_type == ResultContentType.STREAMING_FINISH:
+            event.set_extra("_streaming_finished", True)
             return
 
         logger.info(
-            f"Prepare to send - {event.get_sender_name()}/{event.get_sender_id()}: {event._outline_chain(result.chain)}"
+            f"Prepare to send - {event.get_sender_name()}/{event.get_sender_id()}: {event._outline_chain(result.chain)}",
         )
 
         if result.result_content_type == ResultContentType.STREAMING_RESULT:
@@ -167,20 +189,24 @@ class RespondStage(Stage):
                 logger.warning("async_stream 为空，跳过发送。")
                 return
             # 流式结果直接交付平台适配器处理
-            use_fallback = self.config.get("provider_settings", {}).get(
-                "streaming_segmented", False
+            realtime_segmenting = (
+                self.config.get("provider_settings", {}).get(
+                    "unsupported_streaming_strategy",
+                    "realtime_segmenting",
+                )
+                == "realtime_segmenting"
             )
             logger.info(f"应用流式输出({event.get_platform_id()})")
-            await event.send_streaming(result.async_stream, use_fallback)
+            await event.send_streaming(result.async_stream, realtime_segmenting)
             return
-        elif len(result.chain) > 0:
+        if len(result.chain) > 0:
             # 检查路径映射
             if mappings := self.platform_settings.get("path_mapping", []):
                 for idx, component in enumerate(result.chain):
                     if isinstance(component, Comp.File) and component.file:
                         # 支持 File 消息段的路径映射。
                         component.file = path_Mapping(mappings, component.file)
-                        event.get_result().chain[idx] = component
+                        result.chain[idx] = component
 
             # 检查消息链是否为空
             try:
@@ -212,24 +238,23 @@ class RespondStage(Stage):
                 if not result.chain or len(result.chain) == 0:
                     # may fix #2670
                     logger.warning(
-                        f"实际消息链为空, 跳过发送阶段。header_chain: {header_comps}, actual_chain: {result.chain}"
+                        f"实际消息链为空, 跳过发送阶段。header_chain: {header_comps}, actual_chain: {result.chain}",
                     )
                     return
-                async with session_lock_manager.acquire_lock(event.unified_msg_origin):
-                    for comp in result.chain:
-                        i = await self._calc_comp_interval(comp)
-                        await asyncio.sleep(i)
-                        try:
-                            if comp.type in need_separately:
-                                await event.send(MessageChain([comp]))
-                            else:
-                                await event.send(MessageChain([*header_comps, comp]))
-                                header_comps.clear()
-                        except Exception as e:
-                            logger.error(
-                                f"发送消息链失败: chain = {MessageChain([comp])}, error = {e}",
-                                exc_info=True,
-                            )
+                for comp in result.chain:
+                    i = await self._calc_comp_interval(comp)
+                    await asyncio.sleep(i)
+                    try:
+                        if comp.type in need_separately:
+                            await event.send(result.derive([comp]))
+                        else:
+                            await event.send(result.derive([*header_comps, comp]))
+                            header_comps.clear()
+                    except Exception as e:
+                        logger.error(
+                            f"发送消息链失败: chain = {MessageChain([comp])}, error = {e}",
+                            exc_info=True,
+                        )
             else:
                 if all(
                     comp.type in {ComponentType.Reply, ComponentType.At}
@@ -237,7 +262,7 @@ class RespondStage(Stage):
                 ):
                     # may fix #2670
                     logger.warning(
-                        f"消息链全为 Reply 和 At 消息段, 跳过发送阶段。chain: {result.chain}"
+                        f"消息链全为 Reply 和 At 消息段, 跳过发送阶段。chain: {result.chain}",
                     )
                     return
                 sep_comps = self._extract_comp(
@@ -246,7 +271,7 @@ class RespondStage(Stage):
                     modify_raw_chain=True,
                 )
                 for comp in sep_comps:
-                    chain = MessageChain([comp])
+                    chain = result.derive([comp])
                     try:
                         await event.send(chain)
                     except Exception as e:
@@ -254,7 +279,7 @@ class RespondStage(Stage):
                             f"发送消息链失败: chain = {chain}, error = {e}",
                             exc_info=True,
                         )
-                chain = MessageChain(result.chain)
+                chain = result.derive(result.chain)
                 if result.chain and len(result.chain) > 0:
                     try:
                         await event.send(chain)
