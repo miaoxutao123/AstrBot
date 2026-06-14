@@ -1,243 +1,244 @@
-![AstrBot-Logo-Simplified](https://github.com/user-attachments/assets/ffd99b6b-3272-4682-beaa-6fe74250f7d9)
+# AstraBot + Unified Gateway
 
-</p>
+> 本分支 (`feat/unified-gateway`) 在 AstraBot 基础上新增了**统一网关**能力，使其可作为一个纯粹的多 IM 接入层，将 AI 处理完全外包给外部 Agent 系统。
 
-<div align="center">
+---
 
-<br>
+## 一句话定位
 
-<div>
-<a href="https://trendshift.io/repositories/12875" target="_blank"><img src="https://trendshift.io/api/badge/repositories/12875" alt="Soulter%2FAstrBot | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-<a href="https://hellogithub.com/repository/AstrBotDevs/AstrBot" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=d127d50cd5e54c5382328acc3bb25483&claim_uid=ZO9by7qCXgSd6Lp" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
-</div>
+**AstraBot = 18+ 主流 IM 平台的接入器 + 统一消息网关**
 
-<br>
+AstraBot 原生是一个 All-in-One AI 助手，内置 LLM、Agent、知识库、插件等重型模块。但如果你只需要一个**纯粹的消息网关**：接收来自 QQ、Telegram、微信、飞书、钉钉等平台的用户消息，转发给外部 Agent（如 Hermes、Dify、Coze、自研 Agent）处理，再把回复发回去——这个分支就是为此而生的。
 
-<div>
-<img src="https://img.shields.io/github/v/release/Soulter/AstrBot?style=for-the-badge&color=76bad9" href="https://github.com/Soulter/AstrBot/releases/latest">
-<img src="https://img.shields.io/badge/python-3.10+-blue.svg?style=for-the-badge&color=76bad9" alt="python">
-<a href="https://hub.docker.com/r/soulter/astrbot"><img alt="Docker pull" src="https://img.shields.io/docker/pulls/soulter/astrbot.svg?style=for-the-badge&color=76bad9"/></a>
-<a href="https://qm.qq.com/cgi-bin/qm/qr?k=wtbaNx7EioxeaqS9z7RQWVXPIxg2zYr7&jump_from=webapi&authKey=vlqnv/AV2DbJEvGIcxdlNSpfxVy+8vVqijgreRdnVKOaydpc+YSw4MctmEbr0k5"><img alt="QQ_community" src="https://img.shields.io/badge/QQ群-775869627-purple?style=for-the-badge&color=76bad9"></a>
-<a href="https://t.me/+hAsD2Ebl5as3NmY1"><img alt="Telegram_community" src="https://img.shields.io/badge/Telegram-AstrBot-purple?style=for-the-badge&color=76bad9"></a>
-<img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.soulter.top%2Fastrbot%2Fplugin-num&query=%24.result&suffix=%E4%B8%AA&style=for-the-badge&label=%E6%8F%92%E4%BB%B6%E5%B8%82%E5%9C%BA&cacheSeconds=3600">
-</div>
+---
 
-<br>
+## 架构图
 
-<a href="https://github.com/Soulter/AstrBot/blob/master/README_en.md">English</a> ｜
-<a href="https://github.com/Soulter/AstrBot/blob/master/README_ja.md">日本語</a> ｜
-<a href="https://astrbot.app/">文档</a> ｜
-<a href="https://blog.astrbot.app/">Blog</a> ｜
-<a href="https://astrbot.featurebase.app/roadmap">路线图</a> ｜
-<a href="https://github.com/Soulter/AstrBot/issues">问题提交</a>
-</div>
-
-AstrBot 是一个开源的一站式 Agent 聊天机器人平台及开发框架。
-
-## 主要功能
-
-1. **大模型对话**。支持接入多种大模型服务。支持多模态、工具调用、MCP、原生知识库、人设等功能。
-2. **多消息平台支持**。支持接入 QQ、企业微信、微信公众号、飞书、Telegram、钉钉、Discord、KOOK 等平台。支持速率限制、白名单、百度内容审核。
-3. **Agent**。完善适配的 Agentic 能力。支持多轮工具调用、内置沙盒代码执行器、网页搜索等功能。
-4. **插件扩展**。深度优化的插件机制，支持[开发插件](https://astrbot.app/dev/plugin.html)扩展功能，社区插件生态丰富。
-5. **WebUI**。可视化配置和管理机器人，功能齐全。
-
-## 部署方式
-
-#### Docker 部署(推荐 🥳)
-
-推荐使用 Docker / Docker Compose 方式部署 AstrBot。
-
-请参阅官方文档 [使用 Docker 部署 AstrBot](https://astrbot.app/deploy/astrbot/docker.html#%E4%BD%BF%E7%94%A8-docker-%E9%83%A8%E7%BD%B2-astrbot) 。
-
-#### 宝塔面板部署
-
-AstrBot 与宝塔面板合作，已上架至宝塔面板。
-
-请参阅官方文档 [宝塔面板部署](https://astrbot.app/deploy/astrbot/btpanel.html) 。
-
-#### 1Panel 部署
-
-AstrBot 已由 1Panel 官方上架至 1Panel 面板。
-
-请参阅官方文档 [1Panel 部署](https://astrbot.app/deploy/astrbot/1panel.html) 。
-
-#### 在 雨云 上部署
-
-AstrBot 已由雨云官方上架至云应用平台，可一键部署。
-
-[![Deploy on RainYun](https://rainyun-apps.cn-nb1.rains3.com/materials/deploy-on-rainyun-en.svg)](https://app.rainyun.com/apps/rca/store/5994?ref=NjU1ODg0)
-
-#### 在 Replit 上部署
-
-社区贡献的部署方式。
-
-[![Run on Repl.it](https://repl.it/badge/github/Soulter/AstrBot)](https://repl.it/github/Soulter/AstrBot)
-
-#### Windows 一键安装器部署
-
-请参阅官方文档 [使用 Windows 一键安装器部署 AstrBot](https://astrbot.app/deploy/astrbot/windows.html) 。
-
-#### CasaOS 部署
-
-社区贡献的部署方式。
-
-请参阅官方文档 [CasaOS 部署](https://astrbot.app/deploy/astrbot/casaos.html) 。
-
-#### 手动部署
-
-首先安装 uv：
-
-```bash
-pip install uv
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        外部 Agent 系统                        │
+│              (Hermes / Dify / Coze / 自研 Agent)              │
+└──────────────────┬────────────────────────────┬─────────────┘
+                   │                            │
+         ┌─────────▼──────────┐      ┌──────────▼──────────┐
+         │   Webhook (推送)   │      │  Long Poll (拉取)   │
+         │  HTTP POST 推送    │      │  GET /events 拉取    │
+         └─────────┬──────────┘      └──────────┬──────────┘
+                   │                            │
+         ┌─────────▼────────────────────────────▼──────────┐
+         │           WebSocket (全双工实时)                 │
+         │         WS /api/gateway/stream                 │
+         └──────────────────┬─────────────────────────────┘
+                            │
+         ┌──────────────────▼─────────────────────────────┐
+         │           AstraBot 统一网关层                   │
+         │  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+         │  │  Gateway │  │  Pipeline│  │  EventBus│    │
+         │  │Dispatcher│  │ (轻量)   │  │ (队列)   │    │
+         │  └──────────┘  └──────────┘  └──────────┘    │
+         └──────────────────┬─────────────────────────────┘
+                            │
+         ┌──────────────────┼────────────────────────────────────┐
+         │                  │                                    │
+   ┌─────▼─────┐    ┌───────▼──────┐   ┌──────────┐   ┌────────▼────┐
+   │ Telegram  │    │ QQ (OneBot)  │   │  飞书    │   │   钉钉      │
+   │           │    │ QQ (官方)    │   │  企业微信 │   │   Discord   │
+   └───────────┘    └──────────────┘   └──────────┘   └─────────────┘
+   ┌───────────┐    ┌──────────────┐   ┌──────────┐   ┌─────────────┐
+   │  Slack    │    │  KOOK        │   │ Misskey  │   │  Satori     │
+   │  LINE     │    │  Mattermost  │   │  VoceChat│   │  微信客服   │
+   └───────────┘    └──────────────┘   └──────────┘   └─────────────┘
 ```
 
-通过 Git Clone 安装 AstrBot：
+**回发通道**（统一）：外部 Agent 处理完后，通过 `POST /api/v1/im/message` 将消息发回指定会话，AstraBot 负责投递到对应 IM 平台。
+
+---
+
+## 核心能力（本分支新增）
+
+| 能力 | 说明 |
+|------|------|
+| **统一消息信封** | 所有 IM 平台的消息被序列化为标准化的 `MessageEnvelope`，包含 `event_id`、`platform`、`session`、`sender`、`message` 五元组 |
+| **Webhook 推送** | AstraBot 收到消息后，立即 HTTP POST 到外部 Agent 的 Webhook URL。适合云端 Agent、微服务架构 |
+| **Long Polling 拉取** | 外部 Agent 通过 `GET /api/gateway/events` 阻塞拉取消息。适合本地 Agent、防火墙后部署 |
+| **WebSocket 全双工** | 一条连接实时双向收发。适合高频交互、流式回复场景 |
+| **统一回发** | 无论通过哪种上行通道接收消息，外部 Agent 都通过 `POST /api/v1/im/message` 回发，路由到正确的 IM 平台与会话 |
+| **平台过滤** | Webhook 端点可按平台名称过滤（如只转发 Telegram 和微信） |
+| **ACK 防重** | Long Polling 支持 ACK 确认，防止 Agent 崩溃后重复处理 |
+| **插件兼容** | 本地插件（关键词过滤、黑名单、速率限制等）仍然生效，优先级高于网关转发 |
+
+---
+
+## 快速开始
+
+### 1. 克隆本分支
 
 ```bash
-git clone https://github.com/AstrBotDevs/AstrBot && cd AstrBot
+git clone https://github.com/<your-fork>/AstrBot.git
+cd AstrBot
+git checkout feat/unified-gateway
+```
+
+### 2. 配置网关
+
+编辑 `data/cmd_config.json`，新增 `gateway` 段：
+
+```json
+{
+  "gateway": {
+    "enabled": true,
+    "message_ttl_seconds": 300,
+    "max_queue_size": 10000,
+    "channels": {
+      "webhook": {
+        "enabled": true,
+        "endpoints": [
+          {
+            "name": "hermes-agent",
+            "url": "http://hermes-service:8080/astrbot/events",
+            "secret": "your-shared-secret",
+            "timeout": 30,
+            "filter": {
+              "platforms": ["telegram", "wecom"]
+            }
+          }
+        ]
+      },
+      "longpoll": {
+        "enabled": true,
+        "max_queue_size": 10000,
+        "max_unacked": 1000,
+        "ack_timeout_seconds": 60
+      },
+      "websocket": {
+        "enabled": true,
+        "max_connections_per_key": 3,
+        "heartbeat_interval_seconds": 30
+      }
+    }
+  },
+  "provider_settings": {
+    "enable": false
+  }
+}
+```
+
+### 3. 创建 API Key
+
+在 Dashboard → 扩展 → API Key 管理中创建新 Key：
+- **Scope**: 勾选 `im` + `gateway`
+- 复制生成的 `abk_xxx` 密钥，供外部 Agent 使用
+
+### 4. 启动
+
+```bash
 uv run main.py
 ```
 
-或者请参阅官方文档 [通过源码部署 AstrBot](https://astrbot.app/deploy/astrbot/cli.html) 。
+---
 
-## 🌍 社区
+## 三种通道对比
 
-### QQ 群组
+| 维度 | Webhook | Long Polling | WebSocket |
+|------|---------|-------------|-----------|
+| **方向** | AstraBot → Agent（推送） | Agent → AstraBot（拉取） | 双向 |
+| **网络要求** | Agent 需暴露 HTTP 接口 | Agent 无需暴露端口 | 双向可达 |
+| **实时性** | 高（即时推送） | 中（取决于 poll 间隔） | 高（实时双向） |
+| **断线恢复** | 简单（HTTP 重试） | 简单（续 poll） | 需心跳 + 重连 |
+| **适用场景** | 云端 Agent、微服务 | 本地 Agent、防火墙后 | 高频交互、流式回复 |
+| **推荐** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
 
-- 1 群：322154837
-- 3 群：630166526
-- 5 群：822130018
-- 6 群：753075035
-- 开发者群：975206796
+> 可以同时启用三种通道，不同的 Agent 按需接入。
 
-### Telegram 群组
+---
 
-<a href="https://t.me/+hAsD2Ebl5as3NmY1"><img alt="Telegram_community" src="https://img.shields.io/badge/Telegram-AstrBot-purple?style=for-the-badge&color=76bad9"></a>
+## 项目结构
 
-### Discord 群组
-
-<a href="https://discord.gg/hAVk6tgV36"><img alt="Discord_community" src="https://img.shields.io/badge/Discord-AstrBot-purple?style=for-the-badge&color=76bad9"></a>
-
-## ⚡ 消息平台支持情况
-
-**官方维护**
-
-| 平台    | 支持性 |
-| -------- | ------- |
-| QQ(官方平台) | ✔    |
-| QQ(OneBot)      | ✔    |
-| Telegram   | ✔    |
-| 企微应用    | ✔    |
-| 企微智能机器人 | ✔ |
-| 微信客服    | ✔    |
-| 微信公众号    | ✔    |
-| 飞书   | ✔    |
-| 钉钉   | ✔    |
-| Slack   | ✔    |
-| Discord   | ✔    |
-| Satori   | ✔    |
-| Misskey   | ✔    |
-| Whatsapp | 将支持 |
-| LINE | 将支持 |
-
-**社区维护**
-
-| 平台    | 支持性 |
-| -------- | ------- |
-| [KOOK](https://github.com/wuyan1003/astrbot_plugin_kook_adapter)   | ✔    |
-| [VoceChat](https://github.com/HikariFroya/astrbot_plugin_vocechat)   | ✔    |
-| [Bilibili 私信](https://github.com/Hina-Chat/astrbot_plugin_bilibili_adapter)   | ✔    |
-| [wxauto](https://github.com/luosheng520qaq/wxauto-repost-onebotv11)   | ✔    |
-
-## ⚡ 提供商支持情况
-
-**大模型服务**
-
-| 名称  | 支持性 | 备注 |
-| -------- | ------- | ------- |
-| OpenAI | ✔    | 支持任何兼容 OpenAI API 的服务 |
-| Anthropic | ✔    |  |
-| Google Gemini | ✔   |  |
-| Moonshot AI | ✔   |  |
-| 智谱 AI | ✔   |  |
-| DeepSeek | ✔   |  |
-| Ollama | ✔     | 本地部署 DeepSeek 等开源语言模型 |
-| LM Studio | ✔    | 本地部署 DeepSeek 等开源语言模型 |
-| [优云智算](https://www.compshare.cn/?ytag=GPU_YY-gh_astrbot&referral_code=FV7DcGowN4hB5UuXKgpE74) | ✔  |  |
-| [302.AI](https://share.302.ai/rr1M3l) | ✔   |  |
-| [小马算力](https://www.tokenpony.cn/3YPyf) | ✔   |  |
-| 硅基流动 | ✔    |  |
-| PPIO 派欧云 | ✔    |  |
-| ModelScope | ✔    |  |
-| OneAPI | ✔    |  |
-| Dify | ✔    |  |
-| 阿里云百炼应用 | ✔    |  |
-| Coze | ✔    |  |
-
-**语音转文本服务**
-
-| 名称  | 支持性 | 备注 |
-| -------- | ------- | ------- |
-| Whisper | ✔    | 支持 API、本地部署 |
-| SenseVoice | ✔   | 本地部署 |
-
-**文本转语音服务**
-
-| 名称  | 支持性 | 备注 |
-| -------- | ------- | ------- |
-| OpenAI TTS | ✔    |  |
-| Gemini TTS | ✔    |  |
-| GSVI | ✔    | GPT-Sovits-Inference |
-| GPT-SoVITs | ✔     | GPT-Sovits |
-| FishAudio | ✔    | |
-| Edge TTS | ✔    | Edge 浏览器的免费 TTS |
-| 阿里云百炼 TTS | ✔    |  |
-| Azure TTS | ✔   | |
-| Minimax TTS | ✔   | |
-| 火山引擎 TTS | ✔   | |
-
-## ❤️ 贡献
-
-欢迎任何 Issues/Pull Requests！只需要将你的更改提交到此项目 ：)
-
-### 如何贡献
-
-你可以通过查看问题或帮助审核 PR（拉取请求）来贡献。任何问题或 PR 都欢迎参与，以促进社区贡献。当然，这些只是建议，你可以以任何方式进行贡献。对于新功能的添加，请先通过 Issue 讨论。
-
-### 开发环境
-
-AstrBot 使用 `ruff` 进行代码格式化和检查。
-
-```bash
-git clone https://github.com/Soulter/AstrBot
-pip install pre-commit
-pre-commit install
+```
+AstrBot/
+├── astrbot/
+│   ├── core/
+│   │   ├── gateway/                  # ⭐ 新增：统一网关核心
+│   │   │   ├── envelope.py           # 消息信封 schema
+│   │   │   ├── serializer.py         # 消息序列化
+│   │   │   ├── dispatcher.py         # 多路分发器
+│   │   │   ├── webhook.py            # Webhook 推送
+│   │   │   ├── longpoll.py           # Long Polling 队列
+│   │   │   └── websocket.py          # WebSocket 连接管理
+│   │   ├── pipeline/
+│   │   │   └── process_stage/stage.py # 嫁接 Gateway 分发逻辑
+│   │   ├── platform/               # 18+ 平台适配器（核心资产）
+│   │   ├── event_bus.py            # 事件总线
+│   │   ├── agent/                  # 原生 LLM/Agent（可关闭）
+│   │   ├── provider/               # 模型提供商（可关闭）
+│   │   └── ...
+│   ├── dashboard/
+│   │   └── routes/
+│   │       └── gateway.py            # ⭐ 新增：网关 REST + WS 端点
+│   └── api/                        # 插件 API 暴露
+├── tests/gateway/                  # ⭐ 新增：网关单元测试
+├── docs/
+│   ├── gateway-human-guide.md      # 给人看的中文文档
+│   └── gateway-agent-spec.md     # 给 Agent 看的协议规范
+├── dashboard/                      # Vue3 管理面板（可选）
+└── main.py                         # 入口
 ```
 
-## ❤️ Special Thanks
+---
 
-特别感谢所有 Contributors 和插件开发者对 AstrBot 的贡献 ❤️
+## 文档
 
-<a href="https://github.com/AstrBotDevs/AstrBot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=AstrBotDevs/AstrBot" />
-</a>
+| 文档 | 面向读者 | 内容 |
+|------|---------|------|
+| [`docs/gateway-human-guide.md`](docs/gateway-human-guide.md) | AstraBot 维护者 / 运维 | 中文配置指南、UMO 格式、常见问题 |
+| [`docs/gateway-agent-spec.md`](docs/gateway-agent-spec.md) | 外部 Agent 开发者（Hermes / Dify / Coze） | 协议规范、请求示例、Hermes 集成代码、错误处理、最小 Checklist |
 
-此外，本项目的诞生离不开以下开源项目的帮助：
+---
 
-- [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) - 伟大的猫猫框架
+## 回发示例
 
-## ⭐ Star History
+外部 Agent 处理完消息后，通过统一 HTTP API 回发：
 
-> [!TIP] 
-> 如果本项目对您的生活 / 工作产生了帮助，或者您关注本项目的未来发展，请给项目 Star，这是我们维护这个开源项目的动力 <3
+```bash
+POST http://astrbot-host:6185/api/v1/im/message
+Authorization: Bearer abk_xxx
+Content-Type: application/json
 
-<div align="center">
+{
+  "umo": "telegram:FriendMessage:telegram!123456789",
+  "message": [
+    {"type": "plain", "text": "Hello from Hermes"}
+  ]
+}
+```
 
-[![Star History Chart](https://api.star-history.com/svg?repos=soulter/astrbot&type=Date)](https://star-history.com/#soulter/astrbot&Date)
+`umo` 格式：`platform_name:MessageType:session_id`
 
-</div>
+---
 
-</details>
+## 技术栈
+
+- **Python 3.10+** — 主运行时
+- **Quart** — 异步 Web 框架（Dashboard + OpenAPI）
+- **aiohttp** — 网关 HTTP 客户端
+- **asyncio** — 事件总线与消息队列
+- **SQLite** — 会话、配置持久化
+
+---
+
+## 协议与许可
+
+本项目基于 [AGPL-v3](LICENSE) 开源。如果你对本分支进行了修改并将其用于提供具有商业盈利性质的网络服务，你必须开源所做的修改。
+
+---
+
+## 致谢
+
+本分支基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 开发。AstrBot 是一个优秀的开源 Agent 聊天机器人平台，由全世界热心开源贡献者维护。
+
+- 特别感谢 AstrBot 原作者及所有 Contributors ❤️
+- 感谢 [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) — 伟大的猫猫框架
+
+---
 
 _私は、高性能ですから!_
