@@ -18,5 +18,6 @@ class PipelineContext:
     astrbot_config: AstrBotConfig  # AstrBot 配置对象
     plugin_manager: PluginManager  # 插件管理器对象
     astrbot_config_id: str
+    gateway_dispatcher = None  # GatewayDispatcher 实例（gateway 模式启用时）
     call_handler = call_handler
     call_event_hook = call_event_hook

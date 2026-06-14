@@ -17,6 +17,17 @@ class ProcessStage(Stage):
         self.config = ctx.astrbot_config
         self.plugin_manager = ctx.plugin_manager
 
+        from astrbot.core.gateway import MessageSerializer, GatewayDispatcher
+        
+        # initialize gateway dispatcher (if enabled)
+        self.gateway_cfg = self.ctx.astrbot_config.get("gateway", {})
+        self.gateway_enabled = self.gateway_cfg.get("enabled", False)
+        if self.gateway_enabled:
+            self.gateway_dispatcher = GatewayDispatcher(self.gateway_cfg)
+            await self.gateway_dispatcher.initialize()
+        else:
+            self.gateway_dispatcher = None
+
         # initialize agent sub stage
         self.agent_sub_stage = AgentRequestSubStage()
         await self.agent_sub_stage.initialize(ctx)
@@ -48,6 +59,14 @@ class ProcessStage(Stage):
                         yield
                 else:
                     yield
+
+        # 如果启用了 Gateway 模式，将消息转发到外部 Agent 系统
+        if self.gateway_enabled and self.gateway_dispatcher:
+            if event.is_at_or_wake_command and not event.call_llm:
+                envelope = MessageSerializer.to_envelope(event)
+                await self.gateway_dispatcher.dispatch(envelope)
+                event.stop_event()
+                return
 
         # 调用 LLM 相关请求
         if not self.ctx.astrbot_config["provider_settings"].get("enable", True):

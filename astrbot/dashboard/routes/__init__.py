@@ -8,6 +8,7 @@ from .config import ConfigRoute
 from .conversation import ConversationRoute
 from .cron import CronRoute
 from .file import FileRoute
+from .gateway import GatewayRoute
 from .knowledge_base import KnowledgeBaseRoute
 from .log import LogRoute
 from .open_api import OpenApiRoute
@@ -33,6 +34,7 @@ __all__ = [
     "ConversationRoute",
     "CronRoute",
     "FileRoute",
+    "GatewayRoute",
     "KnowledgeBaseRoute",
     "LogRoute",
     "OpenApiRoute",

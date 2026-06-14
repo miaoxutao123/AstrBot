@@ -38,6 +38,7 @@ from .routes import *
 from .routes.api_key import ALL_OPEN_API_SCOPES
 from .routes.auth import DASHBOARD_JWT_COOKIE_NAME
 from .routes.backup import BackupRoute
+from .routes.gateway import GatewayRoute
 from .routes.live_chat import LiveChatRoute
 from .routes.platform import PlatformRoute
 from .routes.route import Response, RouteContext
@@ -307,6 +308,7 @@ class AstrBotDashboard:
         self.platform_route = PlatformRoute(self.context, core_lifecycle)
         self.backup_route = BackupRoute(self.context, db, core_lifecycle)
         self.live_chat_route = LiveChatRoute(self.context, db, core_lifecycle)
+        self.gateway_route = GatewayRoute(self.context, db, core_lifecycle)
 
         self.app.add_url_rule(
             "/api/plug/<path:subpath>",
@@ -511,6 +513,8 @@ class AstrBotDashboard:
             "/api/v1/file": "file",
             "/api/v1/im/message": "im",
             "/api/v1/im/bots": "im",
+            "/api/gateway/events": "gateway",
+            "/api/gateway/events/ack": "gateway",
         }
         return scope_map.get(path)
 
