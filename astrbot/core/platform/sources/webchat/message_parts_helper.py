@@ -8,6 +8,8 @@ from typing import Any
 
 from astrbot.core.db.po import Attachment
 from astrbot.core.message.components import (
+    At,
+    AtAll,
     File,
     Image,
     Json,
@@ -127,9 +129,37 @@ async def parse_webchat_message_parts(
             )
             continue
 
+        if part_type == "at":
+            qq = part.get("qq")
+            if qq is None:
+                if strict:
+                    raise ValueError("at part missing qq")
+                continue
+            if str(qq).strip().lower() == "all":
+                components.append(AtAll())
+            else:
+                components.append(At(qq=qq, name=str(part.get("name", ""))))
+            has_content = True
+            continue
+
         if part_type not in MEDIA_PART_TYPES:
             if strict:
                 raise ValueError(f"unsupported message part type: {part_type}")
+            continue
+
+        # NEW: support direct URL for multimedia parts
+        url = str(part.get("url", "")).strip()
+        if url and (url.startswith("http://") or url.startswith("https://")):
+            has_content = True
+            filename = str(part.get("filename", "")).strip()
+            if part_type == "image":
+                components.append(Image.fromURL(url))
+            elif part_type == "record":
+                components.append(Record.fromURL(url))
+            elif part_type == "video":
+                components.append(Video.fromURL(url))
+            else:
+                components.append(File(name=filename or "file", url=url))
             continue
 
         path = part.get("path")
@@ -164,7 +194,7 @@ async def parse_webchat_message_parts(
 async def build_webchat_message_parts(
     message_payload: str | list,
     *,
-    get_attachment_by_id: AttachmentGetter,
+    get_attachment_by_id: AttachmentGetter | None,
     strict: bool = False,
 ) -> list[dict]:
     if isinstance(message_payload, str):
@@ -205,15 +235,50 @@ async def build_webchat_message_parts(
             )
             continue
 
+        if part_type == "at":
+            qq = part.get("qq")
+            if qq is None:
+                if strict:
+                    raise ValueError("at part missing qq")
+                continue
+            message_parts.append(
+                {
+                    "type": "at",
+                    "qq": qq,
+                    "name": str(part.get("name", "")),
+                }
+            )
+            continue
+
         if part_type not in MEDIA_PART_TYPES:
             if strict:
                 raise ValueError(f"unsupported message part type: {part_type}")
             continue
 
+        # NEW: support direct URL for multimedia parts
+        url = str(part.get("url", "")).strip()
+        if url and (url.startswith("http://") or url.startswith("https://")):
+            message_parts.append(
+                {
+                    "type": part_type,
+                    "url": url,
+                    "filename": str(part.get("filename", "")).strip(),
+                }
+            )
+            continue
+
+        # Existing attachment_id logic
         attachment_id = part.get("attachment_id")
         if not attachment_id:
             if strict:
-                raise ValueError(f"{part_type} part missing attachment_id")
+                raise ValueError(f"{part_type} part missing attachment_id or url")
+            continue
+
+        if get_attachment_by_id is None:
+            if strict:
+                raise ValueError(
+                    f"{part_type} part has attachment_id but get_attachment_by_id is not provided"
+                )
             continue
 
         attachment = await get_attachment_by_id(str(attachment_id))
@@ -272,9 +337,37 @@ def webchat_message_parts_to_message_chain(
             )
             continue
 
+        if part_type == "at":
+            qq = part.get("qq")
+            if qq is None:
+                if strict:
+                    raise ValueError("at part missing qq")
+                continue
+            if str(qq).strip().lower() == "all":
+                components.append(AtAll())
+            else:
+                components.append(At(qq=qq, name=str(part.get("name", ""))))
+            has_content = True
+            continue
+
         if part_type not in MEDIA_PART_TYPES:
             if strict:
                 raise ValueError(f"unsupported message part type: {part_type}")
+            continue
+
+        # NEW: support direct URL for multimedia parts
+        url = str(part.get("url", "")).strip()
+        if url and (url.startswith("http://") or url.startswith("https://")):
+            has_content = True
+            filename = str(part.get("filename", "")).strip()
+            if part_type == "image":
+                components.append(Image.fromURL(url))
+            elif part_type == "record":
+                components.append(Record.fromURL(url))
+            elif part_type == "video":
+                components.append(Video.fromURL(url))
+            else:
+                components.append(File(name=filename or "file", url=url))
             continue
 
         path = part.get("path")
@@ -310,7 +403,7 @@ def webchat_message_parts_to_message_chain(
 async def build_message_chain_from_payload(
     message_payload: str | list,
     *,
-    get_attachment_by_id: AttachmentGetter,
+    get_attachment_by_id: AttachmentGetter | None,
     strict: bool = True,
 ) -> MessageChain:
     message_parts = await build_webchat_message_parts(
