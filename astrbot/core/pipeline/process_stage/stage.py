@@ -62,8 +62,11 @@ class ProcessStage(Stage):
 
         # 如果启用了 Gateway 模式，将消息转发到外部 Agent 系统
         if self.gateway_enabled and self.gateway_dispatcher:
-            if event.is_at_or_wake_command and not event.call_llm:
-                envelope = MessageSerializer.to_envelope(event)
+            # bypass_llm: 当 Gateway 被触发时，直接 dispatch 并阻止后续 LLM 处理
+            # 避免某个前置 stage 通过 call_llm 标记将消息绕过 Gateway，送入 LLM 导致提示词注入风险
+            gateway_bypass_llm = self.gateway_cfg.get("bypass_llm", False)
+            if event.is_at_or_wake_command and (not event.call_llm or gateway_bypass_llm):
+                envelope = await MessageSerializer.to_envelope(event)
                 await self.gateway_dispatcher.dispatch(envelope)
                 event.stop_event()
                 return
