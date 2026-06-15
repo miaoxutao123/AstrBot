@@ -58,7 +58,9 @@ class GatewayWebSocketHandler:
         if not platform_inst:
             return {"success": False, "error": f"Platform not found: {session.platform_name}"}
         try:
-            message_chain = await build_message_chain_from_payload(message_payload, None, strict=True)
+            message_chain = await build_message_chain_from_payload(
+                message_payload, get_attachment_by_id=None, strict=True
+            )
             await platform_inst.send_by_session(session, message_chain)
             return {"success": True}
         except Exception as e:
