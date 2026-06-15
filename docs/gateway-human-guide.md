@@ -34,6 +34,7 @@ IM 平台 → AstraBot PlatformAdapter → 统一网关 → 外部 Agent
 {
   "gateway": {
     "enabled": true,
+    "bypass_llm": true,
     "message_ttl_seconds": 300,
     "max_queue_size": 10000,
     "channels": {
@@ -69,6 +70,7 @@ IM 平台 → AstraBot PlatformAdapter → 统一网关 → 外部 Agent
 
 配置说明：
 - `enabled`: 总开关。设为 `true` 后，AstraBot 不再调用内置 LLM，所有消息走网关转发。
+- **`bypass_llm`**（新增，安全选项）: 设为 `true` 时，Gateway 触发后直接强制转发，**无视任何前置 stage 的 `call_llm` 标记**。这能防止某个插件（如 LLM 意图识别）被提示词注入后，把消息绕过 Gateway 送入内置 LLM，导致敏感信息泄露或行为失控。推荐所有纯网关用户开启。
 - `channels.webhook`: 主动推送模式。AstraBot 收到消息后，立刻 HTTP POST 到配置的 URL。
 - `channels.longpoll`: 被动拉取模式。外部 Agent 定时 `GET /api/gateway/events` 拉取消息。
 - `channels.websocket`: 全双工模式。外部 Agent 建立 WS 连接后，实时双向收发。
@@ -112,7 +114,41 @@ Content-Type: application/json
 
 `umo` 格式：`platform_name:MessageType:session_id`
 
-### 4.2 WebSocket（仅 WS 连接）
+### 4.2 发送多媒体（图片 / 语音 / 视频 / 文件）
+
+**方式一：直接 URL（推荐）**
+
+外部 Agent 直接提供网络可访问的 URL，AstraBot 自动下载并转发到 IM 平台：
+
+```json
+{
+  "umo": "telegram:FriendMessage:telegram!123456789",
+  "message": [
+    {"type": "plain", "text": "Check this out"},
+    {"type": "image", "url": "https://example.com/chart.png"},
+    {"type": "video", "url": "https://example.com/demo.mp4"},
+    {"type": "file", "url": "https://example.com/report.pdf", "filename": "report.pdf"}
+  ]
+}
+```
+
+支持的多媒体类型：`image`、`record`（语音）、`video`、`file`。
+
+> **注意**：WebSocket 回发通道（`op: send_message`）不支持 `attachment_id`（因为 WS 连接没有 Dashboard 数据库上下文），所以**务必使用 `url` 方式**。
+
+**方式二：附件 ID（仅限 HTTP API）**
+
+如果文件不便暴露公网 URL，可先通过 Dashboard 上传文件获取 `attachment_id`，然后在消息中引用：
+
+```json
+{
+  "message": [
+    {"type": "image", "attachment_id": "att_abc123"}
+  ]
+}
+```
+
+### 4.3 WebSocket（仅 WS 连接）
 
 ```json
 {
@@ -127,6 +163,8 @@ Content-Type: application/json
 ## 5. 消息信封格式
 
 AstraBot 向外部 Agent 推送的消息遵循统一信封（MessageEnvelope）：
+
+### 5.1 纯文本消息
 
 ```json
 {
@@ -164,6 +202,32 @@ AstraBot 向外部 Agent 推送的消息遵循统一信封（MessageEnvelope）�
   }
 }
 ```
+
+### 5.2 含多媒体的消息
+
+当用户发送图片、语音、视频或文件时，`message.chain` 中会出现对应的多媒体段。AstraBot 会尝试将文件注册到内部下载服务，生成 `http://astrbot-host/api/file/{token}` 的可下载 URL，以便外部 Agent 直接下载：
+
+```json
+{
+  "message": {
+    "text": "[图片]",
+    "chain": [
+      {"type": "Image", "data": {"file": "http://astrbot-host/api/file/abc123..."}}
+    ]
+  }
+}
+```
+
+如果 `callback_api_base` 未配置，序列化器会回退到原始 `url` 或 `file` 字段（如 `https://cdn.telegram.org/...`）。本地路径和 base64 不会被直接暴露。
+
+**多媒体组件映射：**
+
+| 用户发送 | chain 中的 type | data 字段 | 说明 |
+|---------|----------------|----------|------|
+| 图片 | `Image` | `file` | 可下载 URL |
+| 语音 | `Record` | `file` | 可下载 URL；可能含 `text`（TTS 原文） |
+| 视频 | `Video` | `file` | 可下载 URL |
+| 文件 | `File` | `file`, `name` | 可下载 URL + 原始文件名 |
 
 ## 6. 常见问题
 

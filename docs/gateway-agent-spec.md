@@ -238,13 +238,49 @@ Examples:
 
 ### 6.2 Message Chain Types
 
+When sending messages back to AstraBot, you can use **either** a direct URL or an attachment ID.
+
+**Direct URL (recommended)** — AstraBot downloads the file automatically:
+
 | Type | Fields | Example |
 |------|--------|---------|
 | `plain` | `text` | `{"type":"plain","text":"hi"}` |
-| `image` | `url` or `file` | `{"type":"image","url":"https://..."}` |
+| `image` | `url` | `{"type":"image","url":"https://example.com/img.png"}` |
+| `video` | `url` | `{"type":"video","url":"https://example.com/vid.mp4"}` |
+| `record` | `url` | `{"type":"record","url":"https://example.com/voice.mp3"}` |
+| `file` | `url`, `filename` | `{"type":"file","url":"https://example.com/doc.pdf","filename":"doc.pdf"}` |
 | `at` | `qq` or `name` | `{"type":"at","qq":"123"}` |
-| `file` | `url` or `file` | `{"type":"file","url":"https://..."}` |
-| `record` | `url` or `file` | `{"type":"record","url":"https://..."}` |
+
+**Attachment ID** — upload the file via Dashboard first, then reference it:
+
+| Type | Fields | Example |
+|------|--------|---------|
+| `image` | `attachment_id` | `{"type":"image","attachment_id":"att_abc123"}` |
+| `video` | `attachment_id` | `{"type":"video","attachment_id":"att_abc123"}` |
+| `record` | `attachment_id` | `{"type":"record","attachment_id":"att_abc123"}` |
+| `file` | `attachment_id` | `{"type":"file","attachment_id":"att_abc123"}` |
+
+> **Note:** WebSocket `send_message` does not have access to the Dashboard attachment database. When sending via WS, always use the `url` approach.
+
+### 6.3 Multimedia in Inbound Events
+
+When AstraBot forwards a message **from IM to your Agent**, multimedia components are normalized to a downloadable URL in the `message.chain`:
+
+```json
+{
+  "type": "Image",
+  "data": {"file": "http://astrbot-host/api/file/abc123..."}
+}
+```
+
+If `callback_api_base` is not configured, the serializer falls back to the raw `url` or `file` field. Base64 blobs are avoided — the serializer prefers URLs.
+
+| Component | Normalized Field | Notes |
+|-----------|-----------------|-------|
+| `Image` | `data.file` | HTTP download URL |
+| `Record` | `data.file` | HTTP download URL; `data.text` may contain TTS source text |
+| `Video` | `data.file` | HTTP download URL |
+| `File` | `data.file`, `data.name` | HTTP download URL + original filename |
 
 ## 7. MessageEnvelope Schema
 
@@ -284,3 +320,55 @@ Examples:
 ---
 
 > Spec version: 1.0 | Branch: `feat/unified-gateway`
+
+## 10. Security Considerations
+
+### 10.1 Gateway bypass_llm (Prompt Injection Defense)
+
+AstraBot's built-in pipeline allows plugins to mark `call_llm = true`, which can divert messages into the internal LLM **before** Gateway dispatch. If a malicious user injects prompt-jailbreak instructions, a poorly-designed plugin stage might honor the injection and bypass the Gateway.
+
+**AstraBot operators can enable `bypass_llm` in the Gateway config:**
+
+```json
+{
+  "gateway": {
+    "enabled": true,
+    "bypass_llm": true
+  }
+}
+```
+
+When `bypass_llm` is `true`, the Gateway **forcefully intercepts** all `is_at_or_wake_command` messages and immediately dispatches them to external Agents. It **ignores any `call_llm` marker** set by upstream stages and stops the pipeline right there.
+
+**What this means for your Agent:**
+- You can trust that messages arriving via Gateway **have not been pre-processed by any internal LLM**.
+- `message.text` and `message.chain` are **raw user content**, not LLM-paraphrased output.
+- If you need to support both "Gateway-only" and "LLM-fallback" modes, check `metadata.is_at` and `metadata.is_wake` to decide whether the user explicitly addressed the bot.
+
+### 10.2 Group Chat Privacy Hints
+
+When operating in a group chat (`session.message_type == "GROUP_MESSAGE"`), your Agent should assume the reply is **publicly visible**. AstraBot does not automatically restrict visibility. If your Agent handles sensitive personal data, consider:
+- Prefixing the reply with an `At` segment targeting the original sender (`sender.id`).
+- Or replying with a brief public acknowledgment and sending details via DM (if your Agent also manages a separate DM channel).
+
+The Gateway Envelope already provides all necessary fields:
+
+```json
+{
+  "session": {
+    "message_type": "GROUP_MESSAGE",
+    "group_id": "123456789",
+    "umo": "qq_1:GROUP_MESSAGE:123456789"
+  },
+  "sender": { "id": "123456", "name": "Alice" },
+  "metadata": { "is_at": true, "is_private": false }
+}
+```
+
+### 10.3 Trust Boundary Summary
+
+| Trust Level | Condition | Recommendation |
+|-------------|-----------|---------------|
+| High | `bypass_llm = true` + `is_at = true` | Safe for personal Agent handling |
+| Medium | `bypass_llm = false` + `is_at = true` | Message may have passed through internal LLM stages; sanitize before trusting |
+| Low | `is_at = false` + `is_wake = false` | Message was not explicitly addressed to the bot; ignore or treat as ambient noise |
