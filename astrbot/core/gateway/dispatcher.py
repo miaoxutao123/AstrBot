@@ -22,21 +22,16 @@ class GatewayDispatcher:
         await self.webhook.initialize()
         await self.ws_handler.initialize()
 
-    async def dispatch(self, envelope: MessageEnvelope):
+    async def dispatch(self, envelope: MessageEnvelope) -> str | None:
+        """Dispatch to all channels. Returns webhook response text if any."""
         if not self._enabled:
-            return
-        tasks = []
+            return None
+        result = None
         if self.webhook.enabled:
-            tasks.append(self.webhook.push(envelope))
+            result = await self.webhook.push(envelope)
+        # Fire-and-forget for longpoll and websocket
         if self.longpoll.enabled:
-            tasks.append(self.longpoll.enqueue(envelope))
+            asyncio.create_task(self.longpoll.enqueue(envelope))
         if self.ws_handler.enabled:
-            tasks.append(self.ws_handler.broadcast(envelope))
-        if tasks:
-            asyncio.create_task(self._fire_and_forget(tasks))
-
-    async def _fire_and_forget(self, tasks):
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            logger.debug(f"Gateway dispatch error: {e}")
+            asyncio.create_task(self.ws_handler.broadcast(envelope))
+        return result

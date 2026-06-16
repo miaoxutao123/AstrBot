@@ -308,6 +308,27 @@ DEFAULT_CONFIG = {
     "kb_agentic_mode": False,
     "disable_builtin_commands": False,
     "disable_metrics": False,
+    "gateway": {
+        "enabled": False,
+        "message_ttl_seconds": 300,
+        "max_queue_size": 10000,
+        "bypass_llm": False,
+        "webhook": {
+            "enabled": False,
+            "endpoints": [],
+        },
+        "longpoll": {
+            "enabled": False,
+            "max_queue_size": 10000,
+            "max_unacked": 1000,
+            "ack_timeout_seconds": 60,
+        },
+        "websocket": {
+            "enabled": False,
+            "max_connections_per_key": 3,
+            "heartbeat_interval_seconds": 30,
+        },
+    },
 }
 
 

@@ -38,17 +38,18 @@ class WebhookPusher:
         if self.enabled:
             self._session = aiohttp.ClientSession()
 
-    async def push(self, envelope: MessageEnvelope):
+    async def push(self, envelope: MessageEnvelope) -> str | None:
         if not self._session:
-            return
+            return None
         payload = envelope.to_dict()
         platform_name = envelope.platform.name
         for ep in self.endpoints:
             if not ep.accepts(platform_name):
                 continue
-            asyncio.create_task(self._post(ep, payload))
+            return await self._post(ep, payload)
+        return None
 
-    async def _post(self, ep: WebhookEndpoint, payload: dict):
+    async def _post(self, ep: WebhookEndpoint, payload: dict) -> str | None:
         try:
             async with self._session.post(
                 ep.url,
@@ -58,5 +59,8 @@ class WebhookPusher:
             ) as resp:
                 if resp.status >= 400:
                     logger.warning(f"Webhook {ep.name} returned {resp.status}")
+                    return None
+                return await resp.text()
         except Exception as e:
             logger.warning(f"Webhook {ep.name} push failed: {e}")
+            return None

@@ -39,12 +39,21 @@ class GatewayStage(Stage):
             return
 
         # 序列化并分发
-        envelope = MessageSerializer.to_envelope(event)
-        await self.dispatcher.dispatch(envelope)
+        envelope = await MessageSerializer.to_envelope(event)
+        result = await self.dispatcher.dispatch(envelope)
 
-        # 设置占位结果，等待外部 Agent 回发
-        # 外部 Agent 通过 /api/v1/im/message 回发，会走 RespondStage
-        event.set_result(
-            MessageEventResult().message("[消息已转发至外部 Agent]")
-        )
+        if result:
+            try:
+                import json
+                data = json.loads(result)
+                reply = data.get("reply", result)
+            except Exception:
+                reply = result
+            event.set_result(
+                MessageEventResult().message(reply)
+            )
+        else:
+            event.set_result(
+                MessageEventResult().message("[消息已转发至外部 Agent]")
+            )
         event.stop_event()

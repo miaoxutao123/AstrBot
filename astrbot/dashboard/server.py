@@ -336,7 +336,7 @@ class AstrBotDashboard:
     async def auth_middleware(self):
         if not request.path.startswith("/api"):
             return None
-        if request.path.startswith("/api/v1"):
+        if request.path.startswith("/api/v1") or request.path.startswith("/api/gateway"):
             raw_key = self._extract_raw_api_key()
             if not raw_key:
                 r = jsonify(Response().error("Missing API key").__dict__)

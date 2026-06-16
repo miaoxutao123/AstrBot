@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.star.star_handler import StarHandlerMetadata
+from astrbot.core.message.message_event_result import MessageEventResult
 
 from ..context import PipelineContext
 from ..stage import Stage, register_stage
@@ -25,6 +26,7 @@ class ProcessStage(Stage):
         if self.gateway_enabled:
             self.gateway_dispatcher = GatewayDispatcher(self.gateway_cfg)
             await self.gateway_dispatcher.initialize()
+            self.ctx.gateway_dispatcher = self.gateway_dispatcher
         else:
             self.gateway_dispatcher = None
 
@@ -66,8 +68,19 @@ class ProcessStage(Stage):
             # 避免某个前置 stage 通过 call_llm 标记将消息绕过 Gateway，送入 LLM 导致提示词注入风险
             gateway_bypass_llm = self.gateway_cfg.get("bypass_llm", False)
             if event.is_at_or_wake_command and (not event.call_llm or gateway_bypass_llm):
+                from astrbot.core.gateway import MessageSerializer
                 envelope = await MessageSerializer.to_envelope(event)
-                await self.gateway_dispatcher.dispatch(envelope)
+                result = await self.gateway_dispatcher.dispatch(envelope)
+                if result:
+                    try:
+                        import json
+                        data = json.loads(result)
+                        reply = data.get("reply", result)
+                    except Exception:
+                        reply = result
+                    event.set_result(
+                        MessageEventResult().message(reply)
+                    )
                 event.stop_event()
                 return
 

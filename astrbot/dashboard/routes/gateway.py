@@ -1,6 +1,5 @@
 """Dashboard routes for Gateway (Long Poll, WebSocket, config)."""
 
-import asyncio
 import hashlib
 from quart import g, request, websocket
 
@@ -37,7 +36,17 @@ class GatewayRoute(Route):
         self.register_routes()
         self.app.websocket("/api/gateway/stream")(self.gateway_ws)
 
-    def _resolve_api_key(self) -> tuple[str | None, str | None]:
+    def _get_dispatcher(self):
+        """Lazily resolve the gateway dispatcher from the pipeline context."""
+        scheduler = self.core_lifecycle.pipeline_scheduler_mapping.get("default")
+        if scheduler is None:
+            return None
+        ctx = getattr(scheduler, "ctx", None)
+        if ctx is None:
+            return None
+        return getattr(ctx, "gateway_dispatcher", None)
+
+    async def _resolve_api_key(self) -> tuple[str | None, str | None]:
         raw_key = None
         if key := request.args.get("api_key"):
             raw_key = key.strip()
@@ -52,31 +61,34 @@ class GatewayRoute(Route):
         key_hash = hashlib.pbkdf2_hmac(
             "sha256", raw_key.encode("utf-8"), b"astrbot_api_key", 100_000
         ).hex()
-        api_key = asyncio.run(self.db.get_active_api_key_by_hash(key_hash))
+        api_key = await self.db.get_active_api_key_by_hash(key_hash)
         if not api_key:
             return None, "Invalid API key"
         return api_key.key_id, None
 
     async def get_events(self):
-        key_id, err = self._resolve_api_key()
+        key_id, err = await self._resolve_api_key()
         if err:
             return Response().error(err).__dict__
-        if not self.dispatcher:
+        dispatcher = self._get_dispatcher()
+        if not dispatcher:
             return Response().error("Gateway not enabled").__dict__
         timeout = float(request.args.get("timeout", 30))
         platform = request.args.get("platform")
-        events = await self.dispatcher.longpoll.dequeue(key_id, timeout)
+        events = await dispatcher.longpoll.dequeue(key_id, timeout)
         if platform:
             events = [e for e in events if e.get("platform", {}).get("name") == platform]
         return Response().ok(data={"events": events}).__dict__
 
     async def ack_events(self):
-        key_id, err = self._resolve_api_key()
+        key_id, err = await self._resolve_api_key()
         if err:
             return Response().error(err).__dict__
         post_data = await request.json or {}
         event_ids = post_data.get("event_ids", [])
-        self.dispatcher.longpoll.ack(key_id, event_ids)
+        dispatcher = self._get_dispatcher()
+        if dispatcher:
+            dispatcher.longpoll.ack(key_id, event_ids)
         return Response().ok().__dict__
 
     async def gateway_ws(self):
@@ -101,11 +113,12 @@ class GatewayRoute(Route):
             await websocket.close(1008, "Invalid API key")
             return
         key_id = api_key.key_id
-        if not self.dispatcher:
+        dispatcher = self._get_dispatcher()
+        if not dispatcher:
             await websocket.close(1011, "Gateway not enabled")
             return
 
-        ws_handler = self.dispatcher.ws_handler
+        ws_handler = dispatcher.ws_handler
         if not ws_handler.register(key_id, websocket):
             await websocket.close(1008, "Max connections reached")
             return
