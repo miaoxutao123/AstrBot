@@ -5,11 +5,11 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
 
 from .adapter import AdapterContext
 from .errors import GatewayError, GatewayErrorCode, GatewayException
 from .event_bus import MemoryEventBus
+from .health import AdapterState
 from .models import (
     Capability,
     CommandResult,
@@ -17,17 +17,6 @@ from .models import (
     GatewayCommand,
 )
 from .registry import AdapterRegistry
-
-
-class AdapterState(str, Enum):
-    """Lifecycle state of one configured adapter instance."""
-
-    STOPPED = "stopped"
-    STARTING = "starting"
-    RUNNING = "running"
-    DEGRADED = "degraded"
-    FAILED = "failed"
-    STOPPING = "stopping"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,12 +27,14 @@ class AdapterRuntimeInfo:
         adapter_id: Configured adapter instance identifier.
         adapter_type: Adapter descriptor type identifier.
         state: Current lifecycle state.
+        reason: Adapter-reported health reason, if any.
         error: Last safe lifecycle error, if any.
     """
 
     adapter_id: str
     adapter_type: str
     state: AdapterState
+    reason: str | None = None
     error: GatewayError | None = None
 
 
@@ -70,6 +61,7 @@ class AdapterRuntime:
         self._logger = logger or logging.getLogger("gateway.runtime")
         self._secret_provider = secret_provider or os.getenv
         self._states: dict[str, AdapterState] = {}
+        self._reasons: dict[str, str | None] = {}
         self._errors: dict[str, GatewayError | None] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -90,6 +82,7 @@ class AdapterRuntime:
             adapter_id=adapter_id,
             adapter_type=adapter.descriptor.id,
             state=self._states.get(adapter_id, AdapterState.STOPPED),
+            reason=self._reasons.get(adapter_id),
             error=self._errors.get(adapter_id),
         )
 
@@ -116,20 +109,30 @@ class AdapterRuntime:
         adapter = self._registry.get(adapter_id)
         lock = self._locks.setdefault(adapter_id, asyncio.Lock())
         async with lock:
-            if self._states.get(adapter_id) == AdapterState.RUNNING:
+            if self._states.get(adapter_id) in {
+                AdapterState.RUNNING,
+                AdapterState.DEGRADED,
+            }:
                 return self.info(adapter_id)
             self._states[adapter_id] = AdapterState.STARTING
+            self._reasons[adapter_id] = None
             self._errors[adapter_id] = None
             context = AdapterContext(
                 adapter_id=adapter_id,
                 emit=self._event_bus.publish,
                 logger=logging.getLogger(f"gateway.adapter.{adapter_id}"),
                 get_secret=self._secret_provider,
+                report_state=lambda state, reason: self._report_state(
+                    adapter_id,
+                    state,
+                    reason,
+                ),
             )
             try:
                 await adapter.start(context)
             except asyncio.CancelledError:
                 self._states[adapter_id] = AdapterState.STOPPED
+                self._reasons[adapter_id] = None
                 raise
             except Exception as exc:
                 error = GatewayError(
@@ -138,6 +141,7 @@ class AdapterRuntime:
                     retryable=True,
                 )
                 self._states[adapter_id] = AdapterState.FAILED
+                self._reasons[adapter_id] = error.message
                 self._errors[adapter_id] = error
                 self._logger.error(
                     "adapter_failed",
@@ -145,11 +149,13 @@ class AdapterRuntime:
                     extra={"adapter_id": adapter_id},
                 )
             else:
-                self._states[adapter_id] = AdapterState.RUNNING
-                self._logger.info(
-                    "adapter_started",
-                    extra={"adapter_id": adapter_id},
-                )
+                if self._states.get(adapter_id) == AdapterState.STARTING:
+                    self._states[adapter_id] = AdapterState.RUNNING
+                if self._states.get(adapter_id) == AdapterState.RUNNING:
+                    self._logger.info(
+                        "adapter_started",
+                        extra={"adapter_id": adapter_id},
+                    )
             return self.info(adapter_id)
 
     async def start_all(self) -> list[AdapterRuntimeInfo]:
@@ -181,10 +187,12 @@ class AdapterRuntime:
             if current_state == AdapterState.STOPPED:
                 return self.info(adapter_id)
             self._states[adapter_id] = AdapterState.STOPPING
+            self._reasons[adapter_id] = None
             try:
                 await adapter.stop()
             except asyncio.CancelledError:
                 self._states[adapter_id] = AdapterState.FAILED
+                self._reasons[adapter_id] = "adapter shutdown was cancelled"
                 raise
             except Exception as exc:
                 error = GatewayError(
@@ -192,6 +200,7 @@ class AdapterRuntime:
                     f"adapter failed to stop: {adapter_id}",
                 )
                 self._states[adapter_id] = AdapterState.FAILED
+                self._reasons[adapter_id] = error.message
                 self._errors[adapter_id] = error
                 self._logger.error(
                     "adapter_failed",
@@ -200,6 +209,7 @@ class AdapterRuntime:
                 )
             else:
                 self._states[adapter_id] = AdapterState.STOPPED
+                self._reasons[adapter_id] = None
                 self._errors[adapter_id] = None
             return self.info(adapter_id)
 
@@ -224,6 +234,46 @@ class AdapterRuntime:
         """
         await self.stop(adapter_id)
         return await self.start(adapter_id)
+
+    def _report_state(
+        self,
+        adapter_id: str,
+        state: AdapterState,
+        reason: str | None,
+    ) -> None:
+        current_state = self._states.get(adapter_id, AdapterState.STOPPED)
+        if current_state in {AdapterState.STOPPED, AdapterState.STOPPING}:
+            self._logger.warning(
+                "adapter_state_report_ignored",
+                extra={
+                    "adapter_id": adapter_id,
+                    "reported_state": state.value,
+                },
+            )
+            return
+        self._states[adapter_id] = state
+        self._reasons[adapter_id] = reason
+        if state == AdapterState.FAILED:
+            self._errors[adapter_id] = GatewayError(
+                GatewayErrorCode.TRANSPORT_ERROR,
+                reason or f"adapter failed: {adapter_id}",
+                retryable=True,
+            )
+            log_event = "adapter_failed"
+        elif state == AdapterState.DEGRADED:
+            self._errors[adapter_id] = None
+            log_event = "adapter_degraded"
+        else:
+            self._errors[adapter_id] = None
+            log_event = "adapter_recovered"
+        self._logger.info(
+            log_event,
+            extra={
+                "adapter_id": adapter_id,
+                "adapter_state": state.value,
+                "reason": reason,
+            },
+        )
 
     async def capabilities(
         self,

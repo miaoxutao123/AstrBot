@@ -85,3 +85,39 @@ async def test_stop_drains_queued_events() -> None:
 
     assert received == ["evt_1", "evt_2"]
     assert not bus.running
+
+
+@pytest.mark.asyncio
+async def test_publish_admitted_before_stop_is_drained() -> None:
+    bus = MemoryEventBus(maxsize=1)
+    release_first_event = asyncio.Event()
+    first_event_started = asyncio.Event()
+    received: list[str] = []
+
+    async def slow_first_subscriber(event: GatewayEvent) -> None:
+        received.append(event.id)
+        if event.id == "evt_1":
+            first_event_started.set()
+            await release_first_event.wait()
+
+    bus.subscribe(slow_first_subscriber)
+    await bus.start()
+    await bus.publish(make_event(1))
+    await first_event_started.wait()
+    await bus.publish(make_event(2))
+
+    # This publish passes admission and blocks on the full queue while holding the
+    # barrier. stop() must wait for it rather than placing _STOP ahead of the event.
+    admitted_publish = asyncio.create_task(bus.publish(make_event(3)))
+    await asyncio.sleep(0)
+    assert not admitted_publish.done()
+    concurrent_stop = asyncio.create_task(bus.stop())
+    await asyncio.sleep(0)
+    assert not concurrent_stop.done()
+
+    release_first_event.set()
+    await admitted_publish
+    await concurrent_stop
+
+    assert received == ["evt_1", "evt_2", "evt_3"]
+    assert not bus.running

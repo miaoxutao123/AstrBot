@@ -78,7 +78,9 @@ def factory(instance_id: str, config: Mapping[str, Any]) -> TransportAdapter:
 
 Installed adapters are discovered only through the standard
 `agent_gateway.adapters` entry-point group. Core contains no platform import switch
-and permits no arbitrary hook registration.
+and permits no arbitrary hook registration. Discovery is isolated per entry point:
+the result records `loaded`, `failed`, and safe `errors`, so a broken third-party
+package cannot prevent later adapters from being discovered.
 
 ### Runtime
 
@@ -96,12 +98,26 @@ instance. `start_all` and `stop_all` run concurrently. A command is dispatched o
 when the target adapter is running or degraded and declares the exact capability.
 Adapter exceptions become `TRANSPORT_ERROR` results rather than leaking tracebacks.
 
+`TransportAdapter.start(context)` is initialization, not a run-forever coroutine.
+It creates background receive/reconnect tasks, establishes enough transport state
+to accept work, and then returns. `stop()` cancels and awaits those tasks before it
+returns. Background tasks report disconnect, recovery, and terminal failure through
+the minimal `context.report_state(RUNNING|DEGRADED|FAILED, reason)` contract. Runtime
+owns the transitional `STARTING`, `STOPPING`, and `STOPPED` states. Commands remain
+available while degraded, allowing adapters to model temporary reconnect periods;
+failed adapters reject commands as offline.
+
 ### Memory event bus
 
 `MemoryEventBus` uses a bounded `asyncio.Queue`. Publication awaits free capacity,
 which supplies backpressure. One subscriber exception is logged and does not block
 other subscribers. Shutdown rejects new events, drains queued work, sends a private
 sentinel, and awaits the dispatcher task.
+
+Event admission and shutdown use a lock barrier. A publisher holds admission until
+its queue insertion completes; shutdown closes admission only after all previously
+admitted publishers have enqueued. Therefore the stop sentinel cannot overtake an
+accepted event, including when publication was blocked by a full queue.
 
 Phase 1 provides at-most-once in-memory delivery. Durability and disconnected-client
 replay are explicitly deferred.

@@ -8,10 +8,13 @@
 - Stable error model and required error codes.
 - Minimal `TransportAdapter`, `AdapterContext`, and versioned descriptor contract.
 - Adapter factory/instance registry with standard Python entry-point discovery.
+- Failure-isolated discovery results, so one broken third-party entry point does
+  not prevent healthy adapters from loading.
 - Per-adapter runtime states, concurrent lifecycle management, startup/shutdown
-  failure isolation, capability enforcement, and safe command results.
+  failure isolation, runtime health reporting, capability enforcement, and safe
+  command results.
 - Bounded in-memory event bus with awaited backpressure, subscriber exception
-  isolation, logging context, and graceful draining.
+  isolation, atomic shutdown admission, logging context, and graceful draining.
 - Transport-metadata router and ordered top-level lifecycle.
 - Fake IM, temperature sensor, and robot adapters.
 - Phase 0 extraction audit, architecture, protocol, and provenance documents.
@@ -73,17 +76,23 @@ database, API server, document, or media package is installed by the project.
 
 ## Verification
 
-- Tests: 20 passed.
+- Tests: 23 passed.
 - Ruff: clean.
 - Mypy strict mode and Pyright basic mode: clean across the source/test tree.
 - Forbidden import scan: no AstrBot, AI SDK, MCP, HTTP API framework, or platform
   SDK imports in `gateway/gateway`.
 
 Covered behavior includes model validation, unknown payload pass-through, registry
-creation and duplicate rejection, bounded-queue backpressure, subscriber exception
-isolation, graceful drain, transport-only routing, adapter contract conformance,
-source spoofing rejection, sensor event delivery, robot command execution, offline
-and unsupported-command errors, and one-adapter startup failure isolation.
+creation, duplicate rejection, isolated discovery failure, bounded-queue
+backpressure, concurrent publish/stop admission, subscriber exception isolation,
+graceful drain, transport-only routing, adapter contract conformance, source
+spoofing rejection, sensor event delivery, robot command execution, degraded/recover
+health reporting, offline and unsupported-command errors, and one-adapter startup
+failure isolation.
+
+Gateway has an independent `.github/workflows/gateway-ci.yml` quality gate for
+Python 3.10 and 3.13. It runs pytest, Ruff formatting and linting, Mypy, and Pyright
+when Gateway files or the workflow change.
 
 ## AstrBot adapter migration risks
 

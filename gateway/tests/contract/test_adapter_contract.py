@@ -33,6 +33,7 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
         emit=emit,
         logger=logging.getLogger("test.adapter"),
         get_secret=lambda key: {"TOKEN": "secret"}.get(key),
+        report_state=lambda _state, _reason: None,
     )
     assert adapter.descriptor.api_version == GATEWAY_API_VERSION
     assert adapter.descriptor.id
@@ -76,6 +77,7 @@ async def test_adapter_context_rejects_spoofed_source() -> None:
         emit=emit,
         logger=logging.getLogger("test.adapter"),
         get_secret=lambda _key: None,
+        report_state=lambda _state, _reason: None,
     )
     spoofed = GatewayEvent(
         source=EndpointRef("sensor", "other-adapter", "temperature/1"),

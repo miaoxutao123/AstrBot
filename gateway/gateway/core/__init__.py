@@ -8,6 +8,7 @@ from .adapter import (
 )
 from .errors import GatewayError, GatewayErrorCode, GatewayException
 from .event_bus import MemoryEventBus
+from .health import AdapterState
 from .lifecycle import GatewayLifecycle
 from .models import (
     Capability,
@@ -17,14 +18,15 @@ from .models import (
     GatewayEvent,
     Payload,
 )
-from .registry import AdapterRegistry
+from .registry import AdapterDiscoveryResult, AdapterRegistry
 from .router import RouteMatch, Router
-from .runtime import AdapterRuntime, AdapterRuntimeInfo, AdapterState
+from .runtime import AdapterRuntime, AdapterRuntimeInfo
 
 __all__ = [
     "GATEWAY_API_VERSION",
     "AdapterContext",
     "AdapterDescriptor",
+    "AdapterDiscoveryResult",
     "AdapterRegistry",
     "AdapterRuntime",
     "AdapterRuntimeInfo",

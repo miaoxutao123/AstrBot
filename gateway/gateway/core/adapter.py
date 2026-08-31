@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from .health import AdapterState
 from .models import (
     Capability,
     CommandResult,
@@ -16,6 +17,7 @@ from .models import (
 GATEWAY_API_VERSION = 1
 EventEmitter = Callable[[GatewayEvent], Awaitable[None]]
 SecretProvider = Callable[[str], str | None]
+StateReporter = Callable[[AdapterState, str | None], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,7 @@ class AdapterContext:
         emit: Runtime callback used to publish events.
         logger: Logger scoped to the adapter instance.
         get_secret: Secret resolver controlled by the Gateway host.
+        report_state: Runtime callback for connection health transitions.
     """
 
     def __init__(
@@ -75,11 +78,13 @@ class AdapterContext:
         emit: EventEmitter,
         logger: logging.Logger,
         get_secret: SecretProvider,
+        report_state: StateReporter,
     ) -> None:
         self.adapter_id = adapter_id
         self._emit = emit
         self._logger = logger
         self._get_secret = get_secret
+        self._report_state = report_state
 
     async def emit(self, event: GatewayEvent) -> None:
         """Publish an event produced by this adapter instance.
@@ -120,6 +125,36 @@ class AdapterContext:
             raise ValueError("secret key must not be empty")
         return self._get_secret(key)
 
+    def report_state(
+        self,
+        state: AdapterState,
+        reason: str | None = None,
+    ) -> None:
+        """Report connection health after adapter startup.
+
+        Adapters use this for runtime transitions such as disconnect, reconnect,
+        or terminal authentication failure. Lifecycle-owned transitional states
+        cannot be reported by an adapter.
+
+        Args:
+            state: New health state: running, degraded, or failed.
+            reason: Required diagnostic reason for degraded and failed states.
+
+        Raises:
+            ValueError: If the state is lifecycle-owned or lacks a required reason.
+        """
+        if state not in {
+            AdapterState.RUNNING,
+            AdapterState.DEGRADED,
+            AdapterState.FAILED,
+        }:
+            raise ValueError(f"adapter cannot report lifecycle state: {state.value}")
+        if state in {AdapterState.DEGRADED, AdapterState.FAILED} and (
+            reason is None or not reason.strip()
+        ):
+            raise ValueError(f"{state.value} state requires a reason")
+        self._report_state(state, reason)
+
 
 class TransportAdapter(ABC):
     """Primary and intentionally narrow Gateway extension interface."""
@@ -136,7 +171,11 @@ class TransportAdapter(ABC):
 
     @abstractmethod
     async def start(self, context: AdapterContext) -> None:
-        """Start receiving and sending through the transport.
+        """Initialize transport resources and return when ready.
+
+        This method must create any long-running receive/reconnect tasks and then
+        return. It must not await a run-forever loop. After return, Runtime marks
+        the adapter running unless it reported degraded or failed during startup.
 
         Args:
             context: Minimal host services available to the adapter.
@@ -145,7 +184,7 @@ class TransportAdapter(ABC):
 
     @abstractmethod
     async def stop(self) -> None:
-        """Stop the adapter and release transport resources."""
+        """Cancel background tasks and return after resources are released."""
         raise NotImplementedError
 
     @abstractmethod

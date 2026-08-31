@@ -164,3 +164,26 @@ async def test_adapter_execution_failure_is_contained() -> None:
     assert broken_result.error is not None
     assert broken_result.error.code.value == "TRANSPORT_ERROR"
     assert healthy_result.status == "success"
+
+
+@pytest.mark.asyncio
+async def test_adapter_reports_degraded_and_recovers() -> None:
+    bus = MemoryEventBus()
+    registry = AdapterRegistry()
+    robot = FakeRobotAdapter()
+    registry.register(robot.instance_id, robot)
+    runtime = AdapterRuntime(registry, bus)
+    lifecycle = GatewayLifecycle(bus, runtime)
+    await lifecycle.start()
+    assert robot.context is not None
+
+    robot.context.report_state(AdapterState.DEGRADED, "websocket disconnected")
+    degraded = runtime.info(robot.instance_id)
+    robot.context.report_state(AdapterState.RUNNING)
+    recovered = runtime.info(robot.instance_id)
+    await lifecycle.stop()
+
+    assert degraded.state == AdapterState.DEGRADED
+    assert degraded.reason == "websocket disconnected"
+    assert recovered.state == AdapterState.RUNNING
+    assert recovered.reason is None
