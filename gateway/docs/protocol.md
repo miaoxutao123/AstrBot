@@ -1,8 +1,7 @@
 # Gateway Protocol v1 Draft
 
-This document defines the Phase 1 data contract. It is transport-neutral and will
-be used by the Phase 2 HTTP and WebSocket encodings. All examples are JSON-shaped;
-Phase 1 itself does not implement network serialization.
+This document defines the transport-neutral v1 data contract and its Phase 2 HTTP
+and WebSocket encoding.
 
 ## Endpoint
 
@@ -119,6 +118,7 @@ Stable error codes are:
 ADAPTER_NOT_FOUND
 ADAPTER_OFFLINE
 ENDPOINT_NOT_FOUND
+EVENT_NOT_FOUND
 CAPABILITY_NOT_SUPPORTED
 INVALID_COMMAND
 AUTH_FAILED
@@ -178,9 +178,53 @@ Commands created in response to an event should normally copy the event ID into
 Structured logs must carry the available event ID or command ID together with
 correlation ID, adapter ID, and endpoint ID.
 
-## Phase 2 reservations
+## HTTP API
 
-WebSocket envelopes will use the shape `{ "type": "event", "data": {...} }`.
-The event subscription protocol will reserve `cursor` and `last_event_id` even
-though Phase 2 MVP will not promise durable replay. These fields are not implemented
-in Phase 1.
+`GET /v1/health` is intentionally unauthenticated and contains no configuration or
+secrets. All other REST routes require either `Authorization: Bearer <key>` or
+`X-API-Key: <key>`.
+
+| Route | Required scope |
+| --- | --- |
+| `GET /v1/adapters`, `GET /v1/adapters/{id}` | `adapters:read` |
+| `POST /v1/adapters/{id}/start`, `/stop`, `/restart` | `adapters:manage` |
+| `GET /v1/endpoints`, `GET /v1/endpoints/{id}/capabilities` | `adapters:read` |
+| `POST /v1/commands` | `commands:send` |
+| `GET /v1/events/{id}` | `events:read` |
+
+Commands targeting robot or hardware transports additionally require
+`hardware:control`. A wildcard `*` grants all current scopes. Endpoint resource IDs
+are opaque strings returned by the endpoints API and must not be parsed by clients.
+
+HTTP errors use one stable envelope:
+
+```json
+{
+  "error": {
+    "code": "INVALID_COMMAND",
+    "message": "request validation failed",
+    "retryable": false,
+    "details": {}
+  }
+}
+```
+
+## WebSocket event API
+
+Connect to `GET /v1/events/ws` with an API key having `events:read`. Optional query
+filters are `transport`, `adapter_id`, and `event_type`; omitted fields and `*`
+match all events. Event messages use:
+
+```json
+{"type": "event", "data": {"id": "evt_01", "source": {}, "type": "im.message", "payload": {}}}
+```
+
+When idle, the server sends a heartbeat containing a timestamp and the most recent
+cursor. A reconnecting client may pass `last_event_id` (or the compatibility alias
+`cursor`) to replay matching events still present in process memory. This is a
+best-effort bounded replay, not durable delivery. The server emits a `gap` envelope
+when the cursor is absent or replay is truncated. A client whose bounded delivery
+queue overflows receives a retryable `DELIVERY_FAILED` error and close code 1013.
+
+Authentication failures close the WebSocket with 4401; insufficient scope uses
+4403. Every connection subscription is removed on disconnect or server-side close.

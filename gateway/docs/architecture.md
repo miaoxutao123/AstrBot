@@ -7,8 +7,9 @@ adapter instances, distributes neutral events, validates commands against declar
 capabilities, and delegates execution back to the addressed adapter. It neither
 knows nor cares whether a consumer is an AI agent.
 
-Phase 1 intentionally contains no HTTP server, WebSocket server, storage backend,
-real platform SDK, MCP package, or agent behavior.
+The optional Gateway API translates HTTP/WebSocket traffic into the Core models.
+It contains authentication and wire concerns without making Core depend on
+FastAPI. Storage, real platform SDKs, MCP, and agent behavior are not present.
 
 ## Dependency direction
 
@@ -17,7 +18,9 @@ fake/real adapter ──implements──> TransportAdapter
         │                              │
         └── emits GatewayEvent ──> AdapterContext ──> MemoryEventBus
 
-external API (Phase 2) ──> AdapterRuntime ──> GatewayCommand ──> adapter
+HTTP command ──> Gateway API ──> AdapterRuntime ──> GatewayCommand ──> adapter
+
+MemoryEventBus ──> EventStream ──> filtered WebSocket clients
 
 Router ──subscribes to──> MemoryEventBus
 ```
@@ -26,7 +29,7 @@ Allowed imports:
 
 ```text
 adapter package -> gateway.core
-future API       -> gateway.core
+gateway.api      -> gateway.core
 future MCP       -> Gateway HTTP API/SDK
 ```
 
@@ -119,20 +122,39 @@ its queue insertion completes; shutdown closes admission only after all previous
 admitted publishers have enqueued. Therefore the stop sentinel cannot overtake an
 accepted event, including when publication was blocked by a full queue.
 
-Phase 1 provides at-most-once in-memory delivery. Durability and disconnected-client
-replay are explicitly deferred.
+Core provides at-most-once in-memory delivery. The API adds best-effort replay from
+its bounded process-local history; durable delivery and replay across restarts are
+explicitly deferred.
 
 ### Router
 
 `Router` matches only `transport`, `adapter_id`, and `event_type`, each optionally a
 wildcard. It never inspects payload text or invokes intelligence. Destinations are
-async callables that will later include WebSocket and webhook delivery services.
+async callables for configured transport delivery. The Phase 2 WebSocket event
+stream subscribes directly to the bus because every client applies its own filter.
 
 ### Lifecycle
 
 `GatewayLifecycle` starts the event bus before adapters and stops adapters before
 draining the bus. This ordering prevents adapters from emitting into a stopped bus
 and preserves already accepted events during graceful shutdown.
+
+### HTTP and WebSocket API
+
+`create_app` binds a configured runtime and event bus to a FastAPI application.
+Its ASGI lifespan subscribes the API event stream before adapter startup, then
+stops adapters, drains the bus, and removes the subscription during shutdown.
+
+The API layer owns explicit Core-to-wire serialization, request validation,
+API-key scopes, stable HTTP errors, and adapter lifecycle endpoints. Unexpected
+exceptions are logged server-side and become a generic `INTERNAL_ERROR`; Python
+tracebacks and exception messages never enter the response.
+
+`EventStream` is a bounded, in-memory delivery view. It deduplicates retained
+events by stable ID, records endpoints observed in events, keeps a small replay
+window, and creates a bounded queue per WebSocket client. A slow client is closed
+explicitly instead of allowing unbounded memory growth. Filters use only transport,
+adapter ID, and event type.
 
 ## Non-IM proof
 
@@ -145,10 +167,11 @@ Phase 1 includes three contract-equivalent fake adapters:
 The sensor-to-event-bus and command-to-robot flow uses no chat fields and requires
 no Core conditionals. This is the primary Phase 1 abstraction acceptance test.
 
-## Security boundary in Phase 1
+## Security boundary
 
-Capability describes what an endpoint can do; it is not authorization. Phase 1
-does not expose a network API and therefore does not yet implement API keys or
-scopes. `AdapterContext` restricts host access, validates source adapter identity,
-and avoids passing configuration/runtime/database objects into adapters. Phase 2
-must add caller scopes before commands become remotely accessible.
+Capability describes what an endpoint can do; it is not authorization.
+`AdapterContext` restricts host access, validates source adapter identity, and
+avoids passing configuration/runtime/database objects into adapters. The network
+boundary authenticates API keys and separately checks `events:read`,
+`commands:send`, `adapters:read`, `adapters:manage`, and `hardware:control`.
+Robot and hardware transports require both command and hardware scopes.
