@@ -190,6 +190,12 @@ reconnect loop and action/echo correlation; reverse mode preserves the compatibl
 aiocqhttp server lifecycle. Both convert directly between OneBot protocol data and
 Gateway contracts.
 
+Telegram uses the same entry-point boundary and imports `python-telegram-bot` only
+inside its client. Polling and health probes report disconnect/recovery through the
+shared runtime state contract. Telegram-specific chat and topic fields remain in
+adapter-owned endpoint IDs while the standard IM profile preserves private, group,
+channel, and thread conversation types.
+
 ## Non-IM proof
 
 Phase 1 includes three contract-equivalent fake adapters:

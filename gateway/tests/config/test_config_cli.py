@@ -70,6 +70,28 @@ def test_config_check_discovers_onebot_without_connecting(tmp_path: Path) -> Non
     assert result.configured_instances == ("qq-main",)
 
 
+def test_config_check_discovers_telegram_without_polling(tmp_path: Path) -> None:
+    telegram = (
+        CONFIG.replace("id: qq-main", "id: telegram-main")
+        .replace(
+            "type: onebot\n    config:\n      mode: websocket\n      endpoint: ws://127.0.0.1:3001",
+            "type: telegram\n    config:",
+        )
+        .replace("ONEBOT_TOKEN", "TELEGRAM_TOKEN")
+    )
+    config = load_config(write_config(tmp_path, telegram))
+
+    result = check_config(
+        config,
+        EnvironmentSecretResolver(
+            {"TELEGRAM_TOKEN": "123:token", "GATEWAY_API_KEY": "api-key"}
+        ),
+    )
+
+    assert "telegram" in result.adapter_types
+    assert result.configured_instances == ("telegram-main",)
+
+
 def test_config_rejects_duplicates_plaintext_and_missing_secrets(
     tmp_path: Path,
 ) -> None:

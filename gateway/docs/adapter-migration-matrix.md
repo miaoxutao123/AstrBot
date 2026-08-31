@@ -6,7 +6,7 @@ not a real platform smoke pass.
 | Adapter | Phase | Status | Automated coverage | Real smoke |
 | --- | ---: | --- | --- | --- |
 | OneBot v11 | 3 | `INTEGRATION_PASS` | Unit, contract, loopback WebSocket, mocked action, API integration | `REAL_SMOKE_PENDING` |
-| Telegram | 4 | `NOT_STARTED` | None | Not run |
+| Telegram | 4 | `INTEGRATION_PASS` | Unit, contract, mocked SDK lifecycle, API integration | `REAL_SMOKE_PENDING` |
 | Weixin | 5 | `NOT_STARTED` | None | Not run |
 | Satori | 6 | `NOT_STARTED` | None | Not run |
 | Discord | 8 | `NOT_STARTED` | None | Not run |

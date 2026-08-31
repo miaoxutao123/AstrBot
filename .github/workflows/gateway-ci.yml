@@ -106,3 +106,20 @@ jobs:
       - run: python -m pip install --upgrade uv
       - run: uv sync --extra onebot
       - run: uv run pytest -q tests/adapters/onebot
+
+  telegram:
+    name: Telegram / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync --extra telegram
+      - run: uv run pytest -q tests/adapters/telegram

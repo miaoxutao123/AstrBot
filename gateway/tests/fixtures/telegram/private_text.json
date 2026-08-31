@@ -1,0 +1,11 @@
+{
+  "update_id": 1001,
+  "message": {
+    "message_id": 51,
+    "date": 1788160000,
+    "chat": {"id": 12345, "type": "private", "first_name": "Alice"},
+    "from": {"id": 12345, "first_name": "Alice", "username": "alice"},
+    "text": "Hi 😀 @alice",
+    "entities": [{"type": "mention", "offset": 6, "length": 6}]
+  }
+}

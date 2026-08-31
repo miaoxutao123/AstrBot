@@ -177,6 +177,12 @@ and may include `reply_to`; the destination remains the command's opaque
 an opaque `media_id` from the media service together with safe metadata such as
 MIME type, filename, and size.
 
+Rich IM operations use small versioned payloads: `im.message.edit.v1` contains a
+message ID and replacement segments; `im.message.delete.v1` contains a message ID;
+`im.reaction.v1` contains a message ID, optional emoji, and optional `big` flag;
+and `im.typing.v1` contains an activity name. Adapters advertise only the
+operations they implement.
+
 ## Correlation and logging
 
 Commands created in response to an event should normally copy the event ID into

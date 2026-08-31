@@ -49,3 +49,9 @@ def test_onebot_does_not_import_astrbot_agent_runtime() -> None:
     modules = imported_modules(PACKAGE / "adapters" / "onebot")
 
     assert not any(name == "astrbot" or name.startswith("astrbot.") for name in modules)
+
+
+def test_telegram_does_not_import_astrbot_agent_runtime() -> None:
+    modules = imported_modules(PACKAGE / "adapters" / "telegram")
+
+    assert not any(name == "astrbot" or name.startswith("astrbot.") for name in modules)

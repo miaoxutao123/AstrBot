@@ -2,6 +2,7 @@
 
 import pytest
 
+from gateway.core import Payload
 from gateway.media import MediaMetadata
 from gateway.profiles.im import (
     IM_CONVERSATION_TYPES,
@@ -9,9 +10,13 @@ from gateway.profiles.im import (
     IM_OUTBOUND_SCHEMA,
     IMConversation,
     IMMessage,
+    IMMessageDelete,
+    IMMessageEdit,
     IMOutboundMessage,
+    IMReaction,
     IMSegment,
     IMSender,
+    IMTyping,
 )
 
 
@@ -57,3 +62,27 @@ def test_unknown_standard_segment_is_rejected_but_raw_is_lossless() -> None:
     raw = IMSegment.raw("onebot", "face", {"id": "1", "large": True})
 
     assert raw.to_dict()["data"]["data"] == {"id": "1", "large": True}
+
+
+def test_rich_im_operation_payloads_are_validated() -> None:
+    edit = IMMessageEdit.from_payload(
+        Payload(
+            "im.message.edit.v1",
+            {
+                "message_id": "10",
+                "segments": [{"type": "text", "data": {"text": "updated"}}],
+            },
+        )
+    )
+    deletion = IMMessageDelete.from_payload(
+        Payload("im.message.delete.v1", {"message_id": "10"})
+    )
+    reaction = IMReaction.from_payload(
+        Payload("im.reaction.v1", {"message_id": "10", "emoji": "👍"})
+    )
+    typing = IMTyping.from_payload(Payload("im.typing.v1", {}))
+
+    assert edit.segments == (IMSegment.text("updated"),)
+    assert deletion.message_id == "10"
+    assert reaction.emoji == "👍"
+    assert typing.action == "typing"

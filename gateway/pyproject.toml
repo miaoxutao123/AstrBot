@@ -1,6 +1,6 @@
 [project]
 name = "astrbot-gateway"
-version = "0.3.0"
+version = "0.4.0"
 description = "A lightweight extensible I/O and transport gateway for external agents"
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
@@ -19,11 +19,15 @@ onebot = [
   "aiocqhttp>=1.4.4,<2",
   "aiohttp>=3.10.0,<4",
 ]
+telegram = [
+  "python-telegram-bot>=22.6,<23",
+]
 all = [
   "aiocqhttp>=1.4.4,<2",
   "aiohttp>=3.10.0,<4",
   "fastapi>=0.124.0,<1",
   "python-multipart>=0.0.20",
+  "python-telegram-bot>=22.6,<23",
   "uvicorn[standard]>=0.30.0",
 ]
 
@@ -32,6 +36,7 @@ astrbot-gateway = "gateway.cli:main"
 
 [project.entry-points."astrbot_gateway.adapters"]
 onebot = "gateway.adapters.onebot:OneBotAdapter"
+telegram = "gateway.adapters.telegram:TelegramAdapter"
 
 [dependency-groups]
 dev = [
@@ -40,6 +45,7 @@ dev = [
   "fastapi>=0.124.0,<1",
   "httpx2>=2.12.0",
   "python-multipart>=0.0.20",
+  "python-telegram-bot>=22.6,<23",
   "PyYAML>=6.0.2,<7",
   "mypy>=1.18.0",
   "pyright>=1.1.400",

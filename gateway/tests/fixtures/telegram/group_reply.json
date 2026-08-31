@@ -1,0 +1,13 @@
+{
+  "update_id": 1002,
+  "message": {
+    "message_id": 52,
+    "date": 1788160001,
+    "chat": {"id": -100123, "type": "supergroup", "title": "Gateway"},
+    "message_thread_id": 9,
+    "is_topic_message": true,
+    "from": {"id": 222, "first_name": "Bob"},
+    "reply_to_message": {"message_id": 49},
+    "text": "reply"
+  }
+}

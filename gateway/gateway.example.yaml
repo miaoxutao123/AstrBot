@@ -21,6 +21,14 @@ adapters:
       endpoint: ws://127.0.0.1:3001
       token:
         env: ONEBOT_TOKEN
+  - id: telegram-main
+    type: telegram
+    enabled: false
+    config:
+      token:
+        env: TELEGRAM_BOT_TOKEN
+      polling_timeout: 30
+      reconnect_max_delay: 30
 
 api:
   keys:
