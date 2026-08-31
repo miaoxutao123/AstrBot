@@ -1,0 +1,10 @@
+Agent Transport Gateway
+Copyright (C) 2026 AstrBot contributors and Gateway contributors
+
+This project is developed in the AstrBot repository and is distributed under the
+GNU Affero General Public License v3.0 or later. The repository root LICENSE file
+contains the full license text.
+
+Phase 1 contains newly written core code. No real platform adapter source has been
+copied. Future derived adapter files must record their AstrBot source and upstream
+revision in docs/upstream-map.md and in the file header where appropriate.
