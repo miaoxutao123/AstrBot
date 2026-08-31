@@ -1,0 +1,11 @@
+{
+  "time": 1788148800,
+  "self_id": 10000,
+  "post_type": "message",
+  "message_type": "private",
+  "sub_type": "friend",
+  "message_id": 101,
+  "user_id": 20001,
+  "sender": {"user_id": 20001, "nickname": "Alice"},
+  "message": [{"type": "text", "data": {"text": "hello"}}]
+}

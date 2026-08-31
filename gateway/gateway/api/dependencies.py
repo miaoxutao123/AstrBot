@@ -7,6 +7,7 @@ from typing import cast
 from fastapi import Request
 
 from gateway.core import AdapterRuntime, GatewayLifecycle, MemoryEventBus
+from gateway.media import MediaStore
 
 from .auth import ApiKeyStore, ApiPrincipal
 from .event_stream import EventStream
@@ -22,6 +23,7 @@ class ApiServices:
         lifecycle: Ordered Core lifecycle.
         api_keys: API key authenticator.
         events: In-memory event and endpoint catalog.
+        media: Opaque media store shared with adapter contexts.
         heartbeat_interval: WebSocket heartbeat interval in seconds.
     """
 
@@ -30,6 +32,7 @@ class ApiServices:
     lifecycle: GatewayLifecycle
     api_keys: ApiKeyStore
     events: EventStream
+    media: MediaStore
     heartbeat_interval: float
 
 

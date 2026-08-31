@@ -1,0 +1,1 @@
+"""Adapter state store tests."""

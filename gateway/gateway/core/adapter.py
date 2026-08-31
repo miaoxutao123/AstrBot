@@ -5,6 +5,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from gateway.media import MediaStore
+from gateway.state import AdapterStateStore
+
 from .health import AdapterState
 from .models import (
     Capability,
@@ -62,7 +65,7 @@ class AdapterDescriptor:
 
 
 class AdapterContext:
-    """Expose only event emission, logging, and secrets to an adapter.
+    """Expose narrow host services to one adapter instance.
 
     Args:
         adapter_id: Configured adapter instance identifier.
@@ -70,6 +73,8 @@ class AdapterContext:
         logger: Logger scoped to the adapter instance.
         get_secret: Secret resolver controlled by the Gateway host.
         report_state: Runtime callback for connection health transitions.
+        state: State store restricted to this adapter's namespace.
+        media: Generic media store shared through opaque media identifiers.
     """
 
     def __init__(
@@ -79,12 +84,16 @@ class AdapterContext:
         logger: logging.Logger,
         get_secret: SecretProvider,
         report_state: StateReporter,
+        state: AdapterStateStore,
+        media: MediaStore,
     ) -> None:
         self.adapter_id = adapter_id
         self._emit = emit
         self._logger = logger
         self._get_secret = get_secret
         self._report_state = report_state
+        self.state = state
+        self.media = media
 
     async def emit(self, event: GatewayEvent) -> None:
         """Publish an event produced by this adapter instance.

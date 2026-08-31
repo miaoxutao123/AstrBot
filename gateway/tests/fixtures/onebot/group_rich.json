@@ -1,0 +1,20 @@
+{
+  "time": 1788148801,
+  "self_id": 10000,
+  "post_type": "message",
+  "message_type": "group",
+  "sub_type": "normal",
+  "message_id": 102,
+  "group_id": 30001,
+  "user_id": 20002,
+  "sender": {"user_id": 20002, "nickname": "Bob", "card": "Builder"},
+  "message": [
+    {"type": "reply", "data": {"id": "99"}},
+    {"type": "at", "data": {"qq": "10000"}},
+    {"type": "at", "data": {"qq": "all"}},
+    {"type": "text", "data": {"text": " status"}},
+    {"type": "image", "data": {"url": "https://example.test/photo.jpg", "file": "photo.jpg"}},
+    {"type": "file", "data": {"file_id": "file-1", "file_name": "report.txt"}},
+    {"type": "mface", "data": {"emoji_id": "123"}}
+  ]
+}

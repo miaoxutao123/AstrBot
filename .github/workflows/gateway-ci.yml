@@ -11,46 +11,98 @@ on:
       - '.github/workflows/gateway-ci.yml'
   workflow_dispatch:
 
+defaults:
+  run:
+    working-directory: gateway
+
 jobs:
-  gateway-quality:
-    name: Python ${{ matrix.python-version }}
+  quality:
+    name: Quality / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.10', '3.13']
-
-    defaults:
-      run:
-        working-directory: gateway
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pyright -p pyproject.toml
 
-      - name: Install uv
-        run: python -m pip install --upgrade uv
+  core:
+    name: Core / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync
+      - run: >-
+          uv run pytest -q
+          tests/core tests/profiles tests/media tests/state tests/config
+          tests/fake_adapters tests/architecture
 
-      - name: Install Gateway development dependencies
-        run: uv sync
+  api:
+    name: API / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync
+      - run: uv run pytest -q tests/api
 
-      - name: Run tests
-        run: uv run pytest -q
+  adapter-contract:
+    name: Adapter contract / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync
+      - run: uv run pytest -q tests/contract
 
-      - name: Check formatting
-        run: uv run ruff format --check .
-
-      - name: Run Ruff
-        run: uv run ruff check .
-
-      - name: Run Mypy
-        run: uv run mypy
-
-      - name: Run Pyright
-        run: uv run pyright -p pyproject.toml
+  onebot:
+    name: OneBot / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync --extra onebot
+      - run: uv run pytest -q tests/adapters/onebot

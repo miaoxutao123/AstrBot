@@ -53,7 +53,7 @@ class AdapterRegistry:
 
     def discover(
         self,
-        group: str = "agent_gateway.adapters",
+        group: str = "astrbot_gateway.adapters",
     ) -> AdapterDiscoveryResult:
         """Discover adapter factories through standard Python entry points.
 

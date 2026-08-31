@@ -165,11 +165,17 @@ does not grant authorization; Phase 2 caller scopes will be evaluated separately
 Segment type vocabulary for v1:
 
 ```text
-text image audio video file mention mention_all reply location forward json raw
+text image audio video file mention mention_all reply location forward card json raw
 ```
 
 An adapter should use `raw` only when a platform value cannot be represented by a
 standard segment. Unknown platform data must not be silently dropped.
+
+Outbound IM commands use `im.message.outbound.v1`. Their data includes `segments`
+and may include `reply_to`; the destination remains the command's opaque
+`endpoint_id`. Media segments never expose a host filesystem path. They reference
+an opaque `media_id` from the media service together with safe metadata such as
+MIME type, filename, and size.
 
 ## Correlation and logging
 
@@ -191,6 +197,9 @@ secrets. All other REST routes require either `Authorization: Bearer <key>` or
 | `GET /v1/endpoints`, `GET /v1/endpoints/{id}/capabilities` | `adapters:read` |
 | `POST /v1/commands` | `commands:send` |
 | `GET /v1/events/{id}` | `events:read` |
+| `POST /v1/media` | `media:write` |
+| `GET /v1/media/{id}` | `media:read` |
+| `DELETE /v1/media/{id}` | `media:write` |
 
 Commands targeting robot or hardware transports additionally require
 `hardware:control`. A wildcard `*` grants all current scopes. Endpoint resource IDs
@@ -208,6 +217,10 @@ HTTP errors use one stable envelope:
   }
 }
 ```
+
+Media failures use stable `MEDIA_NOT_FOUND` or `MEDIA_INVALID` error codes. Uploads
+are bounded by the configured maximum size, filenames are treated as display
+metadata rather than paths, and expired objects may be removed by store cleanup.
 
 ## WebSocket event API
 

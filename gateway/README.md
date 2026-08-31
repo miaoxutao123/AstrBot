@@ -1,17 +1,20 @@
-# Agent Transport Gateway
+# AstrBot-Gateway
 
-Agent Transport Gateway is an independent, lightweight I/O and transport gateway
+> AstrBot-Gateway is an independent derivative of AstrBot focused on transport
+> and messaging gateway functionality. It is not an official AstrBot distribution.
+
+AstrBot-Gateway is an independent, lightweight I/O and transport gateway
 extracted from lessons learned in AstrBot's platform layer. It converts transport
 input into neutral events and routes neutral commands back to adapters. It does not
 contain an agent runner, model provider, prompt system, memory, or transport SDK.
 
-The base installation contains the dependency-free Python Core. Phase 2 adds an
-optional FastAPI HTTP/WebSocket boundary; storage and real platform adapters remain
-deferred.
+The base installation contains the transport-neutral Python Core, YAML host
+configuration, CLI, media boundary, and adapter state persistence. FastAPI and
+OneBot SDK dependencies remain optional extras.
 
 ```bash
 cd gateway
-python -m pip install -e ".[api]"
+python -m pip install -e ".[all]"
 python -m pytest
 ruff check .
 mypy
@@ -36,5 +39,26 @@ app = create_app(
 Run that module with an ASGI server such as `uvicorn host:app`. The application
 lifespan starts the event bus and adapters before accepting work and stops them in
 the reverse order.
+
+For a standalone process, copy `gateway.example.yaml`, set the referenced secret
+environment variables, and run:
+
+```bash
+astrbot-gateway check -c gateway.yaml
+astrbot-gateway adapters -c gateway.yaml
+astrbot-gateway run -c gateway.yaml
+```
+
+Installation groups are intentionally separated:
+
+```bash
+pip install astrbot-gateway
+pip install "astrbot-gateway[api]"
+pip install "astrbot-gateway[onebot]"
+```
+
+OneBot supports forward WebSocket client mode and an aiocqhttp-compatible reverse
+WebSocket server mode. See `docs/adapters/onebot.md` for configuration and the
+tested feature matrix.
 
 See `docs/architecture.md` and `docs/protocol.md` for the current contracts.

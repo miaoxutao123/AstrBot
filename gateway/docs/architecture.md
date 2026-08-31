@@ -9,7 +9,8 @@ knows nor cares whether a consumer is an AI agent.
 
 The optional Gateway API translates HTTP/WebSocket traffic into the Core models.
 It contains authentication and wire concerns without making Core depend on
-FastAPI. Storage, real platform SDKs, MCP, and agent behavior are not present.
+FastAPI. Generic media/state backends are host services; real platform SDKs, MCP,
+and agent behavior are not part of Core.
 
 ## Dependency direction
 
@@ -62,8 +63,10 @@ must exactly match a declared capability name; unsupported commands fail explici
 ### Adapter contract
 
 `TransportAdapter` has five operations: descriptor, start, stop, execute, and
-capabilities. `AdapterContext` exposes only event emission, a scoped logger, and
-secret lookup. It rejects events that claim another configured adapter ID.
+capabilities. `AdapterContext` exposes event emission, a scoped logger, secret
+lookup, an adapter-namespaced state view, generic media storage, and health
+reporting. It rejects events that claim another configured adapter ID and never
+exposes the runtime, configuration manager, or a database connection.
 
 `AdapterDescriptor.id` identifies an installed adapter type such as `telegram`.
 `EndpointRef.adapter_id` identifies a configured instance such as `telegram-main`.
@@ -80,7 +83,7 @@ def factory(instance_id: str, config: Mapping[str, Any]) -> TransportAdapter:
 ```
 
 Installed adapters are discovered only through the standard
-`agent_gateway.adapters` entry-point group. Core contains no platform import switch
+`astrbot_gateway.adapters` entry-point group. Core contains no platform import switch
 and permits no arbitrary hook registration. Discovery is isolated per entry point:
 the result records `loaded`, `failed`, and safe `errors`, so a broken third-party
 package cannot prevent later adapters from being discovered.
@@ -156,6 +159,37 @@ window, and creates a bounded queue per WebSocket client. A slow client is close
 explicitly instead of allowing unbounded memory growth. Filters use only transport,
 adapter ID, and event type.
 
+### Profiles, media, and adapter state
+
+`gateway.profiles.im` is an optional layer above Core. It defines
+`im.message.v1`, `im.message.outbound.v1`, conversation/sender models, the standard
+segment vocabulary, and operation-level IM capabilities. Core imports neither this
+profile nor any OneBot module.
+
+Media bytes cross the network and adapter boundaries only through opaque
+`media_id` metadata. `MemoryMediaStore` and `FileMediaStore` enforce upload size,
+MIME syntax, safe filenames, random IDs, TTL, and deletion. The file store keeps a
+persistent metadata index but never returns a local absolute path through the API.
+
+`AdapterStateStore` persists only JSON-compatible adapter state. Runtime creates a
+`NamespacedStateStore` for each configured instance, so an adapter sees local keys
+while the host writes `adapter/<adapter_id>/...`. The first backends are memory and
+SQLite; neither contains conversations, prompts, agent memory, or provider data.
+
+### Standalone host
+
+The YAML loader validates duplicate IDs, server/media/state bounds, adapter-owned
+configuration, and environment-only secret references. `astrbot-gateway check`
+discovers and instantiates adapter factories to validate Adapter API compatibility
+without starting a platform connection. The `run` command composes storage,
+registry, runtime, API keys, FastAPI, and Uvicorn.
+
+OneBot is loaded through the `astrbot_gateway.adapters` entry-point group. Its
+optional SDK imports stay inside the adapter client. Forward WebSocket mode owns a
+reconnect loop and action/echo correlation; reverse mode preserves the compatible
+aiocqhttp server lifecycle. Both convert directly between OneBot protocol data and
+Gateway contracts.
+
 ## Non-IM proof
 
 Phase 1 includes three contract-equivalent fake adapters:
@@ -174,4 +208,5 @@ Capability describes what an endpoint can do; it is not authorization.
 avoids passing configuration/runtime/database objects into adapters. The network
 boundary authenticates API keys and separately checks `events:read`,
 `commands:send`, `adapters:read`, `adapters:manage`, and `hardware:control`.
-Robot and hardware transports require both command and hardware scopes.
+Media routes additionally require `media:read` or `media:write`. Robot and hardware
+transports require both command and hardware scopes.

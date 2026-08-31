@@ -1,0 +1,36 @@
+server:
+  host: 127.0.0.1
+  port: 6186
+
+state:
+  type: sqlite
+  path: data/gateway-state.db
+
+media:
+  type: file
+  path: data/media
+  max_upload_size: 20971520
+  ttl_seconds: 3600
+
+adapters:
+  - id: qq-main
+    type: onebot
+    enabled: true
+    config:
+      mode: websocket
+      endpoint: ws://127.0.0.1:3001
+      token:
+        env: ONEBOT_TOKEN
+
+api:
+  keys:
+    - id: local-agent
+      secret:
+        env: GATEWAY_API_KEY
+      scopes:
+        - events:read
+        - commands:send
+        - adapters:read
+        - adapters:manage
+        - media:read
+        - media:write

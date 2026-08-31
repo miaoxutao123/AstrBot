@@ -17,8 +17,9 @@ from gateway.core import (
     GatewayLifecycle,
     MemoryEventBus,
 )
+from gateway.media import MediaStoreError
 
-from . import adapters, commands, endpoints, events, health, websocket
+from . import adapters, commands, endpoints, events, health, media, websocket
 from .auth import ApiKey, ApiKeyStore
 from .dependencies import ApiServices
 from .errors import GatewayApiError
@@ -67,6 +68,7 @@ def create_app(
         lifecycle=gateway_lifecycle,
         api_keys=ApiKeyStore(api_keys),
         events=event_stream,
+        media=runtime.media_store,
         heartbeat_interval=heartbeat_interval,
     )
 
@@ -74,6 +76,7 @@ def create_app(
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         subscription_token = event_bus.subscribe(event_stream.ingest)
         try:
+            await services.media.cleanup()
             if manage_lifecycle:
                 await gateway_lifecycle.start()
             elif not event_bus.running:
@@ -85,9 +88,10 @@ def create_app(
             if manage_lifecycle:
                 await gateway_lifecycle.stop()
             event_bus.unsubscribe(subscription_token)
+            await services.media.cleanup()
 
     app = FastAPI(
-        title="Agent Transport Gateway",
+        title="AstrBot-Gateway",
         version=__version__,
         lifespan=lifespan,
     )
@@ -136,6 +140,22 @@ def create_app(
             content={"error": error_to_dict(error)},
         )
 
+    @app.exception_handler(MediaStoreError)
+    async def handle_media_error(
+        _request: Request,
+        exc: MediaStoreError,
+    ) -> JSONResponse:
+        error = GatewayError(
+            GatewayErrorCode.MEDIA_NOT_FOUND
+            if exc.not_found
+            else GatewayErrorCode.MEDIA_INVALID,
+            str(exc),
+        )
+        return JSONResponse(
+            status_code=404 if exc.not_found else 400,
+            content={"error": error_to_dict(error)},
+        )
+
     @app.exception_handler(Exception)
     async def handle_unexpected_error(
         request: Request,
@@ -161,5 +181,6 @@ def create_app(
     app.include_router(endpoints.router)
     app.include_router(commands.router)
     app.include_router(events.router)
+    app.include_router(media.router)
     app.include_router(websocket.router)
     return app

@@ -37,7 +37,7 @@ class FakeEntryPoints(list[FakeEntryPoint]):
         Returns:
             This fake collection.
         """
-        assert group == "agent_gateway.adapters"
+        assert group == "astrbot_gateway.adapters"
         return self
 
 

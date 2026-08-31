@@ -8,9 +8,8 @@
 - Baseline date: 2026-08-31
 - License: AGPL-3.0-or-later
 
-Phase 1 Core and fake adapters are newly written and do not copy a real AstrBot
-adapter. The following table records audit sources and planned migration ownership.
-It must be updated file-by-file when real adapter migration begins.
+Phase 1 Core and fake adapters are newly written. Phase 3 selectively rewrites the
+OneBot transport behavior and records every derived package below.
 
 | Gateway component | AstrBot source | Status | Local changes / plan |
 |---|---|---|---|
@@ -21,7 +20,11 @@ It must be updated file-by-file when real adapter migration begins.
 | Fake IM | None | Test-only new code | Exercises `im.message.v1`. |
 | Fake Sensor | None | Test-only new code | Exercises `sensor.temperature.v1`. |
 | Fake Robot | None | Test-only new code | Exercises `robot.pose.v1` and robot commands. |
-| OneBot adapter | `astrbot/core/platform/sources/aiocqhttp/` | Not migrated | Planned Phase 3 selective port of protocol, parsing, send, media, reply, and reconnect. |
+| `gateway/adapters/onebot/adapter.py` | `astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py` | Rewritten, 2026-08-31 | Replaced `Platform`, global registration, AstrBot events, and queue with `TransportAdapter`, entry point, Core events, state/media context, and isolated runtime health. Provenance header present. |
+| `gateway/adapters/onebot/client.py` | `astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py` | Selective rewrite, 2026-08-31 | Retains reverse WebSocket lifecycle/action behavior and guarded private-client shutdown; adds forward WebSocket action/echo and bounded reconnect. No AstrBot imports. Provenance header present. |
+| `gateway/adapters/onebot/inbound.py` | `astrbot/core/platform/sources/aiocqhttp/aiocqhttp_platform_adapter.py` | Rewritten, 2026-08-31 | Converts OneBot payloads directly to `im.message.v1`; unknown segments become `raw`; media becomes opaque `media_id`. Provenance header present. |
+| `gateway/adapters/onebot/outbound.py` | `astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py` | Rewritten, 2026-08-31 | Converts standard outbound IM segments to OneBot actions; removes `MessageChain`, streaming, local path exposure, and agent behavior. Provenance header present. |
+| `gateway/adapters/onebot/config.py`, `capabilities.py`, `errors.py` | aiocqhttp package behavior and audited AstrBot adapter | New code, 2026-08-31 | Adapter-owned config, standard IM capability vocabulary, and isolated errors. |
 | Telegram adapter | `astrbot/core/platform/sources/telegram/` | Not migrated | Planned Phase 4 selective port; Star command and agent streaming logic excluded. |
 | Weixin adapter | `astrbot/core/platform/sources/weixin_oc/` | Not migrated | Planned Phase 5 selective port of client, login, state, media, polling, and send behavior. |
 

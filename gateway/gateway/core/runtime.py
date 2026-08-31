@@ -6,6 +6,13 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from gateway.media import MediaStore, MemoryMediaStore
+from gateway.state import (
+    AdapterStateStore,
+    MemoryStateStore,
+    NamespacedStateStore,
+)
+
 from .adapter import AdapterContext
 from .errors import GatewayError, GatewayErrorCode, GatewayException
 from .event_bus import MemoryEventBus
@@ -47,6 +54,8 @@ class AdapterRuntime:
         logger: Optional runtime logger.
         secret_provider: Host-controlled secret resolver. Environment lookup is
             used by default.
+        state_store: Host-owned adapter persistence backend.
+        media_store: Host-owned opaque media backend.
     """
 
     def __init__(
@@ -55,15 +64,37 @@ class AdapterRuntime:
         event_bus: MemoryEventBus,
         logger: logging.Logger | None = None,
         secret_provider: Callable[[str], str | None] | None = None,
+        state_store: AdapterStateStore | None = None,
+        media_store: MediaStore | None = None,
     ) -> None:
         self._registry = registry
         self._event_bus = event_bus
         self._logger = logger or logging.getLogger("gateway.runtime")
         self._secret_provider = secret_provider or os.getenv
+        self._state_store = state_store or MemoryStateStore()
+        self._media_store = media_store or MemoryMediaStore()
         self._states: dict[str, AdapterState] = {}
         self._reasons: dict[str, str | None] = {}
         self._errors: dict[str, GatewayError | None] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+
+    @property
+    def media_store(self) -> MediaStore:
+        """Return the media store shared with adapter contexts.
+
+        Returns:
+            Host-owned media store.
+        """
+        return self._media_store
+
+    @property
+    def state_store(self) -> AdapterStateStore:
+        """Return the underlying host adapter state store.
+
+        Returns:
+            Host-owned state store. Adapters receive only namespaced views.
+        """
+        return self._state_store
 
     def info(self, adapter_id: str) -> AdapterRuntimeInfo:
         """Return current state for a configured adapter.
@@ -127,6 +158,8 @@ class AdapterRuntime:
                     state,
                     reason,
                 ),
+                state=NamespacedStateStore(self._state_store, adapter_id),
+                media=self._media_store,
             )
             try:
                 await adapter.start(context)
