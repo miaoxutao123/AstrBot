@@ -14,6 +14,7 @@ from gateway.state import (
 )
 
 from .adapter import AdapterContext
+from .auth import AdapterAuthInfo
 from .errors import GatewayError, GatewayErrorCode, GatewayException
 from .event_bus import MemoryEventBus
 from .health import AdapterState
@@ -335,6 +336,18 @@ class AdapterRuntime:
                 )
             )
         return await adapter.capabilities(endpoint)
+
+    async def auth_info(self, adapter_id: str) -> AdapterAuthInfo:
+        """Return one adapter's generic interactive authentication state."""
+        return await self._registry.get(adapter_id).auth_info()
+
+    async def start_auth(self, adapter_id: str) -> AdapterAuthInfo:
+        """Start one adapter's generic interactive authentication flow."""
+        return await self._registry.get(adapter_id).start_auth()
+
+    async def cancel_auth(self, adapter_id: str) -> AdapterAuthInfo:
+        """Cancel one adapter's generic interactive authentication flow."""
+        return await self._registry.get(adapter_id).cancel_auth()
 
     async def execute(self, command: GatewayCommand) -> CommandResult:
         """Validate and dispatch a command to its target adapter.

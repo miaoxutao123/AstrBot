@@ -337,3 +337,21 @@ def test_hardware_command_requires_hardware_scope() -> None:
     assert forbidden.status_code == 403
     assert allowed.status_code == 200
     assert allowed.json()["status"] == "success"
+
+
+def test_generic_auth_routes_report_not_required() -> None:
+    app, _adapter = build_im_app()
+
+    with TestClient(app) as client:
+        current = client.get("/v1/adapters/im-main/auth", headers=READ_HEADERS)
+        started = client.post("/v1/adapters/im-main/auth/start", headers=ADMIN_HEADERS)
+        cancelled = client.post(
+            "/v1/adapters/im-main/auth/cancel", headers=ADMIN_HEADERS
+        )
+
+    assert current.status_code == 200
+    assert started.status_code == 200
+    assert cancelled.status_code == 200
+    assert current.json() == {"status": "not_required"}
+    assert started.json() == {"status": "not_required"}
+    assert cancelled.json() == {"status": "not_required"}

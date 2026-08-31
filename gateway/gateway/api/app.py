@@ -19,7 +19,16 @@ from gateway.core import (
 )
 from gateway.media import MediaStoreError
 
-from . import adapters, commands, endpoints, events, health, media, websocket
+from . import (
+    adapter_auth,
+    adapters,
+    commands,
+    endpoints,
+    events,
+    health,
+    media,
+    websocket,
+)
 from .auth import ApiKey, ApiKeyStore
 from .dependencies import ApiServices
 from .errors import GatewayApiError
@@ -178,6 +187,7 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(adapters.router)
+    app.include_router(adapter_auth.router)
     app.include_router(endpoints.router)
     app.include_router(commands.router)
     app.include_router(events.router)

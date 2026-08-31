@@ -1,0 +1,1 @@
+"""Weixin adapter tests."""

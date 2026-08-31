@@ -29,7 +29,8 @@ OneBot transport behavior and records every derived package below.
 | `gateway/adapters/telegram/inbound.py` | `astrbot/core/platform/sources/telegram/tg_adapter.py` | Rewritten, 2026-08-31 | Direct Bot API update to standard IM conversion for private/group/channel/thread, reply, entities, and media. No AstrBot message types. Provenance header present. |
 | `gateway/adapters/telegram/outbound.py` | `astrbot/core/platform/sources/telegram/tg_event.py` | Rewritten, 2026-08-31 | Standard send/reply/edit/delete/reaction/typing operations and 4096-character splitting. MessageChain, Markdown rewriting, metrics, and Agent streaming removed. Provenance header present. |
 | `gateway/adapters/telegram/config.py`, `capabilities.py`, `errors.py` | Telegram Bot API and audited AstrBot adapter | New code, 2026-08-31 | Environment-only token config, rich standard IM capability declarations, and safe error categories. |
-| Weixin adapter | `astrbot/core/platform/sources/weixin_oc/` | Not migrated | Planned Phase 5 selective port of client, login, state, media, polling, and send behavior. |
+| `gateway/adapters/weixin/adapter.py`, `client.py` | `astrbot/core/platform/sources/weixin_oc/weixin_oc_adapter.py`, `weixin_oc_client.py`, `login_registration.py` | Selective rewrite, 2026-08-31 | Generic auth integration, injected namespaced state, opaque media, polling/reconnect and standard IM operations. Removed AstrBot config/data paths, MessageChain, platform events, plugins, prompts, and Agent runtime. Provenance header present. |
+| `gateway/adapters/weixin/config.py`, `capabilities.py`, `errors.py` | Weixin OC protocol and audited AstrBot adapter | New code, 2026-08-31 | Adapter-owned URLs/timing, standard IM capabilities, and safe error categories. |
 
 ## Required migration record
 

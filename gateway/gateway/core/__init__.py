@@ -6,6 +6,7 @@ from .adapter import (
     AdapterDescriptor,
     TransportAdapter,
 )
+from .auth import AdapterAuthInfo, AdapterAuthStatus, AuthChallenge
 from .errors import GatewayError, GatewayErrorCode, GatewayException
 from .event_bus import MemoryEventBus
 from .health import AdapterState
@@ -25,12 +26,15 @@ from .runtime import AdapterRuntime, AdapterRuntimeInfo
 __all__ = [
     "GATEWAY_API_VERSION",
     "AdapterContext",
+    "AdapterAuthInfo",
+    "AdapterAuthStatus",
     "AdapterDescriptor",
     "AdapterDiscoveryResult",
     "AdapterRegistry",
     "AdapterRuntime",
     "AdapterRuntimeInfo",
     "AdapterState",
+    "AuthChallenge",
     "Capability",
     "CommandResult",
     "EndpointRef",

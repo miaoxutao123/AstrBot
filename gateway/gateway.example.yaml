@@ -29,6 +29,15 @@ adapters:
         env: TELEGRAM_BOT_TOKEN
       polling_timeout: 30
       reconnect_max_delay: 30
+  - id: weixin-main
+    type: weixin
+    enabled: false
+    config:
+      base_url: https://ilinkai.weixin.qq.com
+      cdn_base_url: https://novac2c.cdn.weixin.qq.com/c2c
+      qr_poll_interval: 1
+      long_poll_timeout: 35
+      reconnect_max_delay: 30
 
 api:
   keys:

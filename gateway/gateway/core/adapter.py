@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from gateway.media import MediaStore
 from gateway.state import AdapterStateStore
 
+from .auth import AdapterAuthInfo, AdapterAuthStatus
 from .health import AdapterState
 from .models import (
     Capability,
@@ -222,3 +223,15 @@ class TransportAdapter(ABC):
             Capabilities supported at the requested scope.
         """
         raise NotImplementedError
+
+    async def auth_info(self) -> AdapterAuthInfo:
+        """Return interactive authentication state, if required."""
+        return AdapterAuthInfo(AdapterAuthStatus.NOT_REQUIRED)
+
+    async def start_auth(self) -> AdapterAuthInfo:
+        """Start an interactive authentication challenge."""
+        return AdapterAuthInfo(AdapterAuthStatus.NOT_REQUIRED)
+
+    async def cancel_auth(self) -> AdapterAuthInfo:
+        """Cancel an active interactive authentication challenge."""
+        return AdapterAuthInfo(AdapterAuthStatus.NOT_REQUIRED)

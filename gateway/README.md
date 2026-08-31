@@ -56,6 +56,7 @@ pip install astrbot-gateway
 pip install "astrbot-gateway[api]"
 pip install "astrbot-gateway[onebot]"
 pip install "astrbot-gateway[telegram]"
+pip install "astrbot-gateway[weixin]"
 ```
 
 OneBot supports forward WebSocket client mode and an aiocqhttp-compatible reverse
@@ -65,5 +66,10 @@ tested feature matrix.
 Telegram supports Bot API polling, private/group/channel/thread conversations,
 albums, standard media, edit, delete, reaction, and typing operations. See
 `docs/adapters/telegram.md` for its feature matrix and real-smoke status.
+
+Weixin OC supports generic QR authentication, persistent login/cursor state,
+private messages, encrypted CDN media, inbound reply recognition, typing, and
+bounded reconnect. See
+`docs/adapters/weixin.md` for setup and the protected real-smoke sequence.
 
 See `docs/architecture.md` and `docs/protocol.md` for the current contracts.

@@ -200,6 +200,8 @@ secrets. All other REST routes require either `Authorization: Bearer <key>` or
 | --- | --- |
 | `GET /v1/adapters`, `GET /v1/adapters/{id}` | `adapters:read` |
 | `POST /v1/adapters/{id}/start`, `/stop`, `/restart` | `adapters:manage` |
+| `GET /v1/adapters/{id}/auth` | `adapters:read` |
+| `POST /v1/adapters/{id}/auth/start`, `/auth/cancel` | `adapters:manage` |
 | `GET /v1/endpoints`, `GET /v1/endpoints/{id}/capabilities` | `adapters:read` |
 | `POST /v1/commands` | `commands:send` |
 | `GET /v1/events/{id}` | `events:read` |
@@ -247,3 +249,11 @@ queue overflows receives a retryable `DELIVERY_FAILED` error and close code 1013
 
 Authentication failures close the WebSocket with 4401; insufficient scope uses
 4403. Every connection subscription is removed on disconnect or server-side close.
+
+## Interactive adapter authentication
+
+Adapters that require user interaction expose the generic statuses `not_required`,
+`logged_out`, `waiting_user`, `authenticated`, `expired`, and `failed`. A challenge
+may contain `qr_uri`, opaque Gateway `media_id`, `verification_code`, and
+instructions. Core and API do not interpret these fields or define platform-specific
+login endpoints. Ordinary adapters return `not_required` from the default contract.
