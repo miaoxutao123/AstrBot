@@ -62,3 +62,9 @@ def test_weixin_does_not_import_astrbot_agent_runtime() -> None:
     modules = imported_modules(PACKAGE / "adapters" / "weixin")
 
     assert not any(name == "astrbot" or name.startswith("astrbot.") for name in modules)
+
+
+def test_satori_does_not_import_astrbot_agent_runtime() -> None:
+    modules = imported_modules(PACKAGE / "adapters" / "satori")
+
+    assert not any(name == "astrbot" or name.startswith("astrbot.") for name in modules)
