@@ -92,6 +92,10 @@ class AiohttpSatoriClient:
             except Exception as exc:
                 if self._stopping:
                     return
+                if self._is_authentication_rejection(exc):
+                    exc = SatoriAuthenticationError(
+                        "Satori WebSocket authentication was rejected"
+                    )
                 report_state(AdapterState.DEGRADED, "Satori disconnected; reconnecting")
                 try:
                     await asyncio.wait_for(asyncio.sleep(delay), timeout=delay + 0.1)
@@ -103,6 +107,11 @@ class AiohttpSatoriClient:
                     return
             else:
                 delay = 1.0
+
+    @staticmethod
+    def _is_authentication_rejection(exc: BaseException) -> bool:
+        response = getattr(exc, "response", None)
+        return getattr(response, "status_code", None) in {401, 403}
 
     async def _heartbeat(self, socket: Any) -> None:
         while not self._stopping:

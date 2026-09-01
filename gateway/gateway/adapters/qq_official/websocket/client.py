@@ -21,7 +21,7 @@ from .config import QQOfficialWebSocketConfig
 
 DispatchHandler = Callable[[str, Mapping[str, Any]], Awaitable[None]]
 StateHandler = Callable[[AdapterState, str | None], None]
-CredentialHandler = Callable[[str, float], Awaitable[None]]
+CredentialHandler = Callable[[str | None, float], Awaitable[None]]
 SessionHandler = Callable[[str | None, int | None, str | None], Awaitable[None]]
 
 
@@ -132,6 +132,12 @@ class TencentGatewayClient:
         if self._credential is not None:
             await self._credential(token, self.expires_at)
 
+    async def _invalidate_token(self) -> None:
+        self.access_token = None
+        self.expires_at = 0
+        if self._credential is not None:
+            await self._credential(None, 0)
+
     async def _gateway_url(self) -> str:
         value = await self.request("GET", "/gateway/bot")
         url = value.get("url")
@@ -159,6 +165,10 @@ class TencentGatewayClient:
             except QQOfficialAuthenticationError as exc:
                 report_state(AdapterState.FAILED, str(exc))
                 return
+            except QQOfficialTimeoutError as exc:
+                if self._stopping:
+                    return
+                report_state(AdapterState.DEGRADED, str(exc))
             except Exception:
                 if self._stopping:
                     return
@@ -176,84 +186,111 @@ class TencentGatewayClient:
     ) -> bool:
         acknowledged = [True]
         heartbeat: asyncio.Task[None] | None = None
-        async for raw in socket:
-            envelope = json.loads(raw)
-            if not isinstance(envelope, Mapping):
-                continue
-            op = envelope.get("op")
-            if isinstance(envelope.get("s"), int):
-                self.sequence = envelope["s"]
-            if op == 10:
-                data = envelope.get("d")
-                interval_ms = (
-                    data.get("heartbeat_interval")
-                    if isinstance(data, Mapping)
-                    else None
-                )
-                if not isinstance(interval_ms, int | float) or interval_ms <= 0:
-                    raise QQOfficialRequestError("QQ Official HELLO is invalid")
-                if self.session_id and self.sequence is not None:
-                    payload = {
-                        "op": 6,
-                        "d": {
-                            "token": f"QQBot {self.access_token}",
-                            "session_id": self.session_id,
-                            "seq": self.sequence,
-                        },
-                    }
-                else:
-                    payload = {
-                        "op": 2,
-                        "d": {
-                            "token": f"QQBot {self.access_token}",
-                            "intents": self.config.intents,
-                            "shard": [0, 1],
-                            "properties": {
-                                "$os": "gateway",
-                                "$browser": "astrbot-gateway",
-                                "$device": "astrbot-gateway",
+        heartbeat_errors: list[Exception] = []
+        try:
+            async for raw in socket:
+                envelope = json.loads(raw)
+                if not isinstance(envelope, Mapping):
+                    continue
+                op = envelope.get("op")
+                if isinstance(envelope.get("s"), int):
+                    self.sequence = envelope["s"]
+                if op == 10:
+                    data = envelope.get("d")
+                    interval_ms = (
+                        data.get("heartbeat_interval")
+                        if isinstance(data, Mapping)
+                        else None
+                    )
+                    if not isinstance(interval_ms, int | float) or interval_ms <= 0:
+                        raise QQOfficialRequestError("QQ Official HELLO is invalid")
+                    if self.session_id and self.sequence is not None:
+                        payload = {
+                            "op": 6,
+                            "d": {
+                                "token": f"QQBot {self.access_token}",
+                                "session_id": self.session_id,
+                                "seq": self.sequence,
                             },
-                        },
-                    }
-                await socket.send(json.dumps(payload))
-                heartbeat = asyncio.create_task(
-                    self._heartbeat(socket, float(interval_ms) / 1000, acknowledged)
-                )
-            elif op == 11:
-                acknowledged[0] = True
-            elif op == 7:
-                if heartbeat:
+                        }
+                    else:
+                        payload = {
+                            "op": 2,
+                            "d": {
+                                "token": f"QQBot {self.access_token}",
+                                "intents": self.config.intents,
+                                "shard": [0, 1],
+                                "properties": {
+                                    "$os": "gateway",
+                                    "$browser": "astrbot-gateway",
+                                    "$device": "astrbot-gateway",
+                                },
+                            },
+                        }
+                    await socket.send(json.dumps(payload))
+                    heartbeat = asyncio.create_task(
+                        self._supervise_heartbeat(
+                            socket,
+                            float(interval_ms) / 1000,
+                            acknowledged,
+                            heartbeat_errors,
+                        )
+                    )
+                elif op == 11:
+                    acknowledged[0] = True
+                elif op == 7:
+                    return True
+                elif op == 9:
+                    self.session_id = None
+                    self.sequence = None
+                    self.resume_url = None
+                    if self._session_handler:
+                        await self._session_handler(None, None, None)
+                    return True
+                elif op == 0:
+                    event_type = envelope.get("t")
+                    data = envelope.get("d")
+                    if event_type == "READY" and isinstance(data, Mapping):
+                        self.session_id = str(data.get("session_id") or "") or None
+                        self.resume_url = (
+                            str(data.get("resume_gateway_url") or "") or None
+                        )
+                        if self._session_handler:
+                            await self._session_handler(
+                                self.session_id, self.sequence, self.resume_url
+                            )
+                        report_state(AdapterState.RUNNING, None)
+                    elif event_type == "RESUMED":
+                        report_state(AdapterState.RUNNING, None)
+                    elif isinstance(event_type, str) and isinstance(data, Mapping):
+                        if self._session_handler:
+                            await self._session_handler(
+                                self.session_id, self.sequence, self.resume_url
+                            )
+                        await dispatch(event_type, cast(Mapping[str, Any], data))
+        finally:
+            if heartbeat is not None:
+                if not heartbeat.done():
                     heartbeat.cancel()
-                return True
-            elif op == 9:
-                self.session_id = None
-                self.sequence = None
-                self.resume_url = None
-                if self._session_handler:
-                    await self._session_handler(None, None, None)
-                return True
-            elif op == 0:
-                event_type = envelope.get("t")
-                data = envelope.get("d")
-                if event_type == "READY" and isinstance(data, Mapping):
-                    self.session_id = str(data.get("session_id") or "") or None
-                    self.resume_url = str(data.get("resume_gateway_url") or "") or None
-                    if self._session_handler:
-                        await self._session_handler(
-                            self.session_id, self.sequence, self.resume_url
-                        )
-                    report_state(AdapterState.RUNNING, None)
-                elif event_type == "RESUMED":
-                    report_state(AdapterState.RUNNING, None)
-                elif isinstance(event_type, str) and isinstance(data, Mapping):
-                    if self._session_handler:
-                        await self._session_handler(
-                            self.session_id, self.sequence, self.resume_url
-                        )
-                    await dispatch(event_type, cast(Mapping[str, Any], data))
-        if heartbeat:
-            heartbeat.cancel()
+                await asyncio.gather(heartbeat, return_exceptions=True)
+        if heartbeat_errors:
+            raise heartbeat_errors[0]
         return True
+
+    async def _supervise_heartbeat(
+        self,
+        socket: Any,
+        interval: float,
+        acknowledged: list[bool],
+        errors: list[Exception],
+    ) -> None:
+        try:
+            await self._heartbeat(socket, interval, acknowledged)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            errors.append(exc)
+            await socket.close()
 
     async def _heartbeat(
         self, socket: Any, interval: float, acknowledged: list[bool]
@@ -282,6 +319,16 @@ class TencentGatewayClient:
     async def request(
         self, method: str, path: str, data: Mapping[str, Any] | None = None
     ) -> Mapping[str, Any]:
+        return await self._request(method, path, data, allow_token_refresh=True)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        data: Mapping[str, Any] | None,
+        *,
+        allow_token_refresh: bool,
+    ) -> Mapping[str, Any]:
         await self._ensure_token()
         if self._session is None:
             raise QQOfficialNetworkError("QQ Official client is not started")
@@ -303,9 +350,14 @@ class TencentGatewayClient:
                         float(retry_header) if retry_header else None,
                     )
                 if response.status in {401, 403}:
-                    self.access_token = None
+                    await self._invalidate_token()
+                    if allow_token_refresh:
+                        await self._ensure_token()
+                        return await self._request(
+                            method, path, data, allow_token_refresh=False
+                        )
                     raise QQOfficialAuthenticationError(
-                        "QQ Official access token was rejected"
+                        "QQ Official access token was rejected after refresh"
                     )
                 value = await response.json(content_type=None)
                 if response.status >= 500:

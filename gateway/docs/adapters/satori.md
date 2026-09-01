@@ -25,3 +25,7 @@ Sequence is ordinary namespaced state. The configured token is a static host
 secret. Media enters Gateway through opaque `media_id` references; outbound media
 is encoded at the adapter boundary. `REAL_SMOKE_PENDING`; use
 `python scripts/smoke/satori.py` against an authorized server.
+
+WebSocket HTTP handshake responses 401/403 are treated as terminal
+authentication failure. Provider-specific authentication rejection after an
+established signaling connection remains part of real-environment smoke.

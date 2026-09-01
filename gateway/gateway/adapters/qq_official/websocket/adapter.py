@@ -129,8 +129,11 @@ class QQOfficialWebSocketAdapter(TransportAdapter):
         expiry = parsed.get("expires_at")
         return parsed["token"], float(expiry) if isinstance(expiry, int | float) else 0
 
-    async def _save_token(self, token: str, expires_at: float) -> None:
+    async def _save_token(self, token: str | None, expires_at: float) -> None:
         if self._context is not None:
+            if token is None:
+                await self._context.secrets.delete(TOKEN_KEY)
+                return
             await self._context.secrets.set(
                 TOKEN_KEY,
                 json.dumps(

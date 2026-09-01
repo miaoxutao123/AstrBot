@@ -106,6 +106,20 @@ evaluated after this report's commit is pushed.
 - Gateway queues and file/secret stores remain single-process facilities.
 - Five authorized real environments were not available during automated work.
 
+## Post-freeze implementation hardening
+
+- A cached QQ Official access token rejected with HTTP 401/403 is removed from
+  SecretStore, refreshed once from AppID/AppSecret, and the request is retried
+  once. A rejected refresh or second rejection becomes `AUTH_FAILED`.
+- QQ Official heartbeat failures are retrieved by the connection supervisor,
+  close the reader, and enter the explicit `DEGRADED` reconnect path without a
+  detached-task exception.
+- Satori WebSocket HTTP handshake rejection with 401/403 is classified as
+  authentication failure. Provider-specific rejection after an established
+  signaling connection remains a real-smoke validation item.
+- These changes affect adapter implementations only; the frozen Adapter API v1
+  surface and compatibility policy are unchanged.
+
 ## Dependency changes
 
 `aiohttp` and `websockets` are restricted to `satori`, `qq_official` and other

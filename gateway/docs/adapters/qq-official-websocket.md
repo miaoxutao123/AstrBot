@@ -13,6 +13,10 @@ access token and expiry use `AdapterSecretStore`. `session_id`, sequence and res
 URL are ordinary `AdapterStateStore` metadata. Neither token is written to SQLite
 state.
 
+If Tencent rejects a still-locally-valid cached token with HTTP 401/403, the
+adapter deletes it from SecretStore, refreshes it once from AppID/AppSecret, and
+retries the request once. It does not enter an unbounded authentication loop.
+
 | Feature | Receive | Send | Automated test |
 | --- | ---: | ---: | --- |
 | C2C | Yes | Text, reply, image | Integration |
@@ -23,7 +27,7 @@ state.
 | Unknown event/element | Raw platform event/segment | No | Integration |
 | File/audio/video upload | Attachment receive | Not implemented | Not claimed |
 | Reconnect / resume | Yes | N/A | Gateway protocol tests |
-| Heartbeat ACK timeout | Yes | N/A | Gateway protocol tests |
+| Heartbeat ACK timeout | Supervised reconnect | N/A | Gateway protocol tests |
 
 The package is divided into `common/` protocol models, inbound/outbound/media
 conversion and WebSocket-only lifecycle. A future QQ Official webhook adapter can

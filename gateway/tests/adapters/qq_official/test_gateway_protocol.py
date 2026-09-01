@@ -7,7 +7,10 @@ from typing import Any
 
 import pytest
 
-from gateway.adapters.qq_official.common.errors import QQOfficialTimeoutError
+from gateway.adapters.qq_official.common.errors import (
+    QQOfficialAuthenticationError,
+    QQOfficialTimeoutError,
+)
 from gateway.adapters.qq_official.websocket.client import TencentGatewayClient
 from gateway.adapters.qq_official.websocket.config import QQOfficialWebSocketConfig
 from gateway.core import AdapterState
@@ -32,6 +35,55 @@ class FakeSocket:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class BlockingFakeSocket(FakeSocket):
+    def __init__(self, messages: list[Mapping[str, Any]]) -> None:
+        super().__init__(messages)
+        self.closed_event = asyncio.Event()
+
+    async def __anext__(self) -> str:
+        if self.messages:
+            return self.messages.pop(0)
+        await self.closed_event.wait()
+        raise StopAsyncIteration
+
+    async def close(self) -> None:
+        await super().close()
+        self.closed_event.set()
+
+
+class FakeResponse:
+    def __init__(self, status: int, value: Mapping[str, Any]) -> None:
+        self.status = status
+        self.value = value
+        self.headers: dict[str, str] = {}
+
+    async def __aenter__(self) -> "FakeResponse":
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def json(self, *, content_type: object = None) -> Mapping[str, Any]:
+        return self.value
+
+
+class FakeSession:
+    def __init__(self, responses: list[FakeResponse]) -> None:
+        self.responses = responses
+        self.auth_calls = 0
+        self.request_tokens: list[str] = []
+
+    def post(self, _url: str, **_kwargs: object) -> FakeResponse:
+        self.auth_calls += 1
+        return self.responses.pop(0)
+
+    def request(
+        self, _method: str, _url: str, *, headers: Mapping[str, str], **_kwargs: object
+    ) -> FakeResponse:
+        self.request_tokens.append(headers["Authorization"])
+        return self.responses.pop(0)
 
 
 def config() -> QQOfficialWebSocketConfig:
@@ -130,3 +182,56 @@ async def test_heartbeat_timeout_closes_socket() -> None:
         await asyncio.wait_for(task, 0.1)
     assert socket.sent[0] == {"op": 1, "d": None}
     assert socket.closed
+
+
+async def test_connection_retrieves_heartbeat_timeout() -> None:
+    client = TencentGatewayClient(config(), "app", "secret", "token", 9999999999)
+    socket = BlockingFakeSocket([{"op": 10, "d": {"heartbeat_interval": 1}}])
+
+    async def ignore(_event_type: str, _data: Mapping[str, Any]) -> None:
+        return None
+
+    with pytest.raises(QQOfficialTimeoutError):
+        await client._connection(socket, ignore, lambda _state, _reason: None)
+
+
+async def test_revoked_cached_token_refreshes_once() -> None:
+    client = TencentGatewayClient(config(), "app", "secret", "revoked", 9999999999)
+    session = FakeSession(
+        [
+            FakeResponse(401, {}),
+            FakeResponse(200, {"access_token": "fresh", "expires_in": 7200}),
+            FakeResponse(200, {"url": "wss://gateway.invalid"}),
+        ]
+    )
+    credentials: list[tuple[str | None, float]] = []
+
+    async def credential(token: str | None, expires_at: float) -> None:
+        credentials.append((token, expires_at))
+
+    client._session = session
+    client._credential = credential
+    result = await client.request("GET", "/gateway/bot")
+
+    assert result["url"] == "wss://gateway.invalid"
+    assert session.auth_calls == 1
+    assert session.request_tokens == ["QQBot revoked", "QQBot fresh"]
+    assert credentials[0] == (None, 0)
+    assert credentials[1][0] == "fresh"
+
+
+async def test_refreshed_token_rejection_fails_without_looping() -> None:
+    client = TencentGatewayClient(config(), "app", "secret", "revoked", 9999999999)
+    session = FakeSession(
+        [
+            FakeResponse(401, {}),
+            FakeResponse(200, {"access_token": "fresh", "expires_in": 7200}),
+            FakeResponse(403, {}),
+        ]
+    )
+    client._session = session
+
+    with pytest.raises(QQOfficialAuthenticationError, match="after refresh"):
+        await client.request("GET", "/gateway/bot")
+    assert session.auth_calls == 1
+    assert session.request_tokens == ["QQBot revoked", "QQBot fresh"]
