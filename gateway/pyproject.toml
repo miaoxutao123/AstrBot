@@ -26,6 +26,10 @@ telegram = [
 weixin = [
   "aiohttp>=3.10.0,<4",
 ]
+satori = [
+  "aiohttp>=3.10.0,<4",
+  "websockets>=15.0,<16",
+]
 all = [
   "aiocqhttp>=1.4.4,<2",
   "aiohttp>=3.10.0,<4",
@@ -33,6 +37,7 @@ all = [
   "python-multipart>=0.0.20",
   "python-telegram-bot>=22.6,<23",
   "uvicorn[standard]>=0.30.0",
+  "websockets>=15.0,<16",
 ]
 
 [project.scripts]
@@ -42,6 +47,7 @@ astrbot-gateway = "gateway.cli:main"
 onebot = "gateway.adapters.onebot:OneBotAdapter"
 telegram = "gateway.adapters.telegram:TelegramAdapter"
 weixin = "gateway.adapters.weixin:WeixinAdapter"
+satori = "gateway.adapters.satori:SatoriAdapter"
 
 [dependency-groups]
 dev = [
@@ -59,6 +65,7 @@ dev = [
   "ruff==0.15.22",
   "types-PyYAML>=6.0.12.20250822",
   "uvicorn[standard]>=0.30.0",
+  "websockets>=15.0,<16",
 ]
 
 [build-system]
