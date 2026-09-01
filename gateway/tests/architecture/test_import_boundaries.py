@@ -68,3 +68,10 @@ def test_satori_does_not_import_astrbot_agent_runtime() -> None:
     modules = imported_modules(PACKAGE / "adapters" / "satori")
 
     assert not any(name == "astrbot" or name.startswith("astrbot.") for name in modules)
+
+
+def test_qq_official_is_independent_from_astrbot_and_onebot() -> None:
+    modules = imported_modules(PACKAGE / "adapters" / "qq_official")
+
+    assert not any(name == "astrbot" or name.startswith("astrbot.") for name in modules)
+    assert not any(name.startswith("gateway.adapters.onebot") for name in modules)
