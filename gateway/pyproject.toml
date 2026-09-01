@@ -1,6 +1,6 @@
 [project]
 name = "astrbot-gateway"
-version = "0.5.0"
+version = "0.5.1"
 description = "A lightweight extensible I/O and transport gateway for external agents"
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }

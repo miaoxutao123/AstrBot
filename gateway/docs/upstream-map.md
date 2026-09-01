@@ -29,8 +29,35 @@ OneBot transport behavior and records every derived package below.
 | `gateway/adapters/telegram/inbound.py` | `astrbot/core/platform/sources/telegram/tg_adapter.py` | Rewritten, 2026-08-31 | Direct Bot API update to standard IM conversion for private/group/channel/thread, reply, entities, and media. No AstrBot message types. Provenance header present. |
 | `gateway/adapters/telegram/outbound.py` | `astrbot/core/platform/sources/telegram/tg_event.py` | Rewritten, 2026-08-31 | Standard send/reply/edit/delete/reaction/typing operations and 4096-character splitting. MessageChain, Markdown rewriting, metrics, and Agent streaming removed. Provenance header present. |
 | `gateway/adapters/telegram/config.py`, `capabilities.py`, `errors.py` | Telegram Bot API and audited AstrBot adapter | New code, 2026-08-31 | Environment-only token config, rich standard IM capability declarations, and safe error categories. |
-| `gateway/adapters/weixin/adapter.py`, `client.py` | `astrbot/core/platform/sources/weixin_oc/weixin_oc_adapter.py`, `weixin_oc_client.py`, `login_registration.py` | Selective rewrite, 2026-08-31 | Generic auth integration, injected namespaced state, opaque media, polling/reconnect and standard IM operations. Removed AstrBot config/data paths, MessageChain, platform events, plugins, prompts, and Agent runtime. Provenance header present. |
+| `gateway/adapters/weixin/adapter.py`, `client.py`, `auth.py`, `session.py`, `inbound.py`, `outbound.py`, `media.py` | `astrbot/core/platform/sources/weixin_oc/weixin_oc_adapter.py`, `weixin_oc_client.py`, `login_registration.py`, `weixin_oc_event.py` | Selective rewrite, 2026-08-31; responsibility split 2026-09-01 | Generic auth integration, separate namespaced state/secrets, opaque media, polling/reconnect and standard IM operations. Removed AstrBot config/data paths, MessageChain, platform events, plugins, prompts, and Agent runtime. Provenance headers present. |
 | `gateway/adapters/weixin/config.py`, `capabilities.py`, `errors.py` | Weixin OC protocol and audited AstrBot adapter | New code, 2026-08-31 | Adapter-owned URLs/timing, standard IM capabilities, and safe error categories. |
+
+## Unmigrated inventory
+
+Every AstrBot Core message adapter still outside Gateway is listed here, even when
+its migration phase has not yet been scheduled. The baseline for every row is
+`AstrBot 4.27.4@0da69dd3f6b0e2a8e012ee3ce03cd4204e547e0d`.
+
+| Adapter | AstrBot source path | Planned phase | Status |
+| --- | --- | --- | --- |
+| Satori | `astrbot/core/platform/sources/satori/` | P6 | `NOT_STARTED` |
+| QQ Official WebSocket | `astrbot/core/platform/sources/qqofficial/` | Post-P6 | `NOT_STARTED` |
+| QQ Official Webhook | `astrbot/core/platform/sources/qqofficial_webhook/` | Post-P6 | `NOT_STARTED` |
+| Lark / Feishu | `astrbot/core/platform/sources/lark/` | Post-P6 | `NOT_STARTED` |
+| DingTalk | `astrbot/core/platform/sources/dingtalk/` | Post-P6 | `NOT_STARTED` |
+| WeCom Application | `astrbot/core/platform/sources/wecom/` | Post-P6 | `NOT_STARTED` |
+| WeCom AI Bot | `astrbot/core/platform/sources/wecom_ai_bot/` | Post-P6 | `NOT_STARTED` |
+| Weixin Official Account | `astrbot/core/platform/sources/weixin_official_account/` | Post-P6 | `NOT_STARTED` |
+| Discord | `astrbot/core/platform/sources/discord/` | Post-P6 | `NOT_STARTED` |
+| Slack | `astrbot/core/platform/sources/slack/` | Post-P6 | `NOT_STARTED` |
+| LINE | `astrbot/core/platform/sources/line/` | Post-P6 | `NOT_STARTED` |
+| KOOK | `astrbot/core/platform/sources/kook/` | Post-P6 | `NOT_STARTED` |
+| Mattermost | `astrbot/core/platform/sources/mattermost/` | Post-P6 | `NOT_STARTED` |
+| Misskey | `astrbot/core/platform/sources/misskey/` | Post-P6 | `NOT_STARTED` |
+| WebChat | `astrbot/core/platform/sources/webchat/` | Never | `DROP` — internal UI/agent-facing chat surface |
+
+Matrix and VoceChat are community-maintained plugins rather than Core packages;
+they remain `COMMUNITY / FUTURE_PORT` and are tracked in the migration matrix.
 
 ## Required migration record
 

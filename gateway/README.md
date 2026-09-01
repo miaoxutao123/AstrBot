@@ -8,6 +8,11 @@ extracted from lessons learned in AstrBot's platform layer. It converts transpor
 input into neutral events and routes neutral commands back to adapters. It does not
 contain an agent runner, model provider, prompt system, memory, or transport SDK.
 
+Phase 5.1 hardens the pre-v1 boundary with four-part endpoint identity, a separate
+encrypted dynamic-credential store, complete adapter migration inventory, and a
+pre-freeze contract review. Adapter API v1 remains **NOT FROZEN** until Satori has
+pressure-tested the contract.
+
 The base installation contains the transport-neutral Python Core, YAML host
 configuration, CLI, media boundary, and adapter state persistence. FastAPI and
 OneBot SDK dependencies remain optional extras.
@@ -72,9 +77,10 @@ Telegram supports Bot API polling, private/group/channel/thread conversations,
 albums, standard media, edit, delete, reaction, and typing operations. See
 `docs/adapters/telegram.md` for its feature matrix and real-smoke status.
 
-Weixin OC supports generic QR authentication, persistent login/cursor state,
+Weixin OC supports generic QR authentication, separated credential/cursor persistence,
 private messages, encrypted CDN media, inbound reply recognition, typing, and
 bounded reconnect. See
 `docs/adapters/weixin.md` for setup and the protected real-smoke sequence.
 
-See `docs/architecture.md` and `docs/protocol.md` for the current contracts.
+See `docs/architecture.md`, `docs/protocol.md`, and
+`docs/adapter-api-v1-review.md` for the current contracts and pre-freeze findings.

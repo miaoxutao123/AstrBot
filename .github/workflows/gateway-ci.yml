@@ -53,7 +53,7 @@ jobs:
       - run: uv sync
       - run: >-
           uv run pytest -q
-          tests/core tests/profiles tests/media tests/state tests/config
+          tests/core tests/profiles tests/media tests/state tests/secrets tests/config
           tests/fake_adapters tests/architecture
 
   api:

@@ -207,10 +207,10 @@ adapter-owned endpoint IDs while the standard IM profile preserves private, grou
 channel, and thread conversation types.
 
 Weixin OC uses the optional generic interactive-auth contract. QR details remain
-adapter-owned while Runtime only delegates start/cancel/status. Session token,
-cursor, server URL, and context tokens are persisted through the adapter's
-namespaced state view. Encrypted CDN bytes cross only the opaque media boundary;
-neither AstrBot configuration nor an AstrBot data directory is available.
+adapter-owned while Runtime only delegates start/cancel/status. Cursor, account ID,
+and server URL use the namespaced state view; login and context tokens use the
+separate namespaced secret view. Encrypted CDN bytes cross only the opaque media
+boundary; neither AstrBot configuration nor an AstrBot data directory is available.
 
 ## Non-IM proof
 

@@ -16,6 +16,10 @@ and WebSocket encoding.
 
 Endpoint IDs are opaque to Core. Valid non-IM examples include MQTT topic names,
 ROS2 controller paths, serial device addresses, and sensor identifiers.
+`family`, `adapter_type`, `adapter_id`, and `endpoint_id` are distinct required
+identity dimensions. Platform metadata may aid diagnostics but is never the
+source of transport identity. The pre-v1 `transport` field was removed without an
+alias.
 
 ## Payload envelope
 

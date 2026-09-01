@@ -1,5 +1,9 @@
 # Phase 5 Report
 
+Historical note: this report records the P5 implementation baseline. P5.1 later
+moved Weixin login/context credentials from ordinary state to the separate
+encrypted-capable `AdapterSecretStore`; see `P5.1_REPORT.md`.
+
 ## Implemented
 
 - Added generic interactive Adapter authentication state and the three required

@@ -7,8 +7,9 @@ Protocol behavior was selectively rewritten from AstrBot 4.27.4 commit
 `astrbot/core/platform/sources/weixin_oc/`. The Gateway version imports no AstrBot
 configuration, data directory, MessageChain, event, plugin, prompt, or Agent code.
 
-Install with `astrbot-gateway[weixin]`. The extra contains `aiohttp` and
-`pycryptodome`; both are imported only at the transport boundary.
+Install with `astrbot-gateway[weixin]`. The extra contains `aiohttp`;
+`pycryptodome` is a base dependency because it also provides the Gateway's
+persistent encrypted secret backend. Both protocol clients remain outside Core.
 
 ## Configuration
 
@@ -25,10 +26,22 @@ Install with `astrbot-gateway[weixin]`. The extra contains `aiohttp` and
     reconnect_max_delay: 30
 ```
 
-No token belongs in YAML. Token, account ID, polling cursor, server-selected base
-URL, and per-user context tokens are stored only through the adapter's injected,
-namespaced `AdapterStateStore`. Use a persistent Gateway state backend for login
-recovery after restart.
+No token belongs in YAML. Account ID, polling cursor, and server-selected base URL
+are ordinary metadata in the namespaced `AdapterStateStore`. The login token and
+per-user context tokens are credentials in the separate namespaced
+`AdapterSecretStore`. Configure `secrets.type: encrypted_file` and the environment
+master key for recovery after restart; the default memory secret backend requires
+re-login. A legacy pre-v1 state containing plaintext credentials is migrated by
+writing and verifying the secret copy before the plaintext state is replaced.
+
+## Internal structure
+
+`adapter.py` now contains lifecycle, dependency composition, polling orchestration,
+execute dispatch, capability checks, and auth delegation. QR state lives in
+`auth.py`; credential classification and persistence in `session.py`; inbound and
+outbound profile conversion in `inbound.py` and `outbound.py`; and CDN/media
+conversion in `media.py`. The split is behavior-preserving and adds no new Weixin
+feature.
 
 ## Interactive authentication
 
@@ -75,7 +88,8 @@ adapter, and encrypted query parameters are not emitted as event metadata.
 
 `INTEGRATION_PASS`: deterministic tests cover QR start/cancel/expiry/confirmation,
 receive, text/media send, typing, encrypted-media boundary calls, token invalidation,
-and restart recovery using the same state store.
+state/secret split, legacy plaintext migration, credential deletion, and restart
+recovery using the same state and secret stores.
 
 `REAL_SMOKE_PENDING`: run `python scripts/smoke/weixin.py --image <path>` against
 an authorized account. The script prints `REAL_SMOKE_PASS` only after login,
