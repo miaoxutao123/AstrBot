@@ -30,6 +30,10 @@ satori = [
   "aiohttp>=3.10.0,<4",
   "websockets>=15.0,<16",
 ]
+qq_official = [
+  "aiohttp>=3.10.0,<4",
+  "websockets>=15.0,<16",
+]
 all = [
   "aiocqhttp>=1.4.4,<2",
   "aiohttp>=3.10.0,<4",
@@ -48,6 +52,7 @@ onebot = "gateway.adapters.onebot:OneBotAdapter"
 telegram = "gateway.adapters.telegram:TelegramAdapter"
 weixin = "gateway.adapters.weixin:WeixinAdapter"
 satori = "gateway.adapters.satori:SatoriAdapter"
+qq_official = "gateway.adapters.qq_official:QQOfficialWebSocketAdapter"
 
 [dependency-groups]
 dev = [
