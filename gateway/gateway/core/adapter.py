@@ -70,6 +70,8 @@ class AdapterContext:
     """Expose narrow host services to one adapter instance.
 
     Args:
+        family: Transport family declared by the adapter implementation.
+        adapter_type: Adapter implementation type declared by its descriptor.
         adapter_id: Configured adapter instance identifier.
         emit: Runtime callback used to publish events.
         logger: Logger scoped to the adapter instance.
@@ -82,6 +84,8 @@ class AdapterContext:
 
     def __init__(
         self,
+        family: str,
+        adapter_type: str,
         adapter_id: str,
         emit: EventEmitter,
         logger: logging.Logger,
@@ -91,6 +95,8 @@ class AdapterContext:
         secrets: AdapterSecretStore,
         media: MediaStore,
     ) -> None:
+        self.family = family
+        self.adapter_type = adapter_type
         self.adapter_id = adapter_id
         self._emit = emit
         self._logger = logger
@@ -107,11 +113,19 @@ class AdapterContext:
             event: Transport-neutral event to publish.
 
         Raises:
-            ValueError: If the event claims a different adapter instance.
+            ValueError: If the event claims a different family, adapter type, or
+                adapter instance.
         """
-        if event.source.adapter_id != self.adapter_id:
+        expected = (self.family, self.adapter_type, self.adapter_id)
+        actual = (
+            event.source.family,
+            event.source.adapter_type,
+            event.source.adapter_id,
+        )
+        if actual != expected:
             raise ValueError(
-                "adapter context cannot emit an event for a different adapter_id"
+                "adapter context cannot emit an event for a different "
+                "family, adapter_type, or adapter_id"
             )
         await self._emit(event)
 

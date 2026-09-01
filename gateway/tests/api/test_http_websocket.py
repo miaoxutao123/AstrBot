@@ -156,6 +156,9 @@ def test_health_authentication_and_adapter_controls() -> None:
     assert missing_key.status_code == 401
     assert missing_key.json()["error"]["code"] == "AUTH_FAILED"
     assert wrong_scope.status_code == 403
+    assert adapter.json()["id"] == "im-main"
+    assert adapter.json()["type"] == "fake-im"
+    assert adapter.json()["family"] == "im"
     assert adapter.json()["state"] == "running"
     assert stopped.json()["state"] == "stopped"
     assert restarted.json()["state"] == "running"

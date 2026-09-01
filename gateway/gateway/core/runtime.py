@@ -35,6 +35,7 @@ class AdapterRuntimeInfo:
     Args:
         adapter_id: Configured adapter instance identifier.
         adapter_type: Adapter descriptor type identifier.
+        family: Adapter descriptor transport family.
         state: Current lifecycle state.
         reason: Adapter-reported health reason, if any.
         error: Last safe lifecycle error, if any.
@@ -42,6 +43,7 @@ class AdapterRuntimeInfo:
 
     adapter_id: str
     adapter_type: str
+    family: str
     state: AdapterState
     reason: str | None = None
     error: GatewayError | None = None
@@ -121,6 +123,7 @@ class AdapterRuntime:
         return AdapterRuntimeInfo(
             adapter_id=adapter_id,
             adapter_type=adapter.descriptor.adapter_type,
+            family=adapter.descriptor.family,
             state=self._states.get(adapter_id, AdapterState.STOPPED),
             reason=self._reasons.get(adapter_id),
             error=self._errors.get(adapter_id),
@@ -158,6 +161,8 @@ class AdapterRuntime:
             self._reasons[adapter_id] = None
             self._errors[adapter_id] = None
             context = AdapterContext(
+                family=adapter.descriptor.family,
+                adapter_type=adapter.descriptor.adapter_type,
                 adapter_id=adapter_id,
                 emit=self._event_bus.publish,
                 logger=logging.getLogger(f"gateway.adapter.{adapter_id}"),

@@ -59,6 +59,8 @@ async def test_session_store_keeps_credentials_out_of_state() -> None:
         return None
 
     context = AdapterContext(
+        family="im",
+        adapter_type="weixin",
         adapter_id="primary",
         emit=emit,
         logger=logging.getLogger("test.weixin"),

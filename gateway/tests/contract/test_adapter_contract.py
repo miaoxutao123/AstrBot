@@ -32,6 +32,8 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
         emitted.append(event)
 
     context = AdapterContext(
+        family=adapter.descriptor.family,
+        adapter_type=adapter.descriptor.adapter_type,
         adapter_id=adapter.instance_id,
         emit=emit,
         logger=logging.getLogger("test.adapter"),
@@ -75,11 +77,22 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
 
 
 @pytest.mark.asyncio
-async def test_adapter_context_rejects_spoofed_source() -> None:
+@pytest.mark.parametrize(
+    "source",
+    [
+        EndpointRef("robot", "fake-sensor", "sensor-main", "temperature/1"),
+        EndpointRef("sensor", "mqtt", "sensor-main", "temperature/1"),
+        EndpointRef("sensor", "fake-sensor", "other-adapter", "temperature/1"),
+    ],
+    ids=["family", "adapter-type", "adapter-id"],
+)
+async def test_adapter_context_rejects_spoofed_source(source: EndpointRef) -> None:
     async def emit(_event: GatewayEvent) -> None:
         return None
 
     context = AdapterContext(
+        family="sensor",
+        adapter_type="fake-sensor",
         adapter_id="sensor-main",
         emit=emit,
         logger=logging.getLogger("test.adapter"),
@@ -90,7 +103,7 @@ async def test_adapter_context_rejects_spoofed_source() -> None:
         media=MemoryMediaStore(),
     )
     spoofed = GatewayEvent(
-        source=EndpointRef("sensor", "fake-sensor", "other-adapter", "temperature/1"),
+        source=source,
         type="telemetry.temperature",
         payload=Payload("sensor.temperature.v1", {"value": 20}),
     )

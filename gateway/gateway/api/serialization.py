@@ -170,6 +170,7 @@ def runtime_info_to_dict(info: AdapterRuntimeInfo) -> dict[str, Any]:
     return {
         "id": info.adapter_id,
         "type": info.adapter_type,
+        "family": info.family,
         "state": info.state.value,
         "reason": info.reason,
         "error": error_to_dict(info.error) if info.error is not None else None,
