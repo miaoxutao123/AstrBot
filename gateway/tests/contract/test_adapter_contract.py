@@ -5,6 +5,7 @@ import logging
 import pytest
 
 from gateway.core import (
+    GATEWAY_API_STABILITY,
     GATEWAY_API_VERSION,
     AdapterContext,
     EndpointRef,
@@ -44,6 +45,7 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
         media=MemoryMediaStore(),
     )
     assert adapter.descriptor.api_version == GATEWAY_API_VERSION
+    assert GATEWAY_API_STABILITY == "stable"
     assert adapter.descriptor.adapter_type
     assert adapter.descriptor.family
     assert adapter.descriptor.capabilities

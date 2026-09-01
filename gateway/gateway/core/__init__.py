@@ -1,6 +1,7 @@
 """Dependency-free Gateway Core public API."""
 
 from .adapter import (
+    GATEWAY_API_STABILITY,
     GATEWAY_API_VERSION,
     AdapterContext,
     AdapterDescriptor,
@@ -25,6 +26,7 @@ from .runtime import AdapterRuntime, AdapterRuntimeInfo
 
 __all__ = [
     "GATEWAY_API_VERSION",
+    "GATEWAY_API_STABILITY",
     "AdapterContext",
     "AdapterAuthInfo",
     "AdapterAuthStatus",

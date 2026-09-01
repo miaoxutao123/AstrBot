@@ -212,6 +212,18 @@ and server URL use the namespaced state view; login and context tokens use the
 separate namespaced secret view. Encrypted CDN bytes cross only the opaque media
 boundary; neither AstrBot configuration nor an AstrBot data directory is available.
 
+Satori keeps downstream platform/account identity in adapter-owned endpoint routes
+and diagnostic metadata while Core always addresses the `satori` implementation.
+QQ Official WebSocket independently implements Tencent's official Gateway and REST
+protocol; it imports no OneBot model. Its common message/media converters are
+transport-agnostic within the QQ Official package so a future webhook transport can
+reuse them.
+
+Adapter API version 1 is frozen after five-adapter protocol validation. Compatible
+v1 evolution may add safely defaulted optional methods, capabilities, payload
+schemas, adapters, and metadata. Required-service, identity-field, method-semantic,
+or entry-point breaking changes require Adapter API v2.
+
 ## Non-IM proof
 
 Phase 1 includes three contract-equivalent fake adapters:

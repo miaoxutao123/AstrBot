@@ -1,8 +1,9 @@
 # Adapter API v1 Pre-freeze Review
 
-Status: **NOT FROZEN**. This P5.1 review records the contract after OneBot,
-Telegram, and Weixin, but Satori remains the final large pressure test before an
-API v1 freeze decision.
+Status: **HISTORICAL / SUPERSEDED**. This P5.1 review records the contract after
+OneBot, Telegram, and Weixin. Phase 6 subsequently completed the Satori and QQ
+Official pressure tests and froze Adapter API v1; the current decision is in
+`adapter-api-v1-final-review.md`.
 
 ## Contract review
 

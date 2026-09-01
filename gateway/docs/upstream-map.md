@@ -31,6 +31,10 @@ OneBot transport behavior and records every derived package below.
 | `gateway/adapters/telegram/config.py`, `capabilities.py`, `errors.py` | Telegram Bot API and audited AstrBot adapter | New code, 2026-08-31 | Environment-only token config, rich standard IM capability declarations, and safe error categories. |
 | `gateway/adapters/weixin/adapter.py`, `client.py`, `auth.py`, `session.py`, `inbound.py`, `outbound.py`, `media.py` | `astrbot/core/platform/sources/weixin_oc/weixin_oc_adapter.py`, `weixin_oc_client.py`, `login_registration.py`, `weixin_oc_event.py` | Selective rewrite, 2026-08-31; responsibility split 2026-09-01 | Generic auth integration, separate namespaced state/secrets, opaque media, polling/reconnect and standard IM operations. Removed AstrBot config/data paths, MessageChain, platform events, plugins, prompts, and Agent runtime. Provenance headers present. |
 | `gateway/adapters/weixin/config.py`, `capabilities.py`, `errors.py` | Weixin OC protocol and audited AstrBot adapter | New code, 2026-08-31 | Adapter-owned URLs/timing, standard IM capabilities, and safe error categories. |
+| `gateway/adapters/satori/adapter.py`, `client.py`, `protocol.py`, `inbound.py`, `outbound.py` | `astrbot/core/platform/sources/satori/satori_adapter.py`, `satori_event.py` | Selective rewrite, 2026-09-01 | Preserves IDENTIFY/PING/READY/EVENT and `/message.create`; replaces AstrBot MessageChain/event/Agent dependencies with multi-login endpoint routing, IM Profile, opaque media, namespaced state and entry point. |
+| `gateway/adapters/satori/config.py`, `capabilities.py`, `errors.py` | Audited Satori implementation and protocol | New code, 2026-09-01 | Adapter-owned optional dependencies, safe errors and implemented-only capability declarations. |
+| `gateway/adapters/qq_official/common/` | `astrbot/core/platform/sources/qqofficial/qqofficial_platform_adapter.py`, `qqofficial_message_event.py`, `qqofficial_chunked_upload.py` | Selective rewrite, 2026-09-01 | Normalizes C2C/group/guild/direct messages and REST/media operations without botpy objects, local paths, MessageChain or OneBot protocol; designed for future Webhook reuse. |
+| `gateway/adapters/qq_official/websocket/` | `astrbot/core/platform/sources/qqofficial/qqofficial_platform_adapter.py` plus audited Tencent Gateway semantics | Selective rewrite, 2026-09-01 | Owns token acquisition, gateway discovery, IDENTIFY/RESUME, heartbeat ACK, invalid session and reconnect. Dynamic token uses SecretStore; resume metadata uses StateStore. No AstrBot or Agent imports. |
 
 ## Unmigrated inventory
 
@@ -40,8 +44,6 @@ its migration phase has not yet been scheduled. The baseline for every row is
 
 | Adapter | AstrBot source path | Planned phase | Status |
 | --- | --- | --- | --- |
-| Satori | `astrbot/core/platform/sources/satori/` | P6 | `NOT_STARTED` |
-| QQ Official WebSocket | `astrbot/core/platform/sources/qqofficial/` | Post-P6 | `NOT_STARTED` |
 | QQ Official Webhook | `astrbot/core/platform/sources/qqofficial_webhook/` | Post-P6 | `NOT_STARTED` |
 | Lark / Feishu | `astrbot/core/platform/sources/lark/` | Post-P6 | `NOT_STARTED` |
 | DingTalk | `astrbot/core/platform/sources/dingtalk/` | Post-P6 | `NOT_STARTED` |

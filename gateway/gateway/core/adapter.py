@@ -20,6 +20,7 @@ from .models import (
 )
 
 GATEWAY_API_VERSION = 1
+GATEWAY_API_STABILITY = "stable"
 EventEmitter = Callable[[GatewayEvent], Awaitable[None]]
 SecretProvider = Callable[[str], str | None]
 StateReporter = Callable[[AdapterState, str | None], None]

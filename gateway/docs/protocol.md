@@ -1,7 +1,7 @@
-# Gateway Protocol v1 Draft
+# Gateway Protocol v1
 
-This document defines the transport-neutral v1 data contract and its Phase 2 HTTP
-and WebSocket encoding.
+This document defines the frozen transport-neutral v1 data contract and its HTTP
+and WebSocket encoding. Breaking public contract changes require Adapter API v2.
 
 ## Endpoint
 

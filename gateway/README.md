@@ -8,10 +8,9 @@ extracted from lessons learned in AstrBot's platform layer. It converts transpor
 input into neutral events and routes neutral commands back to adapters. It does not
 contain an agent runner, model provider, prompt system, memory, or transport SDK.
 
-Phase 5.1 hardens the pre-v1 boundary with four-part endpoint identity, a separate
-encrypted dynamic-credential store, complete adapter migration inventory, and a
-pre-freeze contract review. Adapter API v1 remains **NOT FROZEN** until Satori has
-pressure-tested the contract.
+Phase 6 validates the contract across OneBot, Telegram, Weixin, Satori and Tencent
+QQ Official WebSocket. Adapter API v1 is now **FROZEN** with the compatibility
+policy in `docs/adapter-api-v1-final-review.md`.
 
 The base installation contains the transport-neutral Python Core, YAML host
 configuration, CLI, media boundary, and adapter state persistence. FastAPI and
@@ -67,6 +66,8 @@ pip install "astrbot-gateway[api]"
 pip install "astrbot-gateway[onebot]"
 pip install "astrbot-gateway[telegram]"
 pip install "astrbot-gateway[weixin]"
+pip install "astrbot-gateway[satori]"
+pip install "astrbot-gateway[qq_official]"
 ```
 
 OneBot supports forward WebSocket client mode and an aiocqhttp-compatible reverse
@@ -81,6 +82,10 @@ Weixin OC supports generic QR authentication, separated credential/cursor persis
 private messages, encrypted CDN media, inbound reply recognition, typing, and
 bounded reconnect. See
 `docs/adapters/weixin.md` for setup and the protected real-smoke sequence.
+
+Satori supports multi-platform/multi-login WebSocket events and HTTP message
+operations. Tencent QQ Official WebSocket supports the official Gateway lifecycle,
+C2C/group/guild/direct messages and REST media; it is independent from OneBot.
 
 See `docs/architecture.md`, `docs/protocol.md`, and
 `docs/adapter-api-v1-review.md` for the current contracts and pre-freeze findings.
