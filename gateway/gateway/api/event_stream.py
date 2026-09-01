@@ -12,12 +12,14 @@ class EventFilter:
     """Filter live events using transport metadata only.
 
     Args:
-        transport: Optional transport family.
+        family: Optional transport family.
+        adapter_type: Optional adapter implementation type.
         adapter_id: Optional configured adapter ID.
         event_type: Optional event type.
     """
 
-    transport: str | None = None
+    family: str | None = None
+    adapter_type: str | None = None
     adapter_id: str | None = None
     event_type: str | None = None
 
@@ -31,7 +33,8 @@ class EventFilter:
             ``True`` if every configured field matches.
         """
         return (
-            self.transport in {None, "*", event.source.transport}
+            self.family in {None, "*", event.source.family}
+            and self.adapter_type in {None, "*", event.source.adapter_type}
             and self.adapter_id in {None, "*", event.source.adapter_id}
             and self.event_type in {None, "*", event.type}
         )
@@ -170,7 +173,8 @@ class EventStream:
         return sorted(
             self._endpoints.values(),
             key=lambda record: (
-                record.endpoint.transport,
+                record.endpoint.family,
+                record.endpoint.adapter_type,
                 record.endpoint.adapter_id,
                 record.endpoint.endpoint_id,
             ),

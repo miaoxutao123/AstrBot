@@ -35,9 +35,8 @@ async def submit_command(
     """
     services = get_services(request)
     command = body.to_core()
-    if (
-        command.target.transport.lower() in _HARDWARE_TRANSPORTS
-        or command.type.startswith("robot.")
+    if command.target.family.lower() in _HARDWARE_TRANSPORTS or command.type.startswith(
+        "robot."
     ):
         services.api_keys.require(principal, "hardware:control")
     result = await services.runtime.execute(command)

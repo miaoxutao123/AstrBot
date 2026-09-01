@@ -51,7 +51,7 @@ async def convert_inbound_event(
     user_id = _value(event, "user_id") or "unknown"
     group_id = _value(event, "group_id")
     endpoint_id = f"group:{group_id}" if group_id else f"private:{user_id}"
-    source = EndpointRef("im", adapter_id, endpoint_id)
+    source = EndpointRef("im", "onebot", adapter_id, endpoint_id)
     timestamp_value = event.get("time", time.time())
     timestamp = (
         float(timestamp_value)

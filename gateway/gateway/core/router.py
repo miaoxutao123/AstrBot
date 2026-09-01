@@ -15,12 +15,14 @@ class RouteMatch:
     """Match immutable transport attributes without inspecting payload content.
 
     Args:
-        transport: Transport family or ``*``.
+        family: Transport family or ``*``.
+        adapter_type: Adapter implementation type or ``*``.
         adapter_id: Configured adapter identifier or ``*``.
         event_type: Event type or ``*``.
     """
 
-    transport: str = "*"
+    family: str = "*"
+    adapter_type: str = "*"
     adapter_id: str = "*"
     event_type: str = "*"
 
@@ -34,7 +36,8 @@ class RouteMatch:
             ``True`` when every non-wildcard field matches.
         """
         return (
-            self.transport in {"*", event.source.transport}
+            self.family in {"*", event.source.family}
+            and self.adapter_type in {"*", event.source.adapter_type}
             and self.adapter_id in {"*", event.source.adapter_id}
             and self.event_type in {"*", event.type}
         )

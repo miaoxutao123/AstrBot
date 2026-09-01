@@ -25,7 +25,8 @@ def endpoint_to_dict(endpoint: EndpointRef) -> dict[str, str]:
         JSON-compatible endpoint mapping.
     """
     return {
-        "transport": endpoint.transport,
+        "family": endpoint.family,
+        "adapter_type": endpoint.adapter_type,
         "adapter_id": endpoint.adapter_id,
         "endpoint_id": endpoint.endpoint_id,
     }
@@ -41,7 +42,12 @@ def endpoint_resource_id(endpoint: EndpointRef) -> str:
         Unpadded URL-safe base64 identifier.
     """
     raw = json.dumps(
-        [endpoint.transport, endpoint.adapter_id, endpoint.endpoint_id],
+        [
+            endpoint.family,
+            endpoint.adapter_type,
+            endpoint.adapter_id,
+            endpoint.endpoint_id,
+        ],
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
@@ -72,11 +78,11 @@ def endpoint_from_resource_id(resource_id: str) -> EndpointRef:
         raise ValueError("invalid endpoint resource id") from exc
     if (
         not isinstance(values, list)
-        or len(values) != 3
+        or len(values) != 4
         or not all(isinstance(value, str) for value in values)
     ):
         raise ValueError("invalid endpoint resource id")
-    return EndpointRef(values[0], values[1], values[2])
+    return EndpointRef(values[0], values[1], values[2], values[3])
 
 
 def error_to_dict(error: GatewayError) -> dict[str, Any]:

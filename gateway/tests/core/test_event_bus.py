@@ -18,7 +18,7 @@ def make_event(index: int) -> GatewayEvent:
     """
     return GatewayEvent(
         id=f"evt_{index}",
-        source=EndpointRef("sensor", "sensor-main", "temperature/1"),
+        source=EndpointRef("sensor", "fake-sensor", "sensor-main", "temperature/1"),
         type="telemetry.temperature",
         payload=Payload("sensor.temperature.v1", {"value": index}),
     )

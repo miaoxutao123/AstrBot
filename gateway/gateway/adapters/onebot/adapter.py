@@ -70,11 +70,11 @@ class OneBotAdapter(TransportAdapter):
             OneBot adapter descriptor.
         """
         return AdapterDescriptor(
-            id="onebot",
+            adapter_type="onebot",
             name="OneBot v11",
             version="0.3.0",
             api_version=GATEWAY_API_VERSION,
-            transport="im",
+            family="im",
             capabilities=ONEBOT_CAPABILITIES,
         )
 
@@ -231,7 +231,9 @@ class OneBotAdapter(TransportAdapter):
             Standard IM capabilities or an empty list for foreign endpoints.
         """
         if endpoint is not None and (
-            endpoint.adapter_id != self.instance_id or endpoint.transport != "im"
+            endpoint.adapter_id != self.instance_id
+            or endpoint.adapter_type != "onebot"
+            or endpoint.family != "im"
         ):
             return []
         return list(ONEBOT_CAPABILITIES)

@@ -71,7 +71,8 @@ async def main() -> int:
                 json={
                     "id": command_id,
                     "target": {
-                        "transport": "im",
+                        "family": "im",
+                        "adapter_type": "weixin",
                         "adapter_id": args.adapter_id,
                         "endpoint_id": endpoint,
                     },

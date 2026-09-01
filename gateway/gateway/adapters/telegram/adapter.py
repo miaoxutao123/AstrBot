@@ -100,11 +100,11 @@ class TelegramAdapter(TransportAdapter):
             Telegram adapter descriptor.
         """
         return AdapterDescriptor(
-            id="telegram",
+            adapter_type="telegram",
             name="Telegram Bot API",
             version="0.4.0",
             api_version=GATEWAY_API_VERSION,
-            transport="im",
+            family="im",
             capabilities=TELEGRAM_CAPABILITIES,
         )
 
@@ -409,7 +409,9 @@ class TelegramAdapter(TransportAdapter):
             Capabilities or an empty list for foreign endpoints.
         """
         if endpoint is not None and (
-            endpoint.adapter_id != self.instance_id or endpoint.transport != "im"
+            endpoint.adapter_id != self.instance_id
+            or endpoint.adapter_type != "telegram"
+            or endpoint.family != "im"
         ):
             return []
         return list(TELEGRAM_CAPABILITIES)

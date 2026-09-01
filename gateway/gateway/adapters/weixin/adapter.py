@@ -85,11 +85,11 @@ class WeixinAdapter(TransportAdapter):
     @property
     def descriptor(self) -> AdapterDescriptor:
         return AdapterDescriptor(
-            id="weixin",
+            adapter_type="weixin",
             name="Weixin OC",
             version="0.5.0",
             api_version=GATEWAY_API_VERSION,
-            transport="im",
+            family="im",
             capabilities=WEIXIN_CAPABILITIES,
         )
 
@@ -352,7 +352,7 @@ class WeixinAdapter(TransportAdapter):
         await context.emit(
             GatewayEvent(
                 id=f"evt_weixin_{self.instance_id}_{message_id}",
-                source=EndpointRef("im", self.instance_id, sender),
+                source=EndpointRef("im", "weixin", self.instance_id, sender),
                 type="im.message.received",
                 payload=profile.to_payload(),
                 timestamp=timestamp,
@@ -617,7 +617,9 @@ class WeixinAdapter(TransportAdapter):
         self, endpoint: EndpointRef | None = None
     ) -> list[Capability]:
         if endpoint is not None and (
-            endpoint.adapter_id != self.instance_id or endpoint.transport != "im"
+            endpoint.adapter_id != self.instance_id
+            or endpoint.adapter_type != "weixin"
+            or endpoint.family != "im"
         ):
             return []
         return list(WEIXIN_CAPABILITIES)

@@ -19,11 +19,11 @@ class FakeSensorAdapter(RecordingAdapter):
     """Emit temperature telemetry through the generic event model."""
 
     DESCRIPTOR = AdapterDescriptor(
-        id="fake-sensor",
+        adapter_type="fake-sensor",
         name="Fake Temperature Sensor",
         version="0.1.0",
         api_version=GATEWAY_API_VERSION,
-        transport="sensor",
+        family="sensor",
         capabilities=(Capability("telemetry.temperature.read"),),
     )
 
@@ -49,7 +49,7 @@ class FakeSensorAdapter(RecordingAdapter):
             Event emitted through the Gateway context.
         """
         event = GatewayEvent(
-            source=EndpointRef("sensor", self.instance_id, endpoint_id),
+            source=EndpointRef("sensor", "fake-sensor", self.instance_id, endpoint_id),
             type="telemetry.temperature",
             payload=Payload(
                 schema="sensor.temperature.v1",

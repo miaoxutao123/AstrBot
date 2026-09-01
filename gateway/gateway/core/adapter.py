@@ -29,22 +29,22 @@ class AdapterDescriptor:
     """Describe an adapter implementation and its static capabilities.
 
     Args:
-        id: Adapter type identifier used by configuration and entry points.
+        adapter_type: Adapter type identifier used by configuration and entry points.
         name: Human-readable adapter name.
         version: Adapter implementation version.
         api_version: Gateway Adapter API version implemented by the adapter.
-        transport: Transport family implemented by the adapter.
+        family: Transport family implemented by the adapter.
         capabilities: Capabilities common to every endpoint of this adapter.
 
     Raises:
         ValueError: If a required field is empty or the API version is invalid.
     """
 
-    id: str
+    adapter_type: str
     name: str
     version: str
     api_version: int
-    transport: str
+    family: str
     capabilities: tuple[Capability, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -54,10 +54,10 @@ class AdapterDescriptor:
             ValueError: If a required field is empty or the API version is invalid.
         """
         for field_name, value in (
-            ("id", self.id),
+            ("adapter_type", self.adapter_type),
             ("name", self.name),
             ("version", self.version),
-            ("transport", self.transport),
+            ("family", self.family),
         ):
             if not value or not value.strip():
                 raise ValueError(f"adapter descriptor {field_name} must not be empty")

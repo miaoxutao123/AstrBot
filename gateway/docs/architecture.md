@@ -69,7 +69,10 @@ reporting. It rejects events that claim another configured adapter ID and never
 exposes the runtime, configuration manager, or a database connection.
 
 `AdapterDescriptor.id` identifies an installed adapter type such as `telegram`.
-`EndpointRef.adapter_id` identifies a configured instance such as `telegram-main`.
+`EndpointRef` carries four independent identity fields: `family` (for example
+`im`), `adapter_type` (for example `telegram`), `adapter_id` (a configured instance
+such as `telegram-main`), and the adapter-owned opaque `endpoint_id`. Platform
+identity never depends on optional event metadata.
 The distinction permits multiple accounts using one implementation.
 
 ### Registry
@@ -131,7 +134,7 @@ explicitly deferred.
 
 ### Router
 
-`Router` matches only `transport`, `adapter_id`, and `event_type`, each optionally a
+`Router` matches only `family`, `adapter_type`, `adapter_id`, and `event_type`, each optionally a
 wildcard. It never inspects payload text or invokes intelligence. Destinations are
 async callables for configured transport delivery. The Phase 2 WebSocket event
 stream subscribes directly to the bus because every client applies its own filter.
@@ -156,8 +159,8 @@ tracebacks and exception messages never enter the response.
 `EventStream` is a bounded, in-memory delivery view. It deduplicates retained
 events by stable ID, records endpoints observed in events, keeps a small replay
 window, and creates a bounded queue per WebSocket client. A slow client is closed
-explicitly instead of allowing unbounded memory growth. Filters use only transport,
-adapter ID, and event type.
+explicitly instead of allowing unbounded memory growth. Filters use only family,
+adapter type, adapter ID, and event type.
 
 ### Profiles, media, and adapter state
 

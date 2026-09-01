@@ -94,7 +94,8 @@ class RecordingAdapter(TransportAdapter):
         """
         if endpoint is not None and (
             endpoint.adapter_id != self.instance_id
-            or endpoint.transport != self.descriptor.transport
+            or endpoint.family != self.descriptor.family
+            or endpoint.adapter_type != self.descriptor.adapter_type
         ):
             return []
         return list(self.descriptor.capabilities)

@@ -11,7 +11,8 @@ class EndpointRef:
     participant, a topic, a sensor, an actuator, or another addressable entity.
 
     Args:
-        transport: Transport family, such as ``telegram`` or ``ros2``.
+        family: Transport family, such as ``im`` or ``robotics``.
+        adapter_type: Installed adapter implementation type.
         adapter_id: Configured adapter instance identifier.
         endpoint_id: Adapter-owned endpoint identifier.
 
@@ -19,7 +20,8 @@ class EndpointRef:
         ValueError: If any identifier is empty.
     """
 
-    transport: str
+    family: str
+    adapter_type: str
     adapter_id: str
     endpoint_id: str
 
@@ -30,7 +32,8 @@ class EndpointRef:
             ValueError: If any identifier is empty.
         """
         for field_name, value in (
-            ("transport", self.transport),
+            ("family", self.family),
+            ("adapter_type", self.adapter_type),
             ("adapter_id", self.adapter_id),
             ("endpoint_id", self.endpoint_id),
         ):

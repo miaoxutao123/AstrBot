@@ -112,7 +112,7 @@ class AdapterRuntime:
         adapter = self._registry.get(adapter_id)
         return AdapterRuntimeInfo(
             adapter_id=adapter_id,
-            adapter_type=adapter.descriptor.id,
+            adapter_type=adapter.descriptor.adapter_type,
             state=self._states.get(adapter_id, AdapterState.STOPPED),
             reason=self._reasons.get(adapter_id),
             error=self._errors.get(adapter_id),

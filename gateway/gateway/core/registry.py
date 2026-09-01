@@ -133,10 +133,10 @@ class AdapterRegistry:
         adapter = factory(instance_id, config or {})
         if not isinstance(adapter, TransportAdapter):
             raise TypeError(f"factory {adapter_type} did not return TransportAdapter")
-        if adapter.descriptor.id != adapter_type:
+        if adapter.descriptor.adapter_type != adapter_type:
             raise ValueError(
                 f"factory type {adapter_type} does not match descriptor "
-                f"{adapter.descriptor.id}"
+                f"{adapter.descriptor.adapter_type}"
             )
         self.register(instance_id, adapter)
         return adapter

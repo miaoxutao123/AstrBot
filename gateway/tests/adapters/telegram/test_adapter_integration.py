@@ -81,7 +81,8 @@ def command(
     return {
         "id": command_id,
         "target": {
-            "transport": "im",
+            "family": "im",
+            "adapter_type": "telegram",
             "adapter_id": "telegram-main",
             "endpoint_id": "group:-100123",
         },

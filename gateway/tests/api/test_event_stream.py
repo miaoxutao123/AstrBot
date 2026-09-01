@@ -18,7 +18,7 @@ def make_event(event_id: str, endpoint_id: str = "user:1") -> GatewayEvent:
     """
     return GatewayEvent(
         id=event_id,
-        source=EndpointRef("im", "im-main", endpoint_id),
+        source=EndpointRef("im", "fake-im", "im-main", endpoint_id),
         type="im.message",
         payload=Payload("im.message.v1", {"segments": []}),
     )
@@ -82,7 +82,8 @@ async def test_event_stream_applies_all_subscription_filters() -> None:
     stream = EventStream()
     subscription = stream.subscribe(
         EventFilter(
-            transport="im",
+            family="im",
+            adapter_type="fake-im",
             adapter_id="im-main",
             event_type="im.message",
         )
@@ -91,7 +92,7 @@ async def test_event_stream_applies_all_subscription_filters() -> None:
     await stream.ingest(
         GatewayEvent(
             id="evt_sensor",
-            source=EndpointRef("sensor", "sensor-main", "temperature:1"),
+            source=EndpointRef("sensor", "fake-sensor", "sensor-main", "temperature:1"),
             type="telemetry.temperature",
             payload=Payload("sensor.temperature.v1", {"value": 20.0}),
         )

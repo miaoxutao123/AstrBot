@@ -214,7 +214,7 @@ async def convert_inbound_update(
             prefix = {"private": "private", "channel": "channel"}.get(
                 chat_type, "group"
             )
-            source = EndpointRef("im", adapter_id, f"{prefix}:{chat_id}")
+            source = EndpointRef("im", "telegram", adapter_id, f"{prefix}:{chat_id}")
             return GatewayEvent(
                 id=f"evt_telegram_{adapter_id}_{update_id}",
                 source=source,
@@ -233,7 +233,7 @@ async def convert_inbound_update(
             )
         return GatewayEvent(
             id=f"evt_telegram_{adapter_id}_{update_id}",
-            source=EndpointRef("im", adapter_id, "telegram:updates"),
+            source=EndpointRef("im", "telegram", adapter_id, "telegram:updates"),
             type="telegram.update",
             payload=Payload("telegram.update.v1", {"update": dict(update)}),
             metadata={"platform": "telegram", "update_id": update_id},
@@ -304,7 +304,7 @@ async def convert_inbound_update(
     )
     return GatewayEvent(
         id=f"evt_telegram_{adapter_id}_{update_id}",
-        source=EndpointRef("im", adapter_id, endpoint_id),
+        source=EndpointRef("im", "telegram", adapter_id, endpoint_id),
         type=event_type,
         payload=profile.to_payload(),
         timestamp=timestamp,

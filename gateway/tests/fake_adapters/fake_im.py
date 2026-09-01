@@ -19,11 +19,11 @@ class FakeIMAdapter(RecordingAdapter):
     """Emit IM profile events and record IM commands."""
 
     DESCRIPTOR = AdapterDescriptor(
-        id="fake-im",
+        adapter_type="fake-im",
         name="Fake IM",
         version="0.1.0",
         api_version=GATEWAY_API_VERSION,
-        transport="im",
+        family="im",
         capabilities=(
             Capability("im.send_text"),
             Capability("im.send_image"),
@@ -56,7 +56,7 @@ class FakeIMAdapter(RecordingAdapter):
             Event emitted through the Gateway context.
         """
         event = GatewayEvent(
-            source=EndpointRef("im", self.instance_id, endpoint_id),
+            source=EndpointRef("im", "fake-im", self.instance_id, endpoint_id),
             type="im.message",
             payload=Payload(
                 schema="im.message.v1",

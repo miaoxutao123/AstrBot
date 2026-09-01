@@ -40,13 +40,14 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
         media=MemoryMediaStore(),
     )
     assert adapter.descriptor.api_version == GATEWAY_API_VERSION
-    assert adapter.descriptor.id
-    assert adapter.descriptor.transport
+    assert adapter.descriptor.adapter_type
+    assert adapter.descriptor.family
     assert adapter.descriptor.capabilities
 
     await adapter.start(context)
     endpoint = EndpointRef(
-        adapter.descriptor.transport,
+        adapter.descriptor.family,
+        adapter.descriptor.adapter_type,
         adapter.instance_id,
         "endpoint-1",
     )
@@ -86,10 +87,27 @@ async def test_adapter_context_rejects_spoofed_source() -> None:
         media=MemoryMediaStore(),
     )
     spoofed = GatewayEvent(
-        source=EndpointRef("sensor", "other-adapter", "temperature/1"),
+        source=EndpointRef("sensor", "fake-sensor", "other-adapter", "temperature/1"),
         type="telemetry.temperature",
         payload=Payload("sensor.temperature.v1", {"value": 20}),
     )
 
     with pytest.raises(ValueError):
         await context.emit(spoofed)
+
+
+@pytest.mark.asyncio
+async def test_adapter_rejects_foreign_type_and_instance_capability_queries() -> None:
+    adapter = FakeIMAdapter("im-main")
+    assert (
+        await adapter.capabilities(
+            EndpointRef("im", "telegram", "im-main", "private:1")
+        )
+        == []
+    )
+    assert (
+        await adapter.capabilities(
+            EndpointRef("im", "fake-im", "im-other", "private:1")
+        )
+        == []
+    )

@@ -44,6 +44,7 @@ class LoopbackIMAdapter(FakeIMAdapter):
                 id=f"evt_{command.id}",
                 source=EndpointRef(
                     "im",
+                    "fake-im",
                     self.instance_id,
                     command.target.endpoint_id,
                 ),
@@ -117,7 +118,8 @@ def command_body(command_id: str) -> dict[str, Any]:
     return {
         "id": command_id,
         "target": {
-            "transport": "im",
+            "family": "im",
+            "adapter_type": "fake-im",
             "adapter_id": "im-main",
             "endpoint_id": "user:1",
         },
@@ -314,7 +316,8 @@ def test_hardware_command_requires_hardware_scope() -> None:
     body = {
         "id": "cmd_robot",
         "target": {
-            "transport": "robot",
+            "family": "robot",
+            "adapter_type": "fake-robot",
             "adapter_id": robot.instance_id,
             "endpoint_id": "/base",
         },

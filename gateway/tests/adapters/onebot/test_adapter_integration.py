@@ -96,7 +96,8 @@ def test_onebot_event_websocket_http_command_reconnect_and_shutdown() -> None:
                 json={
                     "id": "cmd_onebot",
                     "target": {
-                        "transport": "im",
+                        "family": "im",
+                        "adapter_type": "onebot",
                         "adapter_id": "qq-main",
                         "endpoint_id": "private:20001",
                     },
@@ -138,7 +139,8 @@ def test_invalid_token_state_and_unsupported_command() -> None:
             json={
                 "id": "cmd_unknown",
                 "target": {
-                    "transport": "im",
+                    "family": "im",
+                    "adapter_type": "onebot",
                     "adapter_id": "qq-main",
                     "endpoint_id": "private:20001",
                 },
@@ -162,7 +164,8 @@ def test_unsupported_command_is_explicit_when_connected() -> None:
             json={
                 "id": "cmd_unknown",
                 "target": {
-                    "transport": "im",
+                    "family": "im",
+                    "adapter_type": "onebot",
                     "adapter_id": "qq-main",
                     "endpoint_id": "private:20001",
                 },
@@ -196,7 +199,8 @@ def test_http_reply_with_image_and_file_uses_standard_profile() -> None:
             json={
                 "id": "cmd_media_reply",
                 "target": {
-                    "transport": "im",
+                    "family": "im",
+                    "adapter_type": "onebot",
                     "adapter_id": "qq-main",
                     "endpoint_id": "group:30001:user:20002",
                 },
@@ -237,7 +241,8 @@ def test_http_delete_uses_onebot_delete_action() -> None:
             json={
                 "id": "cmd_delete",
                 "target": {
-                    "transport": "im",
+                    "family": "im",
+                    "adapter_type": "onebot",
                     "adapter_id": "qq-main",
                     "endpoint_id": "private:20001",
                 },

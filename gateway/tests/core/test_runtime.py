@@ -78,7 +78,7 @@ async def test_sensor_event_and_robot_command_share_core() -> None:
     await bus.wait_until_idle()
     command = GatewayCommand(
         id="cmd_move",
-        target=EndpointRef("robot", robot.instance_id, "/base"),
+        target=EndpointRef("robot", "fake-robot", robot.instance_id, "/base"),
         type="robot.move",
         payload=Payload("robot.motion.v1", {"linear_x": 0.3}),
     )
@@ -117,7 +117,7 @@ async def test_runtime_rejects_offline_and_unknown_capability() -> None:
     registry.register(robot.instance_id, robot)
     runtime = AdapterRuntime(registry, bus)
     command = GatewayCommand(
-        target=EndpointRef("robot", robot.instance_id, "/base"),
+        target=EndpointRef("robot", "fake-robot", robot.instance_id, "/base"),
         type="robot.fly",
         payload=Payload("robot.motion.v1"),
     )
@@ -147,12 +147,12 @@ async def test_adapter_execution_failure_is_contained() -> None:
     lifecycle = GatewayLifecycle(bus, runtime)
     await lifecycle.start()
     broken_command = GatewayCommand(
-        target=EndpointRef("robot", broken_robot.instance_id, "/base"),
+        target=EndpointRef("robot", "fake-robot", broken_robot.instance_id, "/base"),
         type="robot.stop",
         payload=Payload("robot.stop.v1"),
     )
     healthy_command = GatewayCommand(
-        target=EndpointRef("robot", healthy_robot.instance_id, "/base"),
+        target=EndpointRef("robot", "fake-robot", healthy_robot.instance_id, "/base"),
         type="robot.stop",
         payload=Payload("robot.stop.v1"),
     )

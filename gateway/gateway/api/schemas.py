@@ -12,7 +12,8 @@ class EndpointRefRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    transport: str = Field(min_length=1)
+    family: str = Field(min_length=1)
+    adapter_type: str = Field(min_length=1)
     adapter_id: str = Field(min_length=1)
     endpoint_id: str = Field(min_length=1)
 
@@ -23,7 +24,8 @@ class EndpointRefRequest(BaseModel):
             Validated Core endpoint reference.
         """
         return EndpointRef(
-            transport=self.transport,
+            family=self.family,
+            adapter_type=self.adapter_type,
             adapter_id=self.adapter_id,
             endpoint_id=self.endpoint_id,
         )

@@ -31,7 +31,8 @@ async def event_websocket(websocket: WebSocket) -> None:
         await websocket.close(code=4401 if exc.status_code == 401 else 4403)
         return
     event_filter = EventFilter(
-        transport=websocket.query_params.get("transport"),
+        family=websocket.query_params.get("family"),
+        adapter_type=websocket.query_params.get("adapter_type"),
         adapter_id=websocket.query_params.get("adapter_id"),
         event_type=websocket.query_params.get("event_type"),
     )

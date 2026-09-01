@@ -16,10 +16,12 @@ from gateway.core import (
 
 def test_unknown_payload_schema_passes_through() -> None:
     payload = Payload("vendor.experimental.v7", {"opaque": [1, 2, 3]})
-    endpoint = EndpointRef("custom", "custom-main", "device/1")
+    endpoint = EndpointRef("iot", "custom", "custom-main", "device/1")
     event = GatewayEvent(source=endpoint, type="device.state", payload=payload)
 
     assert event.payload is payload
+    assert endpoint.family == "iot"
+    assert endpoint.adapter_type == "custom"
     assert event.payload.data == {"opaque": [1, 2, 3]}
     assert event.id.startswith("evt_")
 
@@ -27,11 +29,11 @@ def test_unknown_payload_schema_passes_through() -> None:
 @pytest.mark.parametrize("value", ["", "   "])
 def test_endpoint_rejects_empty_identifiers(value: str) -> None:
     with pytest.raises(ValueError):
-        EndpointRef("mqtt", "home", value)
+        EndpointRef("iot", "mqtt", "home", value)
 
 
 def test_command_and_capability_are_transport_neutral() -> None:
-    target = EndpointRef("robot", "robot-main", "/arm_controller")
+    target = EndpointRef("robotics", "ros2", "robot-main", "/arm_controller")
     command = GatewayCommand(
         target=target,
         type="robot.move",

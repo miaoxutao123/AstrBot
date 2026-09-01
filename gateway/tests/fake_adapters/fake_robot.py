@@ -19,11 +19,11 @@ class FakeRobotAdapter(RecordingAdapter):
     """Record motion commands and emit robot pose events."""
 
     DESCRIPTOR = AdapterDescriptor(
-        id="fake-robot",
+        adapter_type="fake-robot",
         name="Fake Robot",
         version="0.1.0",
         api_version=GATEWAY_API_VERSION,
-        transport="robot",
+        family="robot",
         capabilities=(
             Capability("robot.move"),
             Capability("robot.stop"),
@@ -57,7 +57,7 @@ class FakeRobotAdapter(RecordingAdapter):
             Event emitted through the Gateway context.
         """
         event = GatewayEvent(
-            source=EndpointRef("robot", self.instance_id, endpoint_id),
+            source=EndpointRef("robot", "fake-robot", self.instance_id, endpoint_id),
             type="robot.pose",
             payload=Payload(
                 schema="robot.pose.v1",

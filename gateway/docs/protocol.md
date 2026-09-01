@@ -7,7 +7,8 @@ and WebSocket encoding.
 
 ```json
 {
-  "transport": "telegram",
+  "family": "im",
+  "adapter_type": "telegram",
   "adapter_id": "telegram-main",
   "endpoint_id": "user:123456"
 }
@@ -38,7 +39,8 @@ or normalize it.
 {
   "id": "evt_01",
   "source": {
-    "transport": "sensor",
+    "family": "sensor",
+    "adapter_type": "mqtt",
     "adapter_id": "home",
     "endpoint_id": "temperature/livingroom"
   },
@@ -63,7 +65,8 @@ available or generate one at the adapter boundary.
 {
   "id": "cmd_01",
   "target": {
-    "transport": "robot",
+    "family": "robotics",
+    "adapter_type": "ros2",
     "adapter_id": "robot-01",
     "endpoint_id": "/base_controller"
   },
@@ -233,7 +236,7 @@ metadata rather than paths, and expired objects may be removed by store cleanup.
 ## WebSocket event API
 
 Connect to `GET /v1/events/ws` with an API key having `events:read`. Optional query
-filters are `transport`, `adapter_id`, and `event_type`; omitted fields and `*`
+filters are `family`, `adapter_type`, `adapter_id`, and `event_type`; omitted fields and `*`
 match all events. Event messages use:
 
 ```json
