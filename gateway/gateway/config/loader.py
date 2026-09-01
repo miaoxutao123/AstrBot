@@ -10,6 +10,7 @@ from .schema import (
     AdapterConfig,
     ApiConfig,
     ApiKeyConfig,
+    DynamicSecretsConfig,
     GatewayConfig,
     MediaConfig,
     SecretReference,
@@ -75,7 +76,14 @@ def load_config(path: Path) -> GatewayConfig:
     except (OSError, yaml.YAMLError) as exc:
         raise ConfigError("configuration file could not be parsed") from exc
     root = _mapping(loaded, "configuration")
-    unknown_root = set(root) - {"server", "adapters", "api", "state", "media"}
+    unknown_root = set(root) - {
+        "server",
+        "adapters",
+        "api",
+        "state",
+        "secrets",
+        "media",
+    }
     if unknown_root:
         raise ConfigError(
             f"unknown configuration fields: {', '.join(sorted(unknown_root))}"
@@ -162,6 +170,17 @@ def load_config(path: Path) -> GatewayConfig:
     if state.type not in {"memory", "sqlite"}:
         raise ConfigError("state.type must be memory or sqlite")
 
+    secrets_data = _mapping(root.get("secrets"), "secrets")
+    secrets = DynamicSecretsConfig(
+        type=_string(secrets_data.get("type", "memory"), "secrets.type"),
+        path=_string(
+            secrets_data.get("path", "data/gateway-secrets.json"),
+            "secrets.path",
+        ),
+    )
+    if secrets.type not in {"memory", "encrypted_file"}:
+        raise ConfigError("secrets.type must be memory or encrypted_file")
+
     media_data = _mapping(root.get("media"), "media")
     media = MediaConfig(
         type=_string(media_data.get("type", "memory"), "media.type"),
@@ -183,5 +202,6 @@ def load_config(path: Path) -> GatewayConfig:
         adapters=tuple(adapters),
         api=api,
         state=state,
+        secrets=secrets,
         media=media,
     )

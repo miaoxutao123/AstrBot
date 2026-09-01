@@ -8,6 +8,7 @@ objects are intentionally absent.
 import asyncio
 import base64
 import hashlib
+import json
 import mimetypes
 import time
 import uuid
@@ -50,6 +51,8 @@ from .errors import WeixinAuthenticationError, WeixinError, WeixinRequestError
 
 WeixinClientFactory = Callable[[WeixinConfig], WeixinClient]
 SESSION_KEY = "session"
+TOKEN_KEY = "token"
+CONTEXT_TOKENS_KEY = "context_tokens"
 SESSION_TIMEOUT_ERRCODE = -14
 
 
@@ -575,14 +578,58 @@ class WeixinAdapter(TransportAdapter):
         value = await self._context.state.get(SESSION_KEY)
         if not isinstance(value, Mapping):
             return
-        self._token = _string(value.get("token")) or None
+        legacy_token = _string(value.get("token"))
+        legacy_context_tokens = value.get("context_tokens")
+        normalized_legacy: dict[str, str] = {}
+        if legacy_token:
+            await self._context.secrets.set(TOKEN_KEY, legacy_token)
+        if isinstance(legacy_context_tokens, Mapping):
+            normalized_legacy = {
+                _string(key): _string(token)
+                for key, token in legacy_context_tokens.items()
+                if _string(key) and _string(token)
+            }
+            if normalized_legacy:
+                await self._context.secrets.set(
+                    CONTEXT_TOKENS_KEY,
+                    json.dumps(normalized_legacy, separators=(",", ":")),
+                )
+        if legacy_token or isinstance(legacy_context_tokens, Mapping):
+            if (
+                legacy_token
+                and await self._context.secrets.get(TOKEN_KEY) != legacy_token
+            ):
+                raise RuntimeError("Weixin token migration verification failed")
+            if normalized_legacy and await self._context.secrets.get(
+                CONTEXT_TOKENS_KEY
+            ) != json.dumps(normalized_legacy, separators=(",", ":")):
+                raise RuntimeError(
+                    "Weixin context credential migration verification failed"
+                )
+            await self._context.state.set(
+                SESSION_KEY,
+                {
+                    "account_id": value.get("account_id"),
+                    "base_url": value.get("base_url"),
+                    "cursor": value.get("cursor", ""),
+                },
+            )
+        self._token = await self._context.secrets.get(TOKEN_KEY)
         self._account_id = _string(value.get("account_id")) or None
         self._cursor = _string(value.get("cursor"))
         base_url = _string(value.get("base_url"))
         if base_url:
             self.config = replace(self.config, base_url=base_url.rstrip("/"))
-        tokens = value.get("context_tokens")
-        if isinstance(tokens, Mapping):
+        serialized_tokens = await self._context.secrets.get(CONTEXT_TOKENS_KEY)
+        if serialized_tokens:
+            try:
+                tokens = json.loads(serialized_tokens)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "stored Weixin context credentials are invalid"
+                ) from exc
+            if not isinstance(tokens, Mapping):
+                raise ValueError("stored Weixin context credentials are invalid")
             self._context_tokens = {
                 _string(key): _string(token)
                 for key, token in tokens.items()
@@ -592,14 +639,20 @@ class WeixinAdapter(TransportAdapter):
     async def _save_session(self) -> None:
         if self._context is None or not self._token:
             return
+        await self._context.secrets.set(TOKEN_KEY, self._token)
+        if self._context_tokens:
+            await self._context.secrets.set(
+                CONTEXT_TOKENS_KEY,
+                json.dumps(self._context_tokens, separators=(",", ":")),
+            )
+        else:
+            await self._context.secrets.delete(CONTEXT_TOKENS_KEY)
         await self._context.state.set(
             SESSION_KEY,
             {
-                "token": self._token,
                 "account_id": self._account_id,
                 "base_url": self.config.base_url,
                 "cursor": self._cursor,
-                "context_tokens": dict(self._context_tokens),
             },
         )
 
@@ -611,6 +664,8 @@ class WeixinAdapter(TransportAdapter):
         self._set_auth(AdapterAuthStatus.LOGGED_OUT, reason=reason)
         if self._context is not None:
             await self._context.state.delete(SESSION_KEY)
+            await self._context.secrets.delete(TOKEN_KEY)
+            await self._context.secrets.delete(CONTEXT_TOKENS_KEY)
             self._context.report_state(AdapterState.DEGRADED, reason)
 
     async def capabilities(

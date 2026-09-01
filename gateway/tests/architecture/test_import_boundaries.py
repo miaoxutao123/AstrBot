@@ -34,6 +34,7 @@ def test_core_does_not_import_profiles_api_or_adapter_sdks() -> None:
     assert not any(name.startswith("gateway.adapters") for name in modules)
     assert "aiocqhttp" not in modules
     assert "aiohttp" not in modules
+    assert not any(name == "Crypto" or name.startswith("Crypto.") for name in modules)
     assert "fastapi" not in modules
 
 

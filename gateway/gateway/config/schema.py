@@ -104,6 +104,18 @@ class StateConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class DynamicSecretsConfig:
+    """Configure dynamic adapter credential persistence.
+
+    The encryption master key is intentionally absent and is always resolved from
+    the fixed ``ASTRBOT_GATEWAY_MASTER_KEY`` environment variable.
+    """
+
+    type: str = "memory"
+    path: str = "data/gateway-secrets.json"
+
+
+@dataclass(frozen=True, slots=True)
 class MediaConfig:
     """Configure opaque media storage.
 
@@ -130,6 +142,7 @@ class GatewayConfig:
         adapters: Configured adapter instances.
         api: API authentication and delivery settings.
         state: Adapter persistence configuration.
+        secrets: Dynamic credential persistence configuration.
         media: Media storage configuration.
     """
 
@@ -138,6 +151,7 @@ class GatewayConfig:
     adapters: tuple[AdapterConfig, ...]
     api: ApiConfig
     state: StateConfig
+    secrets: DynamicSecretsConfig
     media: MediaConfig
 
     def secret_references(self) -> tuple[SecretReference, ...]:
@@ -147,6 +161,8 @@ class GatewayConfig:
             API and adapter secret references in deterministic order.
         """
         references = [key.secret for key in self.api.keys]
+        if self.secrets.type == "encrypted_file":
+            references.append(SecretReference("ASTRBOT_GATEWAY_MASTER_KEY"))
         for adapter in self.adapters:
             if not adapter.enabled:
                 continue

@@ -40,6 +40,11 @@ Run that module with an ASGI server such as `uvicorn host:app`. The application
 lifespan starts the event bus and adapters before accepting work and stops them in
 the reverse order.
 
+For persistent adapter login credentials, configure `secrets.type` as
+`encrypted_file` and provide a base64-encoded 32-byte key through
+`ASTRBOT_GATEWAY_MASTER_KEY`. The key must not be placed in YAML. The default
+`memory` secret backend does not persist credentials across restarts.
+
 For a standalone process, copy `gateway.example.yaml`, set the referenced secret
 environment variables, and run:
 

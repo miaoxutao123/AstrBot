@@ -13,6 +13,7 @@ from gateway.core import (
     Payload,
 )
 from gateway.media import MemoryMediaStore
+from gateway.secrets import MemorySecretStore, NamespacedSecretStore
 from gateway.state import MemoryStateStore, NamespacedStateStore
 from tests.fake_adapters import FakeIMAdapter, FakeRobotAdapter, FakeSensorAdapter
 from tests.fake_adapters.base import RecordingAdapter
@@ -37,6 +38,7 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
         get_secret=lambda key: {"TOKEN": "secret"}.get(key),
         report_state=lambda _state, _reason: None,
         state=NamespacedStateStore(MemoryStateStore(), adapter.instance_id),
+        secrets=NamespacedSecretStore(MemorySecretStore(), adapter.instance_id),
         media=MemoryMediaStore(),
     )
     assert adapter.descriptor.api_version == GATEWAY_API_VERSION
@@ -84,6 +86,7 @@ async def test_adapter_context_rejects_spoofed_source() -> None:
         get_secret=lambda _key: None,
         report_state=lambda _state, _reason: None,
         state=NamespacedStateStore(MemoryStateStore(), "sensor-main"),
+        secrets=NamespacedSecretStore(MemorySecretStore(), "sensor-main"),
         media=MemoryMediaStore(),
     )
     spoofed = GatewayEvent(

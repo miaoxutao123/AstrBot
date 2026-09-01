@@ -179,6 +179,13 @@ persistent metadata index but never returns a local absolute path through the AP
 while the host writes `adapter/<adapter_id>/...`. The first backends are memory and
 SQLite; neither contains conversations, prompts, agent memory, or provider data.
 
+Dynamic credentials use the separate string-only `AdapterSecretStore`. Runtime
+gives each adapter an automatically namespaced view, while static deployment
+secrets continue to come from `AdapterContext.get_secret()`. Persistent dynamic
+credentials use a versioned AES-GCM file whose 256-bit base64 master key is read
+only from `ASTRBOT_GATEWAY_MASTER_KEY`; missing keys, invalid keys, and corrupted
+ciphertext fail explicitly without a plaintext fallback.
+
 ### Standalone host
 
 The YAML loader validates duplicate IDs, server/media/state bounds, adapter-owned

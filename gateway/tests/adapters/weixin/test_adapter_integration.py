@@ -20,6 +20,7 @@ from gateway.profiles.im import (
     IMSegment,
     IMTyping,
 )
+from gateway.secrets import AdapterSecretStore, MemorySecretStore
 from gateway.state import MemoryStateStore
 from tests.adapters.weixin.fakes import FakeWeixinClient
 
@@ -33,14 +34,21 @@ async def _eventually(predicate: Callable[[], bool], timeout: float = 1.0) -> No
 
 
 def _runtime(
-    fake: FakeWeixinClient, state: MemoryStateStore | None = None
+    fake: FakeWeixinClient,
+    state: MemoryStateStore | None = None,
+    secrets: AdapterSecretStore | None = None,
 ) -> tuple[AdapterRuntime, MemoryEventBus]:
     registry = AdapterRegistry()
     registry.register(
         "weixin-main", WeixinAdapter("weixin-main", client_factory=lambda _config: fake)
     )
     bus = MemoryEventBus()
-    return AdapterRuntime(registry, bus, state_store=state), bus
+    return AdapterRuntime(
+        registry,
+        bus,
+        state_store=state,
+        secret_store=secrets,
+    ), bus
 
 
 async def test_qr_login_receive_send_media_typing_and_token_expiry() -> None:
@@ -58,6 +66,8 @@ async def test_qr_login_receive_send_media_typing_and_token_expiry() -> None:
     assert (
         await runtime.auth_info("weixin-main")
     ).status == AdapterAuthStatus.LOGGED_OUT
+    assert await runtime.secret_store.get("adapter/weixin-main/token") is None
+    assert await runtime.secret_store.get("adapter/weixin-main/context_tokens") is None
 
     auth = await runtime.start_auth("weixin-main")
     assert auth.status == AdapterAuthStatus.WAITING_USER
@@ -134,6 +144,7 @@ async def test_qr_login_receive_send_media_typing_and_token_expiry() -> None:
 
 async def test_session_is_restored_without_new_qr() -> None:
     state = MemoryStateStore()
+    secrets = MemorySecretStore()
     await state.set(
         "adapter/weixin-main/session",
         {
@@ -145,7 +156,7 @@ async def test_session_is_restored_without_new_qr() -> None:
         },
     )
     fake = FakeWeixinClient()
-    runtime, bus = _runtime(fake, state)
+    runtime, bus = _runtime(fake, state, secrets)
     await bus.start()
     info = await runtime.start("weixin-main")
     assert info.state == AdapterState.RUNNING
@@ -155,8 +166,30 @@ async def test_session_is_restored_without_new_qr() -> None:
     assert not any(
         endpoint.endswith("get_bot_qrcode") for _method, endpoint, _data in fake.calls
     )
+    migrated = await state.get("adapter/weixin-main/session")
+    assert migrated == {
+        "account_id": "bot",
+        "base_url": "https://ilinkai.weixin.qq.com",
+        "cursor": "saved",
+    }
+    assert await secrets.get("adapter/weixin-main/token") == "persisted"
+    assert "context" in str(await secrets.get("adapter/weixin-main/context_tokens"))
     await runtime.stop("weixin-main")
     await bus.stop()
+
+    restarted_fake = FakeWeixinClient()
+    restarted, restarted_bus = _runtime(restarted_fake, state, secrets)
+    await restarted_bus.start()
+    assert (await restarted.start("weixin-main")).state == AdapterState.RUNNING
+    assert (
+        await restarted.auth_info("weixin-main")
+    ).status == AdapterAuthStatus.AUTHENTICATED
+    assert not any(
+        endpoint.endswith("get_bot_qrcode")
+        for _method, endpoint, _data in restarted_fake.calls
+    )
+    await restarted.stop("weixin-main")
+    await restarted_bus.stop()
 
 
 async def test_auth_cancel_and_expiry() -> None:

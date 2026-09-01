@@ -1,5 +1,6 @@
 """YAML configuration, offline checking, host, and CLI tests."""
 
+import base64
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,36 @@ def test_disabled_adapter_does_not_require_its_secret(tmp_path: Path) -> None:
     )
 
     assert result.configured_instances == ()
+
+
+def test_encrypted_secret_backend_requires_environment_master_key(
+    tmp_path: Path,
+) -> None:
+    configured = CONFIG.replace(
+        "media:\n",
+        "secrets:\n  type: encrypted_file\n  path: data/secrets.json\nmedia:\n",
+    ).replace(
+        "    type: onebot\n    config:",
+        "    type: onebot\n    enabled: false\n    config:",
+    )
+    config = load_config(write_config(tmp_path, configured))
+    with pytest.raises(ValueError, match="ASTRBOT_GATEWAY_MASTER_KEY"):
+        check_config(
+            config,
+            EnvironmentSecretResolver({"GATEWAY_API_KEY": "api-key"}),
+        )
+
+    key = base64.b64encode(bytes(range(32))).decode()
+    host = build_host(
+        config,
+        EnvironmentSecretResolver(
+            {
+                "GATEWAY_API_KEY": "api-key",
+                "ASTRBOT_GATEWAY_MASTER_KEY": key,
+            }
+        ),
+    )
+    assert host.secret_store is host.runtime.secret_store
 
 
 def test_cli_check_and_adapters(

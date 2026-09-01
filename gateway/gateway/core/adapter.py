@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from gateway.media import MediaStore
+from gateway.secrets import AdapterSecretStore
 from gateway.state import AdapterStateStore
 
 from .auth import AdapterAuthInfo, AdapterAuthStatus
@@ -75,6 +76,7 @@ class AdapterContext:
         get_secret: Secret resolver controlled by the Gateway host.
         report_state: Runtime callback for connection health transitions.
         state: State store restricted to this adapter's namespace.
+        secrets: Dynamic credential store restricted to this adapter's namespace.
         media: Generic media store shared through opaque media identifiers.
     """
 
@@ -86,6 +88,7 @@ class AdapterContext:
         get_secret: SecretProvider,
         report_state: StateReporter,
         state: AdapterStateStore,
+        secrets: AdapterSecretStore,
         media: MediaStore,
     ) -> None:
         self.adapter_id = adapter_id
@@ -94,6 +97,7 @@ class AdapterContext:
         self._get_secret = get_secret
         self._report_state = report_state
         self.state = state
+        self.secrets = secrets
         self.media = media
 
     async def emit(self, event: GatewayEvent) -> None:

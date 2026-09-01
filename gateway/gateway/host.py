@@ -5,9 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from gateway.api import ApiKey, create_app
-from gateway.config import EnvironmentSecretResolver, GatewayConfig, check_config
+from gateway.config import (
+    EnvironmentSecretResolver,
+    GatewayConfig,
+    SecretReference,
+    check_config,
+)
 from gateway.core import AdapterRegistry, AdapterRuntime, MemoryEventBus
 from gateway.media import FileMediaStore, MediaStore, MemoryMediaStore
+from gateway.secrets import AdapterSecretStore, MemorySecretStore
+from gateway.secrets.encrypted_file import EncryptedFileSecretStore
 from gateway.state import AdapterStateStore, MemoryStateStore, SQLiteStateStore
 
 
@@ -29,6 +36,7 @@ class GatewayHost:
     runtime: AdapterRuntime
     event_bus: MemoryEventBus
     state_store: AdapterStateStore
+    secret_store: AdapterSecretStore
     media_store: MediaStore
 
 
@@ -72,6 +80,16 @@ def build_host(
             config.media.max_upload_size,
             config.media.ttl_seconds,
         )
+    if config.secrets.type == "encrypted_file":
+        secrets_path = Path(config.secrets.path)
+        if not secrets_path.is_absolute():
+            secrets_path = base_directory / secrets_path
+        secret_store: AdapterSecretStore = EncryptedFileSecretStore(
+            secrets_path,
+            secret_resolver.require(SecretReference("ASTRBOT_GATEWAY_MASTER_KEY")),
+        )
+    else:
+        secret_store = MemorySecretStore()
     registry = AdapterRegistry()
     discovery = registry.discover()
     for adapter in config.adapters:
@@ -87,6 +105,7 @@ def build_host(
         event_bus,
         secret_provider=secret_resolver.get,
         state_store=state_store,
+        secret_store=secret_store,
         media_store=media_store,
     )
     api_keys = [
@@ -111,5 +130,6 @@ def build_host(
         runtime,
         event_bus,
         state_store,
+        secret_store,
         media_store,
     )

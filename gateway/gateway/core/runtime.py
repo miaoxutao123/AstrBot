@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from gateway.media import MediaStore, MemoryMediaStore
+from gateway.secrets import AdapterSecretStore, MemorySecretStore, NamespacedSecretStore
 from gateway.state import (
     AdapterStateStore,
     MemoryStateStore,
@@ -66,6 +67,7 @@ class AdapterRuntime:
         logger: logging.Logger | None = None,
         secret_provider: Callable[[str], str | None] | None = None,
         state_store: AdapterStateStore | None = None,
+        secret_store: AdapterSecretStore | None = None,
         media_store: MediaStore | None = None,
     ) -> None:
         self._registry = registry
@@ -73,6 +75,7 @@ class AdapterRuntime:
         self._logger = logger or logging.getLogger("gateway.runtime")
         self._secret_provider = secret_provider or os.getenv
         self._state_store = state_store or MemoryStateStore()
+        self._secret_store = secret_store or MemorySecretStore()
         self._media_store = media_store or MemoryMediaStore()
         self._states: dict[str, AdapterState] = {}
         self._reasons: dict[str, str | None] = {}
@@ -96,6 +99,11 @@ class AdapterRuntime:
             Host-owned state store. Adapters receive only namespaced views.
         """
         return self._state_store
+
+    @property
+    def secret_store(self) -> AdapterSecretStore:
+        """Return the host-owned dynamic credential backend."""
+        return self._secret_store
 
     def info(self, adapter_id: str) -> AdapterRuntimeInfo:
         """Return current state for a configured adapter.
@@ -160,6 +168,7 @@ class AdapterRuntime:
                     reason,
                 ),
                 state=NamespacedStateStore(self._state_store, adapter_id),
+                secrets=NamespacedSecretStore(self._secret_store, adapter_id),
                 media=self._media_store,
             )
             try:

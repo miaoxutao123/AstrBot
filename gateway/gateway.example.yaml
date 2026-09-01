@@ -6,6 +6,10 @@ state:
   type: sqlite
   path: data/gateway-state.db
 
+secrets:
+  type: encrypted_file
+  path: data/gateway-secrets.json
+
 media:
   type: file
   path: data/media
