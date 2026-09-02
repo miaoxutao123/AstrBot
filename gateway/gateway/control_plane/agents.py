@@ -18,7 +18,10 @@ class AgentRegistry:
 
     def __init__(self, path: Path, *, online_after: float = 60) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(path)
+        # The registry is used by FastAPI lifespan and request handlers,
+        # which can run on different threads under ASGI test and production
+        # servers.
+        self._connection = sqlite3.connect(path, check_same_thread=False)
         self._online_after = online_after
         self._connection.executescript("""
         CREATE TABLE IF NOT EXISTS enrollments (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, name_hint TEXT, scopes TEXT NOT NULL, expires_at REAL NOT NULL, consumed_at REAL);
