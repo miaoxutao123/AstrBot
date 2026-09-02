@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from gateway import __version__
-from gateway.control_plane import AgentRegistry, ManagedAdapterStore
+from gateway.control_plane import AgentRegistry, ManagedAdapterStore, ManagedSecretStore
 from gateway.core import (
     AdapterRuntime,
     GatewayError,
@@ -55,6 +55,7 @@ def create_app(
     client_queue_size: int = 256,
     agent_registry: AgentRegistry | None = None,
     managed_adapter_store: ManagedAdapterStore | None = None,
+    managed_secret_store: ManagedSecretStore | None = None,
 ) -> FastAPI:
     """Create a Gateway API bound to existing Core services.
 
@@ -87,6 +88,7 @@ def create_app(
         media=runtime.media_store,
         heartbeat_interval=heartbeat_interval,
         agents=agent_registry,
+        managed_secrets=managed_secret_store,
         managed_adapters=managed_adapter_store,
     )
 

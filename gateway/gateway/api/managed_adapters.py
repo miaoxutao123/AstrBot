@@ -17,6 +17,20 @@ def _store(request: Request) -> Any:
     return store
 
 
+async def _save_secrets(request: Request, adapter_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    secrets = get_services(request).managed_secrets
+    if secrets is None:
+        return config
+    result = dict(config)
+    for key, value in tuple(result.items()):
+        if isinstance(value, dict) and value.get("clear") is True:
+            await secrets.delete(adapter_id, key)
+            result.pop(key)
+        elif key in {"secret", "token", "app_secret"} and isinstance(value, str):
+            result[key] = await secrets.set(adapter_id, key, value)
+    return result
+
+
 @router.get("/adapter-instances")
 async def list_instances(
     request: Request,
@@ -35,6 +49,9 @@ async def list_instances(
         for info in get_services(request).runtime.list_info()
         if info.adapter_id not in {item["id"] for item in managed}
     ]
+    secrets = get_services(request).managed_secrets
+    if secrets is not None:
+        managed = [{**item, "config": secrets.public(item["config"])} for item in managed]
     return {"instances": [*yaml_instances, *managed]}
 
 
@@ -44,14 +61,13 @@ async def create_instance(
     request: Request,
     body: dict[str, Any] = Body(),
 ) -> dict[str, Any]:
-    return dict(
-        _store(request).put(
+    config = await _save_secrets(request, str(body.get("id", "")), dict(body.get("config", {})))
+    return dict(_store(request).put(
             str(body.get("id", "")),
             str(body.get("type", "")),
             bool(body.get("enabled", True)),
-            dict(body.get("config", {})),
-        )
-    )
+            config,
+        ))
 
 
 @router.patch("/adapter-instances/{adapter_id}")
@@ -61,7 +77,12 @@ async def patch_instance(
     request: Request,
     body: dict[str, Any] = Body(),
 ) -> dict[str, Any]:
-    return dict(_store(request).patch(adapter_id, body))
+    changes = dict(body)
+    if "config" in changes:
+        changes["config"] = await _save_secrets(
+            request, adapter_id, dict(changes["config"])
+        )
+    return dict(_store(request).patch(adapter_id, changes))
 
 
 @router.get("/adapter-types")

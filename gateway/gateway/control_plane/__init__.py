@@ -2,5 +2,6 @@
 
 from .adapters import ManagedAdapterStore
 from .agents import AgentRegistry
+from .secrets import ManagedSecretStore
 
-__all__ = ["AgentRegistry", "ManagedAdapterStore"]
+__all__ = ["AgentRegistry", "ManagedAdapterStore", "ManagedSecretStore"]
