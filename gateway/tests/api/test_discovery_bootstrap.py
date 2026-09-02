@@ -8,6 +8,7 @@ from tests.api.test_http_websocket import ADMIN_HEADERS, READ_HEADERS, build_im_
 def test_discovery_derives_authorized_bidirectional_endpoint() -> None:
     app, adapter = build_im_app()
     with TestClient(app) as client:
+        assert client.portal is not None
         client.portal.call(adapter.emit_message, "private:1", "hello")
         response = client.get("/v1/discovery", headers=ADMIN_HEADERS)
     assert response.status_code == 200
