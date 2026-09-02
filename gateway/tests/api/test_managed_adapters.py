@@ -6,6 +6,7 @@ from gateway.api import ApiKey, create_app
 from gateway.control_plane import ManagedAdapterStore, ManagedSecretStore
 from gateway.core import AdapterRegistry, AdapterRuntime, MemoryEventBus
 from gateway.secrets import MemorySecretStore
+from tests.fake_adapters import FakeIMAdapter
 
 
 def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -52,7 +53,7 @@ def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None
 def test_adapter_type_catalog_is_host_owned(tmp_path) -> None:  # type: ignore[no-untyped-def]
     bus = MemoryEventBus()
     registry = AdapterRegistry()
-    registry.register_factory("telegram", lambda _id, _config: None)  # type: ignore[arg-type]
+    registry.register_factory("telegram", FakeIMAdapter)
     runtime = AdapterRuntime(registry, bus)
     app = create_app(
         runtime,
