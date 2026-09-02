@@ -184,7 +184,7 @@ async def test_heartbeat_timeout_closes_socket() -> None:
     assert socket.closed
 
 
-async def test_connection_retrieves_heartbeat_timeout() -> None:
+async def test_heartbeat_timeout_reconnects_cleanly() -> None:
     client = TencentGatewayClient(config(), "app", "secret", "token", 9999999999)
     socket = BlockingFakeSocket([{"op": 10, "d": {"heartbeat_interval": 1}}])
 
@@ -220,18 +220,19 @@ async def test_revoked_cached_token_refreshes_once() -> None:
     assert credentials[1][0] == "fresh"
 
 
-async def test_refreshed_token_rejection_fails_without_looping() -> None:
+async def test_refresh_failure_becomes_auth_failed() -> None:
     client = TencentGatewayClient(config(), "app", "secret", "revoked", 9999999999)
     session = FakeSession(
         [
             FakeResponse(401, {}),
-            FakeResponse(200, {"access_token": "fresh", "expires_in": 7200}),
-            FakeResponse(403, {}),
+            FakeResponse(401, {}),
         ]
     )
     client._session = session
 
-    with pytest.raises(QQOfficialAuthenticationError, match="after refresh"):
+    with pytest.raises(
+        QQOfficialAuthenticationError, match="credentials were rejected"
+    ):
         await client.request("GET", "/gateway/bot")
     assert session.auth_calls == 1
-    assert session.request_tokens == ["QQBot revoked", "QQBot fresh"]
+    assert session.request_tokens == ["QQBot revoked"]

@@ -4,10 +4,14 @@ on:
   push:
     paths:
       - 'gateway/**'
+      - 'packages/python-sdk/**'
+      - 'examples/python_echo_agent.py'
       - '.github/workflows/gateway-ci.yml'
   pull_request:
     paths:
       - 'gateway/**'
+      - 'packages/python-sdk/**'
+      - 'examples/python_echo_agent.py'
       - '.github/workflows/gateway-ci.yml'
   workflow_dispatch:
 
@@ -174,3 +178,26 @@ jobs:
       - run: python -m pip install --upgrade uv
       - run: uv sync --extra qq_official
       - run: uv run pytest -q tests/adapters/qq_official tests/contract
+
+  sdk:
+    name: Python SDK / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync --extra api
+      - run: >-
+          PYTHONPATH=../packages/python-sdk/src
+          uv run pytest -q tests/sdk
+      - run: >-
+          PYTHONPATH=../packages/python-sdk/src
+          uv run pytest -q -o asyncio_mode=auto ../packages/python-sdk/tests
+      - run: uv run ruff check ../packages/python-sdk ../examples/python_echo_agent.py

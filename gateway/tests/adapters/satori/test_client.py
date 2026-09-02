@@ -14,7 +14,7 @@ class HandshakeFailure(Exception):
         self.response = Response(status_code)
 
 
-def test_websocket_authentication_rejection_classification() -> None:
+def test_websocket_authentication_rejection_is_terminal() -> None:
     client = AiohttpSatoriClient(SatoriConfig.from_mapping({}), None)
 
     assert client._is_authentication_rejection(HandshakeFailure(401))
