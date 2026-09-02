@@ -36,6 +36,10 @@ class ManagedAdapterStore:
             for row in rows
         ]
 
+    def get(self, adapter_id: str) -> dict[str, Any] | None:
+        """Return one managed instance without exposing a mutable backing row."""
+        return next((item for item in self.list() if item["id"] == adapter_id), None)
+
     def put(
         self, adapter_id: str, adapter_type: str, enabled: bool, config: dict[str, Any]
     ) -> dict[str, Any]:

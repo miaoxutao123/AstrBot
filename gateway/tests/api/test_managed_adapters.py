@@ -11,7 +11,9 @@ from tests.fake_adapters import FakeIMAdapter
 
 def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None:  # type: ignore[no-untyped-def]
     bus = MemoryEventBus()
-    runtime = AdapterRuntime(AdapterRegistry(), bus)
+    adapters = AdapterRegistry()
+    adapters.register_factory("qq_official", FakeIMAdapter)
+    runtime = AdapterRuntime(adapters, bus)
     managed = ManagedAdapterStore(tmp_path / "managed.db")
     secrets = ManagedSecretStore(MemorySecretStore())
     app = create_app(
@@ -40,6 +42,11 @@ def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None
             json={"config": {"app_id": "456"}},
         )
         deleted = client.delete("/v1/adapter-instances/qq-main", headers=headers)
+        unavailable = client.post(
+            "/v1/adapter-instances",
+            headers=headers,
+            json={"id": "unknown", "type": "not-installed", "enabled": False},
+        )
 
     assert created.status_code == 200
     assert "never-public" not in str(created.json())
@@ -47,6 +54,7 @@ def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None
     assert patched.json()["config"]["secret"] == {"configured": True}
     assert b"never-public" not in (tmp_path / "managed.db").read_bytes()
     assert deleted.status_code == 200
+    assert unavailable.status_code == 400
     assert managed.list() == []
 
 

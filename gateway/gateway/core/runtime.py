@@ -141,6 +141,10 @@ class AdapterRuntime:
         """Expose discovered adapter types without instantiating them."""
         return tuple(self._registry.factory_types())
 
+    def supports_adapter_type(self, adapter_type: str) -> bool:
+        """Return whether Host discovery registered an adapter factory."""
+        return adapter_type in self.adapter_types()
+
     async def add_adapter(
         self, adapter_id: str, adapter_type: str, config: dict[str, object]
     ) -> AdapterRuntimeInfo:

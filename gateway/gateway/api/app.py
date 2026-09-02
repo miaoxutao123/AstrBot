@@ -186,6 +186,21 @@ def create_app(
             content={"error": error_to_dict(error)},
         )
 
+    @app.exception_handler(ValueError)
+    async def handle_value_error(
+        _request: Request,
+        exc: ValueError,
+    ) -> JSONResponse:
+        """Return validation failures without a traceback or request data."""
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": error_to_dict(
+                    GatewayError(GatewayErrorCode.INVALID_COMMAND, str(exc))
+                )
+            },
+        )
+
     @app.exception_handler(Exception)
     async def handle_unexpected_error(
         request: Request,

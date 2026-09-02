@@ -32,7 +32,11 @@ async def _save_secrets(
         return config
     result = dict(config)
     for key, value in tuple(result.items()):
-        if isinstance(value, dict) and value.get("clear") is True:
+        if (
+            key in {"secret", "token", "app_secret"}
+            and isinstance(value, dict)
+            and value.get("clear") is True
+        ):
             await secrets.delete(adapter_id, key)
             result.pop(key)
         elif key in {"secret", "token", "app_secret"} and isinstance(value, str):
@@ -100,13 +104,17 @@ async def create_instance(
     request: Request,
     body: dict[str, Any] = Body(),
 ) -> dict[str, Any]:
-    config = await _save_secrets(
-        request, str(body.get("id", "")), dict(body.get("config", {}))
-    )
+    adapter_id = str(body.get("id", ""))
+    adapter_type = str(body.get("type", ""))
+    if _store(request).get(adapter_id) is not None:
+        raise ValueError("managed adapter id already exists; use PATCH to update it")
+    if not get_services(request).runtime.supports_adapter_type(adapter_type):
+        raise ValueError("adapter type is not available")
+    config = await _save_secrets(request, adapter_id, dict(body.get("config", {})))
     instance = dict(
         _store(request).put(
-            str(body.get("id", "")),
-            str(body.get("type", "")),
+            adapter_id,
+            adapter_type,
             bool(body.get("enabled", True)),
             config,
         )
