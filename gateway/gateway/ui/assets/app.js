@@ -17,9 +17,20 @@ async function overview() {
 }
 async function connections() {
   const data = await api('/adapter-instances');
-  app.innerHTML = `<div class="header"><h1>Connections</h1><button id="add">Add connection</button></div><table><thead><tr><th>ID</th><th>Type</th><th>Source</th><th>State</th><th></th></tr></thead><tbody>${data.instances.map(item => `<tr><td>${escape(item.id)}</td><td>${escape(item.type)}</td><td>${escape(item.source)}</td><td>${escape(item.state || (item.enabled ? 'configured' : 'disabled'))}</td><td>${item.source === 'managed' ? `<button data-delete="${escape(item.id)}">Delete</button>` : 'Read-only'}</td></tr>`).join('')}</tbody></table>`;
+  app.innerHTML = `<div class="header"><h1>Connections</h1><button id="add">Add connection</button></div><table><thead><tr><th>ID</th><th>Type</th><th>Source</th><th>State</th><th></th></tr></thead><tbody>${data.instances.map(item => `<tr><td>${escape(item.id)}</td><td>${escape(item.type)}</td><td>${escape(item.source)}</td><td>${escape(item.state || (item.enabled ? 'configured' : 'disabled'))}</td><td><button data-auth="${escape(item.id)}">Authentication</button> ${item.source === 'managed' ? `<button data-delete="${escape(item.id)}">Delete</button>` : 'Read-only'}</td></tr>`).join('')}</tbody></table>`;
   document.querySelector('#add').onclick = addConnection;
+  document.querySelectorAll('[data-auth]').forEach(button => button.onclick = () => showAuth(button.dataset.auth));
   document.querySelectorAll('[data-delete]').forEach(button => button.onclick = async () => { await api(`/adapter-instances/${button.dataset.delete}`, { method: 'DELETE' }); connections(); });
+}
+async function showAuth(adapterId) {
+  const dialog = document.createElement('dialog');
+  dialog.innerHTML = `<form method="dialog"><h2>Authentication: ${escape(adapterId)}</h2><p id="auth-status">Loading…</p><div id="auth-challenge"></div><menu><button id="auth-cancel" type="button">Cancel authentication</button><button id="auth-start" type="button">Start authentication</button><button>Close</button></menu></form>`;
+  document.body.append(dialog); dialog.showModal();
+  const render = info => { dialog.querySelector('#auth-status').textContent = info.status + (info.reason ? `: ${info.reason}` : ''); const challenge = info.challenge; dialog.querySelector('#auth-challenge').innerHTML = challenge ? `${challenge.qr_uri ? `<img alt="Authentication QR code" src="${escape(challenge.qr_uri)}">` : ''}<p>${escape(challenge.instructions || '')}</p><code>${escape(challenge.verification_code || '')}</code>` : ''; };
+  const refresh = async () => render(await api(`/adapters/${adapterId}/auth`));
+  dialog.querySelector('#auth-start').onclick = async () => { render(await api(`/adapters/${adapterId}/auth/start`, { method: 'POST' })); };
+  dialog.querySelector('#auth-cancel').onclick = async () => { render(await api(`/adapters/${adapterId}/auth/cancel`, { method: 'POST' })); };
+  dialog.addEventListener('close', () => dialog.remove()); await refresh();
 }
 async function addConnection() {
   const catalog = await api('/adapter-types');
