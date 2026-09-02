@@ -108,6 +108,20 @@ async def test_http_auth_media_and_reply_helper() -> None:
     assert command["correlation_id"] == "evt-1"
 
 
+async def test_respond_falls_back_to_send_when_reply_is_unavailable() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/v1/discovery":
+            return httpx.Response(200, json={"gateway": {}, "access": {}, "adapters": [], "endpoints": [{"id": "one", **endpoint(), "direction": "bidirectional", "capabilities": [{"name": "im.message.send", "authorized": True, "direction": "outbound"}]}]})
+        return httpx.Response(200, json={"status": "success"})
+
+    async with AsyncGatewayClient("http://gateway.invalid", client=httpx.AsyncClient(base_url="http://gateway.invalid", transport=httpx.MockTransport(handler))) as gateway:
+        await gateway.respond(client_module.GatewayEvent.from_wire(event()), "fallback")
+    assert json.loads(requests[-1].content)["type"] == "im.message.send"
+
+
 async def test_events_reconnect_with_replay_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
     sockets = [
         FakeSocket([{"type": "event", "data": event("evt-1")}]),

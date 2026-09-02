@@ -18,3 +18,16 @@ Bridge configuration stores an API-key environment-variable name only. Command e
 ## CI and manual smoke
 
 Run Gateway tests plus SDK/Bridge/MCP package tests. For a real Harness, give it only Gateway URL, `GATEWAY_API_KEY`, and the bootstrap instructions; it must create its own wrapper and configuration, run doctor, then complete FakeIM → Gateway → Bridge → Harness → Gateway → FakeIM without repository changes.
+
+## P7B.1 hardening
+
+- `respond()` discovers the current endpoint's authorized capabilities and uses
+  `im.message.reply` when available, otherwise `im.message.send`; Weixin is
+  no longer assumed to support replies.
+- Bridge uses a bounded pending queue and fixed worker pool, with per-session
+  serialization. CLI create/run/close share one event loop.
+- Doctor validates access, writable SQLite state, and a real synthetic local
+  invocation/result protocol exchange without sending an IM.
+- Capability traits declare required scopes; unknown capabilities are not
+  reported as authorized. The public bootstrap guide endpoint matches its
+  manifest URL. CI now includes Bridge and MCP package checks/tests.

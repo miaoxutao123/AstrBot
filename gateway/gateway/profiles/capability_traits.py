@@ -15,21 +15,46 @@ class CapabilityTrait:
     name: str
     direction: str
     family: str
+    required_scopes: tuple[str, ...]
 
 
 IM_MESSAGE_RECEIVE = "im.message.receive"
 IM_REACTION_RECEIVE = "im.reaction.receive"
 
 CAPABILITY_TRAITS: dict[str, CapabilityTrait] = {
-    IM_MESSAGE_RECEIVE: CapabilityTrait(IM_MESSAGE_RECEIVE, "inbound", "im"),
-    IM_REACTION_RECEIVE: CapabilityTrait(IM_REACTION_RECEIVE, "inbound", "im"),
-    "im.message.send": CapabilityTrait("im.message.send", "outbound", "im"),
-    "im.message.reply": CapabilityTrait("im.message.reply", "outbound", "im"),
-    "im.message.edit": CapabilityTrait("im.message.edit", "outbound", "im"),
-    "im.message.delete": CapabilityTrait("im.message.delete", "outbound", "im"),
-    "im.reaction.add": CapabilityTrait("im.reaction.add", "outbound", "im"),
-    "im.reaction.remove": CapabilityTrait("im.reaction.remove", "outbound", "im"),
-    "im.typing.set": CapabilityTrait("im.typing.set", "outbound", "im"),
+    IM_MESSAGE_RECEIVE: CapabilityTrait(
+        IM_MESSAGE_RECEIVE, "inbound", "im", ("events:read",)
+    ),
+    IM_REACTION_RECEIVE: CapabilityTrait(
+        IM_REACTION_RECEIVE, "inbound", "im", ("events:read",)
+    ),
+    "im.message.send": CapabilityTrait(
+        "im.message.send", "outbound", "im", ("commands:send",)
+    ),
+    "im.message.reply": CapabilityTrait(
+        "im.message.reply", "outbound", "im", ("commands:send",)
+    ),
+    "im.message.edit": CapabilityTrait(
+        "im.message.edit", "outbound", "im", ("commands:send",)
+    ),
+    "im.message.delete": CapabilityTrait(
+        "im.message.delete", "outbound", "im", ("commands:send",)
+    ),
+    "im.reaction.add": CapabilityTrait(
+        "im.reaction.add", "outbound", "im", ("commands:send",)
+    ),
+    "im.reaction.remove": CapabilityTrait(
+        "im.reaction.remove", "outbound", "im", ("commands:send",)
+    ),
+    "im.typing.set": CapabilityTrait(
+        "im.typing.set", "outbound", "im", ("commands:send",)
+    ),
+    "robot.motion.command": CapabilityTrait(
+        "robot.motion.command",
+        "outbound",
+        "robotics",
+        ("commands:send", "hardware:control"),
+    ),
 }
 
 

@@ -64,18 +64,28 @@ class AsyncGatewayClient:
         return GatewayInventory.from_wire(await self._get("/v1/discovery"))
 
     async def find_endpoints(
-        self, *, family: str | None = None, adapter_type: str | None = None,
-        adapter_id: str | None = None, capability: str | None = None,
+        self,
+        *,
+        family: str | None = None,
+        adapter_type: str | None = None,
+        adapter_id: str | None = None,
+        capability: str | None = None,
         direction: str | None = None,
     ) -> list[Mapping[str, Any]]:
         """Filter the aggregate inventory without reconstructing it manually."""
         endpoints = (await self.discover()).endpoints
-        return [endpoint.raw for endpoint in endpoints if
-                (family is None or endpoint.source.family == family) and
-                (adapter_type is None or endpoint.source.adapter_type == adapter_type) and
-                (adapter_id is None or endpoint.source.adapter_id == adapter_id) and
-                (direction is None or endpoint.direction == direction) and
-                (capability is None or any(item.name == capability for item in endpoint.capabilities))]
+        return [
+            endpoint.raw
+            for endpoint in endpoints
+            if (family is None or endpoint.source.family == family)
+            and (adapter_type is None or endpoint.source.adapter_type == adapter_type)
+            and (adapter_id is None or endpoint.source.adapter_id == adapter_id)
+            and (direction is None or endpoint.direction == direction)
+            and (
+                capability is None
+                or any(item.name == capability for item in endpoint.capabilities)
+            )
+        ]
 
     async def get_capabilities(
         self, endpoint: str | Mapping[str, Any]
@@ -106,6 +116,45 @@ class AsyncGatewayClient:
                 "reply_to": message.id,
             },
             correlation_id=event.id,
+        )
+
+    async def respond(self, event: GatewayEvent, text: str) -> Mapping[str, Any]:
+        """Reply when supported, otherwise send to the source endpoint.
+
+        This is the platform-neutral current-conversation response primitive.
+        """
+        endpoints = await self.find_endpoints(
+            family=event.source.family,
+            adapter_type=event.source.adapter_type,
+            adapter_id=event.source.adapter_id,
+        )
+        endpoint = next(
+            (
+                item
+                for item in endpoints
+                if item.get("endpoint_id") == event.source.endpoint_id
+            ),
+            None,
+        )
+        capabilities = endpoint.get("capabilities", []) if endpoint else []
+        names = {item.get("name") for item in capabilities if item.get("authorized")}
+        if "im.message.reply" in names:
+            return await self.reply(event, text)
+        if "im.message.send" in names:
+            return await self.send_text(event.source, text)
+        raise RuntimeError("NO_OUTBOUND_CAPABILITY")
+
+    async def execute(
+        self,
+        endpoint: SourceEndpoint | Mapping[str, Any],
+        command_type: str,
+        payload: Mapping[str, Any],
+        *,
+        schema: str = "gateway.command.v1",
+    ) -> Mapping[str, Any]:
+        """Execute a public generic Gateway command without SDK-private APIs."""
+        return await self._command(
+            self._endpoint_wire(endpoint), command_type, payload, schema=schema
         )
 
     async def upload_media(
@@ -182,12 +231,13 @@ class AsyncGatewayClient:
         data: Mapping[str, Any],
         *,
         correlation_id: str | None = None,
+        schema: str = "im.message.outbound.v1",
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {
             "id": f"sdk_{uuid.uuid4().hex}",
             "target": dict(target),
             "type": command_type,
-            "payload": {"schema": "im.message.outbound.v1", "data": dict(data)},
+            "payload": {"schema": schema, "data": dict(data)},
         }
         if correlation_id is not None:
             body["correlation_id"] = correlation_id

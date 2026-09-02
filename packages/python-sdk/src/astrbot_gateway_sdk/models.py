@@ -122,8 +122,13 @@ class CapabilityInfo:
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityInfo":
-        return cls(str(value["name"]), str(value.get("direction", "unknown")),
-                   bool(value.get("supported", True)), bool(value.get("authorized", False)), value)
+        return cls(
+            str(value["name"]),
+            str(value.get("direction", "unknown")),
+            bool(value.get("supported", True)),
+            bool(value.get("authorized", False)),
+            value,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,9 +143,17 @@ class EndpointInfo:
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "EndpointInfo":
-        return cls(str(value["id"]), SourceEndpoint.from_wire(value), tuple(
-            CapabilityInfo.from_wire(item) for item in value.get("capabilities", []) if isinstance(item, Mapping)),
-            str(value.get("direction", "none")), value)
+        return cls(
+            str(value["id"]),
+            SourceEndpoint.from_wire(value),
+            tuple(
+                CapabilityInfo.from_wire(item)
+                for item in value.get("capabilities", [])
+                if isinstance(item, Mapping)
+            ),
+            str(value.get("direction", "none")),
+            value,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,8 +170,15 @@ class AdapterInfo:
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "AdapterInfo":
-        return cls(*(str(value[key]) for key in ("family", "adapter_type", "adapter_id", "state")),
-                   str(value.get("supported_direction", "none")), str(value.get("effective_direction", "none")), value)
+        return cls(
+            *(
+                str(value[key])
+                for key in ("family", "adapter_type", "adapter_id", "state")
+            ),
+            str(value.get("supported_direction", "none")),
+            str(value.get("effective_direction", "none")),
+            value,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +193,18 @@ class GatewayInventory:
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "GatewayInventory":
-        return cls(value.get("gateway", {}), value.get("access", {}), tuple(
-            AdapterInfo.from_wire(item) for item in value.get("adapters", []) if isinstance(item, Mapping)), tuple(
-            EndpointInfo.from_wire(item) for item in value.get("endpoints", []) if isinstance(item, Mapping)), value)
+        return cls(
+            value.get("gateway", {}),
+            value.get("access", {}),
+            tuple(
+                AdapterInfo.from_wire(item)
+                for item in value.get("adapters", [])
+                if isinstance(item, Mapping)
+            ),
+            tuple(
+                EndpointInfo.from_wire(item)
+                for item in value.get("endpoints", [])
+                if isinstance(item, Mapping)
+            ),
+            value,
+        )

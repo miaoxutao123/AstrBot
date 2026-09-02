@@ -5,12 +5,16 @@ on:
     paths:
       - 'gateway/**'
       - 'packages/python-sdk/**'
+      - 'packages/agent-bridge/**'
+      - 'packages/mcp-server/**'
       - 'examples/python_echo_agent.py'
       - '.github/workflows/gateway-ci.yml'
   pull_request:
     paths:
       - 'gateway/**'
       - 'packages/python-sdk/**'
+      - 'packages/agent-bridge/**'
+      - 'packages/mcp-server/**'
       - 'examples/python_echo_agent.py'
       - '.github/workflows/gateway-ci.yml'
   workflow_dispatch:
@@ -201,3 +205,42 @@ jobs:
           PYTHONPATH=../packages/python-sdk/src
           uv run pytest -q -o asyncio_mode=auto ../packages/python-sdk/tests
       - run: uv run ruff check ../packages/python-sdk ../examples/python_echo_agent.py
+      - run: uv run ruff format --check ../packages/python-sdk ../examples/python_echo_agent.py
+
+  agent-bridge:
+    name: Agent Bridge / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync --extra api
+      - run: >-
+          PYTHONPATH=../packages/python-sdk/src:../packages/agent-bridge/src
+          uv run pytest -q -o asyncio_mode=auto ../packages/agent-bridge/tests
+      - run: uv run ruff format --check ../packages/agent-bridge
+      - run: uv run ruff check ../packages/agent-bridge
+
+  mcp:
+    name: MCP package / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade uv
+      - run: uv sync --extra api
+      - run: uv run ruff format --check ../packages/mcp-server
+      - run: uv run ruff check ../packages/mcp-server
+      - run: >-
+          PYTHONPATH=../packages/python-sdk/src:../packages/mcp-server/src
+          uv run --with 'mcp>=1,<2' pytest -q ../packages/mcp-server/tests
