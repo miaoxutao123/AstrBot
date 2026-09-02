@@ -3,10 +3,12 @@
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from gateway import __version__
 from gateway.control_plane import AgentRegistry, ManagedAdapterStore, ManagedSecretStore
@@ -216,4 +218,21 @@ def create_app(
     app.include_router(events.router)
     app.include_router(media.router)
     app.include_router(websocket.router)
+    ui_directory = Path(__file__).parent.parent / "ui"
+    if ui_directory.is_dir():
+        app.mount(
+            "/ui/assets",
+            StaticFiles(directory=ui_directory / "assets"),
+            name="ui-assets",
+        )
+
+        @app.get("/ui", include_in_schema=False)
+        @app.get("/ui/{path:path}", include_in_schema=False)
+        async def gateway_ui(path: str = "") -> FileResponse:
+            """Serve the standalone Gateway control-plane SPA."""
+            candidate = ui_directory / path
+            if path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(ui_directory / "index.html")
+
     return app
