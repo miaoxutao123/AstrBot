@@ -225,6 +225,9 @@ jobs:
           uv run pytest -q -o asyncio_mode=auto ../packages/agent-bridge/tests
       - run: uv run ruff format --check ../packages/agent-bridge
       - run: uv run ruff check ../packages/agent-bridge
+      - run: >-
+          uv run --with ../packages/python-sdk --with ../packages/agent-bridge
+          astrbot-gateway-agent --help
 
   mcp:
     name: MCP package / Python ${{ matrix.python-version }}
@@ -244,3 +247,6 @@ jobs:
       - run: >-
           PYTHONPATH=../packages/python-sdk/src:../packages/mcp-server/src
           uv run --with 'mcp>=1,<2' pytest -q ../packages/mcp-server/tests
+      - run: >-
+          uv run --with ../packages/python-sdk --with ../packages/mcp-server
+          --with 'mcp>=1,<2' python -c "import astrbot_gateway_mcp.server"

@@ -70,6 +70,22 @@ async def _doctor(config: BridgeConfig) -> int:
     return 0 if event_ok and command_ok else 1
 
 
+async def _discover(config: BridgeConfig) -> int:
+    """Print only the authenticated Gateway inventory; never invoke a Harness."""
+    key = os.getenv(config.api_key_env)
+    if not key:
+        print(f"Authentication              FAIL ({config.api_key_env} is unset)")
+        return 1
+    async with AsyncGatewayClient(config.gateway_url, api_key=key) as client:
+        inventory = await client.discover()
+    print("Gateway discovery")
+    for item in inventory.adapters:
+        print(
+            f"{item.adapter_id:<28} {item.state.upper():<10} {item.effective_direction}"
+        )
+    return 0
+
+
 async def _run_bridge(config: BridgeConfig, key: str) -> None:
     bridge = AgentBridge(config, key)
     try:
@@ -96,6 +112,8 @@ def main() -> None:
         return
     config = BridgeConfig.load(Path(args.config))
     key = os.getenv(config.api_key_env, "")
-    if args.action in {"doctor", "discover"}:
+    if args.action == "doctor":
         raise SystemExit(asyncio.run(_doctor(config)))
+    if args.action == "discover":
+        raise SystemExit(asyncio.run(_discover(config)))
     asyncio.run(_run_bridge(config, key))

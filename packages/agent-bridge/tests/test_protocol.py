@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from astrbot_gateway_agent.config import BridgeConfig
 from astrbot_gateway_agent.protocol import RESULT_SCHEMA, parse_result
 from astrbot_gateway_agent.runtime import AgentBridge
 from astrbot_gateway_agent.sessions import SessionStore
-from astrbot_gateway_agent.config import BridgeConfig
 from astrbot_gateway_sdk import GatewayEvent
 
 
@@ -31,6 +31,14 @@ def test_session_store_persists_mapping(tmp_path: Path) -> None:
     reopened = SessionStore(path)
     assert reopened.get("im/fake/a/private/1") == "external-1"
     reopened.close()
+
+
+@pytest.mark.parametrize("setting", ["max_concurrency: 0", "max_pending: -1", "invoke_timeout: 0", "max_stdout_bytes: nope"])
+def test_runtime_config_requires_positive_values(tmp_path: Path, setting: str) -> None:
+    config = tmp_path / "agent-gateway.yaml"
+    config.write_text("gateway:\n  url: http://gateway\n  api_key_env: KEY\nagent:\n  mode: command\n  command: [python, wrapper.py]\nruntime:\n  " + setting + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="runtime"):
+        BridgeConfig.load(config)
 
 
 class _Harness:
