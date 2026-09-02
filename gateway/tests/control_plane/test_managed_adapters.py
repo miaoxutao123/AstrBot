@@ -12,5 +12,7 @@ async def test_managed_secret_reference_never_contains_value(tmp_path: Path) -> 
     store = ManagedAdapterStore(tmp_path / "managed.db")
     stored = store.put("qq-main", "qq_official", True, {"secret": reference})
     assert stored["config"]["secret"] == reference
-    assert "actual-secret" not in (tmp_path / "managed.db").read_bytes().decode("latin1")
+    assert "actual-secret" not in (tmp_path / "managed.db").read_bytes().decode(
+        "latin1"
+    )
     assert secrets.public(stored["config"]) == {"secret": {"configured": True}}

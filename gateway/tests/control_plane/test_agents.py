@@ -10,9 +10,14 @@ from gateway.control_plane import AgentRegistry
 def test_enrollment_is_hashed_single_use_and_revocable(tmp_path: Path) -> None:
     registry = AgentRegistry(tmp_path / "agents.db")
     enrollment = registry.create_enrollment("DSH", ["adapters:read"], 60)
-    assert enrollment["token"] not in (tmp_path / "agents.db").read_bytes().decode("latin1")
+    assert enrollment["token"] not in (tmp_path / "agents.db").read_bytes().decode(
+        "latin1"
+    )
     registered = registry.register(enrollment["token"], {"display_name": "DSH"})
-    assert registry.authenticate(registered["api_key"]) == (registered["agent_id"], frozenset({"adapters:read"}))
+    assert registry.authenticate(registered["api_key"]) == (
+        registered["agent_id"],
+        frozenset({"adapters:read"}),
+    )
     with pytest.raises(ValueError, match="consumed"):
         registry.register(enrollment["token"], {})
     registry.revoke(registered["agent_id"])
