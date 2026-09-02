@@ -11,7 +11,7 @@ from gateway.config import (
     SecretReference,
     check_config,
 )
-from gateway.control_plane import AgentRegistry
+from gateway.control_plane import AgentRegistry, ManagedAdapterStore
 from gateway.core import AdapterRegistry, AdapterRuntime, MemoryEventBus
 from gateway.media import FileMediaStore, MediaStore, MemoryMediaStore
 from gateway.secrets import AdapterSecretStore, MemorySecretStore
@@ -40,6 +40,7 @@ class GatewayHost:
     secret_store: AdapterSecretStore
     media_store: MediaStore
     agent_registry: AgentRegistry
+    managed_adapter_store: ManagedAdapterStore
 
 
 def build_host(
@@ -119,6 +120,9 @@ def build_host(
         for key in config.api.keys
     ]
     agent_registry = AgentRegistry(base_directory / "data" / "gateway-agents.db")
+    managed_adapter_store = ManagedAdapterStore(
+        base_directory / "data" / "gateway-managed-adapters.db"
+    )
     app = create_app(
         runtime,
         event_bus,
@@ -127,6 +131,7 @@ def build_host(
         event_history_size=config.api.event_history_size,
         client_queue_size=config.api.client_queue_size,
         agent_registry=agent_registry,
+        managed_adapter_store=managed_adapter_store,
     )
     return GatewayHost(
         app,
@@ -137,4 +142,5 @@ def build_host(
         secret_store,
         media_store,
         agent_registry,
+        managed_adapter_store,
     )

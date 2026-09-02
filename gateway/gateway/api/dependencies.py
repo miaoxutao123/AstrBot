@@ -6,7 +6,7 @@ from typing import cast
 
 from fastapi import Request
 
-from gateway.control_plane import AgentRegistry
+from gateway.control_plane import AgentRegistry, ManagedAdapterStore
 from gateway.core import AdapterRuntime, GatewayLifecycle, MemoryEventBus
 from gateway.media import MediaStore
 
@@ -36,6 +36,7 @@ class ApiServices:
     media: MediaStore
     heartbeat_interval: float
     agents: AgentRegistry | None = None
+    managed_adapters: ManagedAdapterStore | None = None
 
 
 def get_services(request: Request) -> ApiServices:
