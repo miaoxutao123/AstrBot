@@ -4,6 +4,7 @@ import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from gateway.control_plane import AgentRegistry
 from gateway.core import GatewayError, GatewayErrorCode
 
 from .errors import GatewayApiError
@@ -71,8 +72,11 @@ class ApiKeyStore:
         keys: API keys configured by the Gateway host.
     """
 
-    def __init__(self, keys: Sequence[ApiKey]) -> None:
+    def __init__(
+        self, keys: Sequence[ApiKey], agents: AgentRegistry | None = None
+    ) -> None:
         self._keys = tuple(keys)
+        self._agents = agents
 
     def authenticate(self, headers: Mapping[str, str]) -> ApiPrincipal:
         """Authenticate an Authorization or X-API-Key header.
@@ -103,6 +107,8 @@ class ApiKeyStore:
         for api_key in self._keys:
             if secrets.compare_digest(token, api_key.secret):
                 return ApiPrincipal(api_key.id, api_key.scopes)
+        if self._agents is not None and (agent := self._agents.authenticate(token)):
+            return ApiPrincipal(agent[0], agent[1])
         raise GatewayApiError(
             401,
             GatewayError(

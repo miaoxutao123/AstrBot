@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from gateway import __version__
+from gateway.control_plane import AgentRegistry
 from gateway.core import (
     AdapterRuntime,
     GatewayError,
@@ -22,6 +23,7 @@ from gateway.media import MediaStoreError
 from . import (
     adapter_auth,
     adapters,
+    agents,
     bootstrap,
     commands,
     discovery,
@@ -50,6 +52,7 @@ def create_app(
     heartbeat_interval: float = 20.0,
     event_history_size: int = 1024,
     client_queue_size: int = 256,
+    agent_registry: AgentRegistry | None = None,
 ) -> FastAPI:
     """Create a Gateway API bound to existing Core services.
 
@@ -77,10 +80,11 @@ def create_app(
         runtime=runtime,
         event_bus=event_bus,
         lifecycle=gateway_lifecycle,
-        api_keys=ApiKeyStore(api_keys),
+        api_keys=ApiKeyStore(api_keys, agent_registry),
         events=event_stream,
         media=runtime.media_store,
         heartbeat_interval=heartbeat_interval,
+        agents=agent_registry,
     )
 
     @asynccontextmanager
@@ -192,6 +196,7 @@ def create_app(
     app.include_router(discovery.router)
     app.include_router(adapters.router)
     app.include_router(adapter_auth.router)
+    app.include_router(agents.router)
     app.include_router(endpoints.router)
     app.include_router(commands.router)
     app.include_router(events.router)
