@@ -1,6 +1,6 @@
 """External Agent enrollment, presence and administrator APIs."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, Request
 
@@ -53,6 +53,18 @@ async def list_agents(
     return {"agents": _registry(request).list_agents()}
 
 
+@router.get("/agents/{agent_id}")
+async def get_agent(
+    _principal: Annotated[ApiPrincipal, Depends(require_scope("agents:read"))],
+    agent_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    agent = _registry(request).get_agent(agent_id)
+    if agent is None:
+        raise ValueError("agent was not found")
+    return cast(dict[str, Any], agent)
+
+
 @router.post("/agents/{agent_id}/revoke")
 async def revoke_agent(
     _principal: Annotated[ApiPrincipal, Depends(require_scope("agents:manage"))],
@@ -68,14 +80,23 @@ async def agent_me(
     request: Request,
     principal: Annotated[ApiPrincipal, Depends(require_scope("adapters:read"))],
 ) -> dict[str, Any]:
-    return next(
-        (
-            item
-            for item in _registry(request).list_agents()
-            if item["id"] == principal.key_id
-        ),
-        {},
-    )
+    return _registry(request).get_agent(principal.key_id) or {}
+
+
+@router.patch("/agents/me")
+async def update_agent_me(
+    principal: Annotated[ApiPrincipal, Depends(require_scope("adapters:read"))],
+    request: Request,
+    body: dict[str, Any] = Body(),
+) -> dict[str, Any]:
+    # Descriptor is Agent-owned observability metadata. Grant scope and key
+    # material stay server-owned and cannot be patched through this endpoint.
+    descriptor = dict(body.get("descriptor", body))
+    descriptor.pop("scopes", None)
+    descriptor.pop("agent_id", None)
+    descriptor.pop("api_key", None)
+    _registry(request).update_descriptor(principal.key_id, descriptor)
+    return _registry(request).get_agent(principal.key_id) or {}
 
 
 @router.post("/agents/me/heartbeat")

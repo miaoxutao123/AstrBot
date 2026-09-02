@@ -137,6 +137,23 @@ class AgentRegistry:
             for row in rows
         ]
 
+    def get_agent(self, agent_id: str) -> dict[str, Any] | None:
+        """Return one non-secret Agent record."""
+        return next(
+            (item for item in self.list_agents() if item["id"] == agent_id), None
+        )
+
+    def update_descriptor(self, agent_id: str, descriptor: dict[str, Any]) -> None:
+        """Replace only the Agent-reported metadata, never its credential or scopes."""
+        encoded = json.dumps(descriptor)
+        updated = self._connection.execute(
+            "UPDATE agents SET metadata=?, display_name=? WHERE id=? AND revoked_at IS NULL",
+            (encoded, str(descriptor.get("display_name", "Unnamed Agent")), agent_id),
+        )
+        self._connection.commit()
+        if updated.rowcount != 1:
+            raise ValueError("agent is revoked or unknown")
+
     def revoke(self, agent_id: str) -> None:
         now = time.time()
         self._connection.execute(

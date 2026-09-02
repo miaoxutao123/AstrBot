@@ -107,6 +107,11 @@ async def agent_bootstrap(
         "access": (inventory := await _inventory(request, principal))["access"],
         "inventory": inventory,
         "recommended_integration": {"bridge": True, "mcp": True},
+        "agent_registration": {
+            "endpoint": "/v1/agents/register",
+            "self": "/v1/agents/me",
+            "heartbeat": "/v1/agents/me/heartbeat",
+        },
         "commands": {
             "install_bridge": "pip install astrbot-gateway-agent",
             "install_mcp": "pip install astrbot-gateway-mcp",

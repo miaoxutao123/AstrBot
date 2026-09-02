@@ -35,6 +35,13 @@ def test_enrollment_register_heartbeat_and_revoke(tmp_path) -> None:  # type: ig
             headers={"Authorization": f"Bearer {registered['api_key']}"},
             json={"state": "ready"},
         )
+        agent_headers = {"Authorization": f"Bearer {registered['api_key']}"}
+        updated = client.patch(
+            "/v1/agents/me",
+            headers=agent_headers,
+            json={"descriptor": {"display_name": "Echo Agent v2", "scopes": ["*"]}},
+        )
+        detail = client.get(f"/v1/agents/{registered['agent_id']}", headers=admin)
         agents = client.get("/v1/agents", headers=admin).json()["agents"]
         revoked = client.post(
             f"/v1/agents/{registered['agent_id']}/revoke", headers=admin
@@ -45,7 +52,10 @@ def test_enrollment_register_heartbeat_and_revoke(tmp_path) -> None:  # type: ig
         )
 
     assert heartbeat.status_code == 200
-    assert agents[0]["display_name"] == "Echo Agent"
+    assert updated.json()["display_name"] == "Echo Agent v2"
+    assert updated.json()["scopes"] == ["adapters:read"]
+    assert detail.status_code == 200
+    assert agents[0]["display_name"] == "Echo Agent v2"
     assert agents[0]["status"] == "ONLINE"
     assert revoked.status_code == 200
     assert rejected.status_code == 401

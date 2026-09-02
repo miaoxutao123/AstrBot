@@ -16,6 +16,10 @@ async def well_known() -> dict[str, object]:
         "discovery": "/v1/discovery",
         "events": "/v1/events/ws",
         "commands": "/v1/commands",
+        "agent_registration": {
+            "endpoint": "/v1/agents/register",
+            "enrollment_env": "GATEWAY_ENROLLMENT_TOKEN",
+        },
         "integration": {
             "python_sdk": "astrbot-gateway-sdk",
             "mcp": "astrbot-gateway-mcp",
@@ -34,4 +38,7 @@ async def bootstrap_guide() -> str:
 3. Install astrbot-gateway-agent and optionally astrbot-gateway-mcp.
 4. Create your own command or HTTP wrapper for astrbot.agent.invoke.v1.
 5. Run astrbot-gateway-agent doctor, then run the Bridge and verify a reply.
+For first-time registration, use GATEWAY_ENROLLMENT_TOKEN with
+POST /v1/agents/register; then use the returned key for /v1/agents/me and
+/v1/agents/me/heartbeat.
 """
