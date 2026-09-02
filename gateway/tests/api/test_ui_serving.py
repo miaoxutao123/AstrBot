@@ -23,3 +23,5 @@ def test_gateway_ui_and_assets_are_served() -> None:
     assert spa_fallback.status_code == 200
     assert asset.status_code == 200
     assert "adapter-instances" in asset.text
+    assert "data-lifecycle" in asset.text
+    assert "auth/start" in asset.text

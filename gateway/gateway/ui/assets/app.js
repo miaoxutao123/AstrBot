@@ -17,8 +17,9 @@ async function overview() {
 }
 async function connections() {
   const data = await api('/adapter-instances');
-  app.innerHTML = `<div class="header"><h1>Connections</h1><button id="add">Add connection</button></div><table><thead><tr><th>ID</th><th>Type</th><th>Source</th><th>State</th><th></th></tr></thead><tbody>${data.instances.map(item => `<tr><td>${escape(item.id)}</td><td>${escape(item.type)}</td><td>${escape(item.source)}</td><td>${escape(item.state || (item.enabled ? 'configured' : 'disabled'))}</td><td><button data-auth="${escape(item.id)}">Authentication</button> ${item.source === 'managed' ? `<button data-delete="${escape(item.id)}">Delete</button>` : 'Read-only'}</td></tr>`).join('')}</tbody></table>`;
+  app.innerHTML = `<div class="header"><h1>Connections</h1><button id="add">Add connection</button></div><table><thead><tr><th>ID</th><th>Type</th><th>Source</th><th>State</th><th></th></tr></thead><tbody>${data.instances.map(item => `<tr><td>${escape(item.id)}</td><td>${escape(item.type)}</td><td>${escape(item.source)}</td><td>${escape(item.state || (item.enabled ? 'configured' : 'disabled'))}</td><td><button data-lifecycle="start" data-id="${escape(item.id)}">Start</button> <button data-lifecycle="stop" data-id="${escape(item.id)}">Stop</button> <button data-lifecycle="restart" data-id="${escape(item.id)}">Restart</button> <button data-auth="${escape(item.id)}">Authentication</button> ${item.source === 'managed' ? `<button data-delete="${escape(item.id)}">Delete</button>` : 'Read-only'}</td></tr>`).join('')}</tbody></table>`;
   document.querySelector('#add').onclick = addConnection;
+  document.querySelectorAll('[data-lifecycle]').forEach(button => button.onclick = async () => { await api(`/adapters/${button.dataset.id}/${button.dataset.lifecycle}`, { method: 'POST' }); connections(); });
   document.querySelectorAll('[data-auth]').forEach(button => button.onclick = () => showAuth(button.dataset.auth));
   document.querySelectorAll('[data-delete]').forEach(button => button.onclick = async () => { await api(`/adapter-instances/${button.dataset.delete}`, { method: 'DELETE' }); connections(); });
 }
