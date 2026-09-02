@@ -81,6 +81,31 @@ jobs:
       - run: uv sync
       - run: uv run pytest -q tests/api
 
+  control-plane-ui:
+    name: Control Plane UI / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: python -m pip install --upgrade uv
+      - run: uv sync --extra api
+      - run: node --check gateway/ui/assets/app.js
+      - run: >-
+          uv run pytest -q
+          tests/api/test_ui_serving.py
+          tests/api/test_managed_adapters.py
+          tests/api/test_agents_api.py
+
   adapter-contract:
     name: Adapter contract / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
