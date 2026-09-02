@@ -3,6 +3,7 @@
 import logging
 
 import pytest
+
 from gateway.core import (
     GATEWAY_API_STABILITY,
     GATEWAY_API_VERSION,

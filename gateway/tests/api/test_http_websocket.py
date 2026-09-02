@@ -5,6 +5,8 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
 from gateway.api import ApiKey, create_app
 from gateway.core import (
     AdapterRegistry,
@@ -16,8 +18,6 @@ from gateway.core import (
     MemoryEventBus,
 )
 from gateway.profiles.im import IMConversation, IMMessage, IMSegment, IMSender
-from starlette.websockets import WebSocketDisconnect
-
 from tests.fake_adapters import FakeIMAdapter, FakeRobotAdapter
 
 READ_HEADERS = {"Authorization": "Bearer read-secret"}
