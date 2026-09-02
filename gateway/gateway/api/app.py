@@ -97,6 +97,11 @@ def create_app(
         subscription_token = event_bus.subscribe(event_stream.ingest)
         try:
             await services.media.cleanup()
+            if services.managed_secrets and services.managed_adapters:
+                await services.managed_secrets.populate_cache(
+                    [item["config"] for item in services.managed_adapters.list()],
+                    _app.state.managed_secret_values,
+                )
             if manage_lifecycle:
                 await gateway_lifecycle.start()
             elif not event_bus.running:
@@ -116,6 +121,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.gateway_services = services
+    # Host replaces this with its long-lived managed-secret cache. Keeping a
+    # local default makes the application factory usable in isolated tests.
+    app.state.managed_secret_values = {}
 
     @app.exception_handler(GatewayApiError)
     async def handle_api_error(

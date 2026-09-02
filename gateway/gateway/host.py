@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from gateway.api import ApiKey, create_app
 from gateway.config import (
@@ -96,6 +96,9 @@ def build_host(
         secret_store = MemorySecretStore()
     registry = AdapterRegistry()
     discovery = registry.discover()
+    managed_adapter_store = ManagedAdapterStore(
+        base_directory / "data" / "gateway-managed-adapters.db"
+    )
     for adapter in config.adapters:
         if adapter.enabled:
             if adapter.type in discovery.failed:
@@ -103,11 +106,26 @@ def build_host(
                     f"configured adapter type failed discovery: {adapter.type}"
                 )
             registry.create(adapter.id, adapter.type, adapter.config)
+    managed_secret_values: dict[str, str] = {}
+    for managed_instance in managed_adapter_store.list():
+        if managed_instance["id"] in {item.id for item in config.adapters}:
+            continue
+        if managed_instance["enabled"]:
+            registry.create(
+                str(managed_instance["id"]),
+                str(managed_instance["type"]),
+                cast(
+                    dict[str, Any],
+                    ManagedSecretStore.runtime_config(managed_instance["config"]),
+                ),
+            )
     event_bus = MemoryEventBus()
     runtime = AdapterRuntime(
         registry,
         event_bus,
-        secret_provider=secret_resolver.get,
+        secret_provider=lambda key: (
+            managed_secret_values.get(key) or secret_resolver.get(key)
+        ),
         state_store=state_store,
         secret_store=secret_store,
         media_store=media_store,
@@ -121,9 +139,6 @@ def build_host(
         for key in config.api.keys
     ]
     agent_registry = AgentRegistry(base_directory / "data" / "gateway-agents.db")
-    managed_adapter_store = ManagedAdapterStore(
-        base_directory / "data" / "gateway-managed-adapters.db"
-    )
     managed_secret_store = ManagedSecretStore(secret_store)
     app = create_app(
         runtime,
@@ -136,6 +151,7 @@ def build_host(
         managed_adapter_store=managed_adapter_store,
         managed_secret_store=managed_secret_store,
     )
+    app.state.managed_secret_values = managed_secret_values
     return GatewayHost(
         app,
         registry,

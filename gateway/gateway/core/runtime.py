@@ -141,6 +141,20 @@ class AdapterRuntime:
         """Expose discovered adapter types without instantiating them."""
         return tuple(self._registry.factory_types())
 
+    async def add_adapter(
+        self, adapter_id: str, adapter_type: str, config: dict[str, object]
+    ) -> AdapterRuntimeInfo:
+        """Register a control-plane managed instance and start it when live."""
+        self._registry.create(adapter_id, adapter_type, config)
+        if self._event_bus.running:
+            return await self.start(adapter_id)
+        return self.info(adapter_id)
+
+    async def remove_adapter(self, adapter_id: str) -> None:
+        """Stop and unregister a managed instance from the running process."""
+        await self.stop(adapter_id)
+        self._registry.unregister(adapter_id)
+
     async def start(self, adapter_id: str) -> AdapterRuntimeInfo:
         """Start one adapter while containing its failure.
 

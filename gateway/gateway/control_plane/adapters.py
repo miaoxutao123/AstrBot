@@ -12,7 +12,9 @@ class ManagedAdapterStore:
 
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(path)
+        # FastAPI's TestClient and production ASGI workers may enter the
+        # lifespan and request handlers from different threads.
+        self._connection = sqlite3.connect(path, check_same_thread=False)
         self._connection.execute(
             "CREATE TABLE IF NOT EXISTS managed_adapters (adapter_id TEXT PRIMARY KEY, adapter_type TEXT NOT NULL, enabled INTEGER NOT NULL, config_json TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)"
         )
