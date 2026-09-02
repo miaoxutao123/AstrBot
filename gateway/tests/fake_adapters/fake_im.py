@@ -13,6 +13,7 @@ from gateway.core import (
     GatewayEvent,
 )
 from gateway.profiles.im import (
+    IM_MESSAGE_RECEIVE,
     IM_MESSAGE_REPLY,
     IM_MESSAGE_SEND,
     IMConversation,
@@ -37,6 +38,7 @@ class FakeIMAdapter(RecordingAdapter):
         capabilities=(
             Capability(IM_MESSAGE_SEND),
             Capability(IM_MESSAGE_REPLY),
+            Capability(IM_MESSAGE_RECEIVE),
         ),
     )
 

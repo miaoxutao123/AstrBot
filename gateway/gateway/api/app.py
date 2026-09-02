@@ -22,7 +22,9 @@ from gateway.media import MediaStoreError
 from . import (
     adapter_auth,
     adapters,
+    bootstrap,
     commands,
+    discovery,
     endpoints,
     events,
     health,
@@ -186,6 +188,8 @@ def create_app(
         )
 
     app.include_router(health.router)
+    app.include_router(bootstrap.router)
+    app.include_router(discovery.router)
     app.include_router(adapters.router)
     app.include_router(adapter_auth.router)
     app.include_router(endpoints.router)

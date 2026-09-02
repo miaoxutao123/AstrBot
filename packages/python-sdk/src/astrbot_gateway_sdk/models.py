@@ -108,3 +108,71 @@ class GatewayEvent:
             ),
             raw=value,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityInfo:
+    """One discovered capability and its caller authorization state."""
+
+    name: str
+    direction: str
+    supported: bool
+    authorized: bool
+    raw: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityInfo":
+        return cls(str(value["name"]), str(value.get("direction", "unknown")),
+                   bool(value.get("supported", True)), bool(value.get("authorized", False)), value)
+
+
+@dataclass(frozen=True, slots=True)
+class EndpointInfo:
+    """One endpoint from the aggregate Discovery response."""
+
+    id: str
+    source: SourceEndpoint
+    capabilities: tuple[CapabilityInfo, ...]
+    direction: str
+    raw: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EndpointInfo":
+        return cls(str(value["id"]), SourceEndpoint.from_wire(value), tuple(
+            CapabilityInfo.from_wire(item) for item in value.get("capabilities", []) if isinstance(item, Mapping)),
+            str(value.get("direction", "none")), value)
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterInfo:
+    """One configured adapter from the aggregate Discovery response."""
+
+    family: str
+    adapter_type: str
+    adapter_id: str
+    state: str
+    supported_direction: str
+    effective_direction: str
+    raw: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "AdapterInfo":
+        return cls(*(str(value[key]) for key in ("family", "adapter_type", "adapter_id", "state")),
+                   str(value.get("supported_direction", "none")), str(value.get("effective_direction", "none")), value)
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayInventory:
+    """Agent-facing, authorized transport inventory."""
+
+    gateway: Mapping[str, Any]
+    access: Mapping[str, Any]
+    adapters: tuple[AdapterInfo, ...]
+    endpoints: tuple[EndpointInfo, ...]
+    raw: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "GatewayInventory":
+        return cls(value.get("gateway", {}), value.get("access", {}), tuple(
+            AdapterInfo.from_wire(item) for item in value.get("adapters", []) if isinstance(item, Mapping)), tuple(
+            EndpointInfo.from_wire(item) for item in value.get("endpoints", []) if isinstance(item, Mapping)), value)

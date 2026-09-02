@@ -3,6 +3,7 @@
 from gateway.core import Capability
 from gateway.profiles.im import (
     IM_MESSAGE_DELETE,
+    IM_MESSAGE_RECEIVE,
     IM_MESSAGE_REPLY,
     IM_MESSAGE_SEND,
     im_capability,
@@ -22,6 +23,7 @@ ONEBOT_SEGMENTS = {
 }
 
 ONEBOT_CAPABILITIES: tuple[Capability, ...] = (
+    Capability(IM_MESSAGE_RECEIVE),
     im_capability(
         IM_MESSAGE_SEND,
         supported_segments=ONEBOT_SEGMENTS,

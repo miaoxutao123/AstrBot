@@ -10,7 +10,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 import httpx
 from websockets.asyncio.client import connect
 
-from .models import GatewayEvent, SourceEndpoint
+from .models import GatewayEvent, GatewayInventory, SourceEndpoint
 
 
 class GatewayWebSocketAuthenticationError(RuntimeError):
@@ -58,6 +58,24 @@ class AsyncGatewayClient:
 
     async def list_endpoints(self) -> list[Mapping[str, Any]]:
         return list((await self._get("/v1/endpoints")).get("endpoints", []))
+
+    async def discover(self) -> GatewayInventory:
+        """Return the Gateway's complete authorized agent-facing inventory."""
+        return GatewayInventory.from_wire(await self._get("/v1/discovery"))
+
+    async def find_endpoints(
+        self, *, family: str | None = None, adapter_type: str | None = None,
+        adapter_id: str | None = None, capability: str | None = None,
+        direction: str | None = None,
+    ) -> list[Mapping[str, Any]]:
+        """Filter the aggregate inventory without reconstructing it manually."""
+        endpoints = (await self.discover()).endpoints
+        return [endpoint.raw for endpoint in endpoints if
+                (family is None or endpoint.source.family == family) and
+                (adapter_type is None or endpoint.source.adapter_type == adapter_type) and
+                (adapter_id is None or endpoint.source.adapter_id == adapter_id) and
+                (direction is None or endpoint.direction == direction) and
+                (capability is None or any(item.name == capability for item in endpoint.capabilities))]
 
     async def get_capabilities(
         self, endpoint: str | Mapping[str, Any]

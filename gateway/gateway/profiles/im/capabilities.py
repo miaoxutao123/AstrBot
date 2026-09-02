@@ -9,6 +9,7 @@ from .segments import IM_SEGMENT_TYPES
 
 IM_MESSAGE_SEND = "im.message.send"
 IM_MESSAGE_REPLY = "im.message.reply"
+IM_MESSAGE_RECEIVE = "im.message.receive"
 IM_MESSAGE_EDIT = "im.message.edit"
 IM_MESSAGE_DELETE = "im.message.delete"
 IM_REACTION_ADD = "im.reaction.add"

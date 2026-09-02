@@ -6,6 +6,7 @@ from gateway.profiles.im import (
     IM_EDIT_SCHEMA,
     IM_MESSAGE_DELETE,
     IM_MESSAGE_EDIT,
+    IM_MESSAGE_RECEIVE,
     IM_MESSAGE_REPLY,
     IM_MESSAGE_SEND,
     IM_REACTION_ADD,
@@ -28,6 +29,7 @@ TELEGRAM_SEGMENTS = {
 }
 
 TELEGRAM_CAPABILITIES: tuple[Capability, ...] = (
+    Capability(IM_MESSAGE_RECEIVE),
     im_capability(
         IM_MESSAGE_SEND,
         supported_segments=TELEGRAM_SEGMENTS,
