@@ -51,10 +51,6 @@ class AdapterRegistry:
             raise ValueError(f"adapter factory already registered: {adapter_type}")
         self._factories[adapter_type] = factory
 
-    def factory_types(self) -> tuple[str, ...]:
-        """Return discovered adapter implementation types in stable order."""
-        return tuple(sorted(self._factories))
-
     def discover(
         self,
         group: str = "astrbot_gateway.adapters",

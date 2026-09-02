@@ -139,7 +139,7 @@ class AdapterRuntime:
 
     def adapter_types(self) -> tuple[str, ...]:
         """Expose discovered adapter types without instantiating them."""
-        return self._registry.factory_types()
+        return tuple(self._registry.factory_types())
 
     async def start(self, adapter_id: str) -> AdapterRuntimeInfo:
         """Start one adapter while containing its failure.
