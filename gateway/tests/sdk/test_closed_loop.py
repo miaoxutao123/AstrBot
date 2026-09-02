@@ -16,30 +16,11 @@ from astrbot_gateway_sdk import AsyncGatewayClient  # type: ignore[import-not-fo
 
 from gateway.api import ApiKey, create_app  # noqa: E402
 from gateway.core import (  # noqa: E402
-    AdapterDescriptor,
     AdapterRegistry,
     AdapterRuntime,
-    Capability,
     MemoryEventBus,
 )
 from tests.fake_adapters import FakeIMAdapter  # noqa: E402
-
-
-class SDKFakeIMAdapter(FakeIMAdapter):
-    """Fake IM also advertising the standard profile operations used by the SDK."""
-
-    @property
-    def descriptor(self) -> AdapterDescriptor:
-        descriptor = super().descriptor
-        return type(descriptor)(
-            descriptor.adapter_type,
-            descriptor.name,
-            descriptor.version,
-            descriptor.api_version,
-            descriptor.family,
-            descriptor.capabilities
-            + (Capability("im.message.send"), Capability("im.message.reply")),
-        )
 
 
 def free_port() -> int:
@@ -51,7 +32,7 @@ def free_port() -> int:
 async def test_sdk_reply_closed_loop() -> None:
     bus = MemoryEventBus()
     registry = AdapterRegistry()
-    adapter = SDKFakeIMAdapter()
+    adapter = FakeIMAdapter()
     registry.register(adapter.instance_id, adapter)
     app = create_app(
         AdapterRuntime(registry, bus),
@@ -92,3 +73,6 @@ async def test_sdk_reply_closed_loop() -> None:
     assert command.type == "im.message.reply"
     assert command.correlation_id == event.id
     assert command.payload.data["reply_to"] == "inbound-1"
+    assert command.payload.data["segments"] == [
+        {"type": "text", "data": {"text": "echo: hello"}}
+    ]

@@ -3,7 +3,6 @@
 import logging
 
 import pytest
-
 from gateway.core import (
     GATEWAY_API_STABILITY,
     GATEWAY_API_VERSION,
@@ -14,6 +13,7 @@ from gateway.core import (
     Payload,
 )
 from gateway.media import MemoryMediaStore
+from gateway.profiles.im import IMOutboundMessage, IMSegment
 from gateway.secrets import MemorySecretStore, NamespacedSecretStore
 from gateway.state import MemoryStateStore, NamespacedStateStore
 from tests.fake_adapters import FakeIMAdapter, FakeRobotAdapter, FakeSensorAdapter
@@ -58,10 +58,13 @@ async def test_adapter_contract(adapter: RecordingAdapter) -> None:
         "endpoint-1",
     )
     capabilities = await adapter.capabilities(endpoint)
+    payload = Payload("contract.command.v1")
+    if adapter.descriptor.family == "im":
+        payload = IMOutboundMessage((IMSegment.text("contract"),)).to_payload()
     command = GatewayCommand(
         target=endpoint,
         type=capabilities[0].name,
-        payload=Payload("contract.command.v1"),
+        payload=payload,
     )
     result = await adapter.execute(command)
     event = GatewayEvent(

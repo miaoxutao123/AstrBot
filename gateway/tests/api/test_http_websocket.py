@@ -5,8 +5,6 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
-
 from gateway.api import ApiKey, create_app
 from gateway.core import (
     AdapterRegistry,
@@ -16,8 +14,10 @@ from gateway.core import (
     GatewayCommand,
     GatewayEvent,
     MemoryEventBus,
-    Payload,
 )
+from gateway.profiles.im import IMConversation, IMMessage, IMSegment, IMSender
+from starlette.websockets import WebSocketDisconnect
+
 from tests.fake_adapters import FakeIMAdapter, FakeRobotAdapter
 
 READ_HEADERS = {"Authorization": "Bearer read-secret"}
@@ -49,22 +49,12 @@ class LoopbackIMAdapter(FakeIMAdapter):
                     command.target.endpoint_id,
                 ),
                 type="im.message",
-                payload=Payload(
-                    "im.message.v1",
-                    {
-                        "message_id": result.external_id,
-                        "conversation": {
-                            "type": "private",
-                            "id": command.target.endpoint_id,
-                        },
-                        "sender": {
-                            "id": command.target.endpoint_id,
-                            "display_name": "Loopback User",
-                        },
-                        "segments": [{"type": "text", "text": "ack"}],
-                        "reply_to": None,
-                    },
-                ),
+                payload=IMMessage(
+                    message_id=result.external_id or "fake-missing-id",
+                    conversation=IMConversation("private", command.target.endpoint_id),
+                    sender=IMSender(command.target.endpoint_id, "Loopback User"),
+                    segments=(IMSegment.text("ack"),),
+                ).to_payload(),
                 correlation_id=command.id,
             )
         )
@@ -123,10 +113,10 @@ def command_body(command_id: str) -> dict[str, Any]:
             "adapter_id": "im-main",
             "endpoint_id": "user:1",
         },
-        "type": "im.send_text",
+        "type": "im.message.send",
         "payload": {
-            "schema": "im.message.v1",
-            "data": {"segments": [{"type": "text", "text": "hello"}]},
+            "schema": "im.message.outbound.v1",
+            "data": {"segments": [{"type": "text", "data": {"text": "hello"}}]},
         },
     }
 
@@ -204,8 +194,8 @@ def test_http_command_to_websocket_event_complete_loop() -> None:
     assert retained.status_code == 200
     assert capabilities.status_code == 200
     assert {item["name"] for item in capabilities.json()["capabilities"]} >= {
-        "im.send_text",
-        "im.send_image",
+        "im.message.send",
+        "im.message.reply",
     }
 
 
@@ -248,7 +238,7 @@ def test_invalid_request_and_missing_event_use_stable_errors() -> None:
         invalid = client.post(
             "/v1/commands",
             headers=COMMAND_HEADERS,
-            json={"type": "im.send_text"},
+            json={"type": "im.message.send"},
         )
         missing = client.get("/v1/events/missing", headers=READ_HEADERS)
 

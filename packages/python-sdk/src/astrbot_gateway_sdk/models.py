@@ -51,9 +51,10 @@ class IMMessage:
             if isinstance(segments_value, list) and isinstance(segment, Mapping)
         )
         text = "".join(
-            str(segment.get("text", ""))
+            str(data.get("text", ""))
             for segment in segments
-            if segment.get("type") == "text"
+            for data in (segment.get("data"),)
+            if segment.get("type") == "text" and isinstance(data, Mapping)
         )
         sender = value.get("sender")
         return cls(

@@ -10,6 +10,7 @@ import pytest
 
 import astrbot_gateway_sdk.client as client_module
 from astrbot_gateway_sdk import AsyncGatewayClient
+from astrbot_gateway_sdk import GatewayWebSocketAuthenticationError
 
 
 def endpoint() -> dict[str, str]:
@@ -31,7 +32,7 @@ def event(event_id: str = "evt-1") -> dict[str, Any]:
             "data": {
                 "message_id": "message-1",
                 "sender": {"id": "user:1"},
-                "segments": [{"type": "text", "text": "hello"}],
+                "segments": [{"type": "text", "data": {"text": "hello"}}],
             },
         },
         "metadata": {"transport": "fake"},
@@ -101,6 +102,9 @@ async def test_http_auth_media_and_reply_helper() -> None:
     command = json.loads(requests[-1].content)
     assert command["type"] == "im.message.reply"
     assert command["payload"]["data"]["reply_to"] == "message-1"
+    assert command["payload"]["data"]["segments"] == [
+        {"type": "text", "data": {"text": "answer"}}
+    ]
     assert command["correlation_id"] == "evt-1"
 
 
@@ -127,6 +131,46 @@ async def test_events_reconnect_with_replay_cursor(monkeypatch: pytest.MonkeyPat
     assert second.id == "evt-2"
     assert "last_event_id=evt-1" in urls[1]
     assert "family=im" in urls[0] and "event_type=im.message" in urls[0]
+
+
+class Close:
+    def __init__(self, code: int) -> None:
+        self.code = code
+
+
+class WebSocketFailure(Exception):
+    def __init__(self, code: int) -> None:
+        self.rcvd = Close(code)
+
+
+class RejectingSocket:
+    def __init__(self, code: int) -> None:
+        self.code = code
+
+    async def __aenter__(self) -> "RejectingSocket":
+        raise WebSocketFailure(self.code)
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+@pytest.mark.parametrize("code", [4401, 4403])
+async def test_events_authentication_close_does_not_reconnect(
+    code: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+
+    def fake_connect(_url: str, **_kwargs: object) -> RejectingSocket:
+        nonlocal attempts
+        attempts += 1
+        return RejectingSocket(code)
+
+    monkeypatch.setattr(client_module, "connect", fake_connect)
+    gateway = AsyncGatewayClient("http://gateway.invalid", reconnect_delay=0)
+    with pytest.raises(GatewayWebSocketAuthenticationError, match=str(code)):
+        await anext(gateway.events())
+    await gateway.aclose()
+    assert attempts == 1
 
 
 def test_sdk_has_no_gateway_implementation_imports() -> None:

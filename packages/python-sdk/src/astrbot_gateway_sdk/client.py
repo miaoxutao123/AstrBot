@@ -13,6 +13,10 @@ from websockets.asyncio.client import connect
 from .models import GatewayEvent, SourceEndpoint
 
 
+class GatewayWebSocketAuthenticationError(RuntimeError):
+    """Raised when Gateway rejects an event stream with close code 4401/4403."""
+
+
 class AsyncGatewayClient:
     """Async Gateway API client for agents and service integrations."""
 
@@ -67,7 +71,9 @@ class AsyncGatewayClient:
     ) -> Mapping[str, Any]:
         target = self._endpoint_wire(endpoint)
         return await self._command(
-            target, "im.message.send", {"segments": [{"type": "text", "text": text}]}
+            target,
+            "im.message.send",
+            {"segments": [{"type": "text", "data": {"text": text}}]},
         )
 
     async def reply(self, event: GatewayEvent, text: str) -> Mapping[str, Any]:
@@ -78,7 +84,7 @@ class AsyncGatewayClient:
             event.source.to_wire(),
             "im.message.reply",
             {
-                "segments": [{"type": "text", "text": text}],
+                "segments": [{"type": "text", "data": {"text": text}}],
                 "reply_to": message.id,
             },
             correlation_id=event.id,
@@ -138,9 +144,14 @@ class AsyncGatewayClient:
                         yield event
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 if self._closed:
                     return
+                close_code = self._websocket_close_code(exc)
+                if close_code in {4401, 4403}:
+                    raise GatewayWebSocketAuthenticationError(
+                        f"Gateway WebSocket authorization failed ({close_code})"
+                    ) from exc
                 await asyncio.sleep(self.reconnect_delay)
 
     async def _get(self, path: str) -> Mapping[str, Any]:
@@ -170,6 +181,12 @@ class AsyncGatewayClient:
         parts = urlsplit(self.base_url)
         scheme = "wss" if parts.scheme == "https" else "ws"
         return urlunsplit((scheme, parts.netloc, "/v1/events/ws", urlencode(query), ""))
+
+    @staticmethod
+    def _websocket_close_code(exc: BaseException) -> int | None:
+        received = getattr(exc, "rcvd", None)
+        code = getattr(received, "code", None)
+        return code if isinstance(code, int) else None
 
     @staticmethod
     def _endpoint_wire(

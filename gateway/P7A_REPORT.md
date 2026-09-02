@@ -24,6 +24,15 @@ dependencies, never Gateway Core or adapter imports.
 - lightweight event, endpoint, and standard IM message views while retaining raw
   wire data
 
+## P7A.1 canonical wire alignment
+
+SDK outbound text and reply segments now always use the frozen canonical
+`{"type": "text", "data": {"text": "..."}}` shape. Inbound SDK message
+views read text from canonical segment data. FakeIM now constructs inbound
+payloads through `IMMessage`/`IMSegment`, advertises canonical IM operations,
+and parses each outbound command with `IMOutboundMessage`. SDK WebSocket close
+codes 4401 and 4403 raise an explicit authentication error and do not reconnect.
+
 ## Closed-loop test
 
 The SDK integration test starts a real local Gateway API with FakeIM, streams an

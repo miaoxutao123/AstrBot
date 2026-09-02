@@ -7,9 +7,19 @@ from gateway.core import (
     GATEWAY_API_VERSION,
     AdapterDescriptor,
     Capability,
+    CommandResult,
     EndpointRef,
+    GatewayCommand,
     GatewayEvent,
-    Payload,
+)
+from gateway.profiles.im import (
+    IM_MESSAGE_REPLY,
+    IM_MESSAGE_SEND,
+    IMConversation,
+    IMMessage,
+    IMOutboundMessage,
+    IMSegment,
+    IMSender,
 )
 
 from .base import RecordingAdapter
@@ -25,10 +35,8 @@ class FakeIMAdapter(RecordingAdapter):
         api_version=GATEWAY_API_VERSION,
         family="im",
         capabilities=(
-            Capability("im.send_text"),
-            Capability("im.send_image"),
-            Capability("im.send_file"),
-            Capability("im.reply"),
+            Capability(IM_MESSAGE_SEND),
+            Capability(IM_MESSAGE_REPLY),
         ),
     )
 
@@ -58,16 +66,19 @@ class FakeIMAdapter(RecordingAdapter):
         event = GatewayEvent(
             source=EndpointRef("im", "fake-im", self.instance_id, endpoint_id),
             type="im.message",
-            payload=Payload(
-                schema="im.message.v1",
-                data={
-                    "message_id": message_id,
-                    "conversation": {"type": "private", "id": endpoint_id},
-                    "sender": {"id": endpoint_id, "display_name": "Fake User"},
-                    "segments": [{"type": "text", "text": text}],
-                    "reply_to": None,
-                },
-            ),
+            payload=IMMessage(
+                message_id=message_id,
+                conversation=IMConversation("private", endpoint_id),
+                sender=IMSender(endpoint_id, "Fake User"),
+                segments=(IMSegment.text(text),),
+            ).to_payload(),
         )
         await self.emit(event)
         return event
+
+    async def execute(self, command: GatewayCommand) -> CommandResult:
+        """Validate canonical outbound IM payloads before recording commands."""
+        if command.type not in {IM_MESSAGE_SEND, IM_MESSAGE_REPLY}:
+            raise ValueError(f"unsupported Fake IM command: {command.type}")
+        IMOutboundMessage.from_payload(command.payload)
+        return await super().execute(command)
