@@ -2,6 +2,9 @@
 
 from fastapi.testclient import TestClient
 
+from gateway.api import ApiKey, create_app
+from gateway.control_plane import AgentRegistry
+from gateway.core import AdapterRegistry, AdapterRuntime, MemoryEventBus
 from tests.api.test_http_websocket import ADMIN_HEADERS, READ_HEADERS, build_im_app
 
 
@@ -47,3 +50,33 @@ def test_well_known_is_public_and_bootstrap_is_private() -> None:
         "family": "im",
         "event_type": "im.message",
     }
+
+
+def test_agent_can_follow_bootstrap_links_without_guessing_paths(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    bus = MemoryEventBus()
+    app = create_app(
+        AdapterRuntime(AdapterRegistry(), bus),
+        bus,
+        [ApiKey("admin", "admin-secret", frozenset({"*"}))],
+        agent_registry=AgentRegistry(tmp_path / "agents.db"),
+    )
+    with TestClient(app) as client:
+        manifest = client.get("/.well-known/astrbot-gateway").json()
+        enrollment = client.post(
+            "/v1/agent-enrollments",
+            headers=ADMIN_HEADERS,
+            json={"name_hint": "generic", "ttl_seconds": 60},
+        ).json()
+        registration = client.post(
+            manifest["agent_registration"]["endpoint"],
+            json={"enrollment_token": enrollment["token"], "descriptor": {}},
+        ).json()
+        bootstrap = client.get(
+            registration["gateway"]["bootstrap"],
+            headers={"Authorization": f"Bearer {registration['api_key']}"},
+        )
+    assert bootstrap.status_code == 200
+    assert bootstrap.json()["gateway"]["events"] == registration["gateway"]["events"]
+    assert bootstrap.json()["subscriptions"]["ordinary_im_messages"] == registration[
+        "default_event_filter"
+    ]
