@@ -95,6 +95,7 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
             {
                 "name": "token",
                 "label": "Access token",
+                "label_key": "gateway.adapterFields.accessToken",
                 "type": "password",
                 "secret": True,
             },

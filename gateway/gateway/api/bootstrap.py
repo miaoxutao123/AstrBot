@@ -54,12 +54,12 @@ async def well_known() -> dict[str, object]:
 async def bootstrap_guide() -> str:
     """Serve the Agent-oriented bootstrap instructions advertised in manifest."""
     return """# AstrBot Gateway Agent Bootstrap
-1. Read this manifest and GATEWAY_API_KEY from your environment.
-2. Call /v1/agent/bootstrap then /v1/discovery with Bearer authentication.
-3. Install astrbot-gateway-agent and optionally astrbot-gateway-mcp.
-4. Create your own command or HTTP wrapper for astrbot.agent.invoke.v1.
-5. Run astrbot-gateway-agent doctor, then run the Bridge and verify a reply.
-For first-time registration, use GATEWAY_ENROLLMENT_TOKEN with
-POST /v1/agents/register; then use the returned key for /v1/agents/me and
-/v1/agents/me/heartbeat.
+1. GET /.well-known/astrbot-gateway from the Gateway base URL.
+2. Do not guess or probe undocumented Gateway endpoints.
+3. Read the registration link from the manifest and submit GATEWAY_ENROLLMENT_TOKEN.
+4. Store the returned independent Agent API key in GATEWAY_API_KEY.
+5. Follow the bootstrap link returned by registration; it is the authoritative runtime manifest.
+6. Ordinary IM messages use family=im and event_type=im.message.
+7. Install astrbot-gateway-agent, provide an astrbot.agent.invoke.v1 wrapper,
+then run doctor and the Bridge.
 """

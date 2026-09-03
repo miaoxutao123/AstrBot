@@ -1,5 +1,5 @@
 <template>
-  <div class="d-flex align-center mb-5"><div><h1 class="text-h4">Connections</h1><p class="text-medium-emphasis">Gateway-managed and YAML adapter instances.</p></div><v-spacer /><v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">Add connection</v-btn></div>
+  <div class="d-flex align-center mb-5"><div><h1 class="text-h4">{{ t('features.gateway.connections') }}</h1><p class="text-medium-emphasis">{{ t('features.gateway.connectionsDescription') }}</p></div><v-spacer /><v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">{{ t('features.gateway.addConnection') }}</v-btn></div>
   <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
   <v-data-table :headers="headers" :items="instances" :loading="loading" item-value="id"><template #item.actions="{ item }"><v-btn size="small" variant="text" @click="lifecycle(item.id, 'start')">Start</v-btn><v-btn size="small" variant="text" @click="lifecycle(item.id, 'stop')">Stop</v-btn><v-btn size="small" variant="text" @click="lifecycle(item.id, 'restart')">Restart</v-btn><v-btn size="small" variant="text" @click="openAuth(item.id)">Auth</v-btn><v-btn v-if="item.source === 'managed'" size="small" color="error" variant="text" @click="remove(item.id)">Delete</v-btn></template></v-data-table>
 
@@ -14,13 +14,13 @@ import { useI18n } from '@/i18n/composables';
 import QrCodeViewer from '@/components/shared/QrCodeViewer.vue';
 import { gatewayApi, type AdapterType } from './api';
 type Instance = { id: string; type: string; source: string; state?: string; enabled?: boolean };
-const headers = [{ title: 'ID', key: 'id' }, { title: 'Type', key: 'type' }, { title: 'Source', key: 'source' }, { title: 'State', key: 'state' }, { title: '', key: 'actions', sortable: false }];
+const headers = computed(() => [{ title: 'ID', key: 'id' }, { title: t('features.gateway.type'), key: 'type' }, { title: t('features.gateway.source'), key: 'source' }, { title: t('features.gateway.state'), key: 'state' }, { title: '', key: 'actions', sortable: false }]);
 const instances = ref<Instance[]>([]); const adapterTypes = ref<AdapterType[]>([]); const loading = ref(false); const saving = ref(false); const error = ref(''); const createDialog = ref(false); const authDialog = ref(false); const authAdapter = ref(''); let poller: ReturnType<typeof setInterval> | undefined;
 const draft = reactive({ id: '', type: '', config: {} as Record<string, string> });
 const auth = reactive<{ status: string; reason?: string; challenge?: { qr_uri?: string; instructions?: string; verification_code?: string } }>({ status: 'not_required' });
 const selectedType = computed(() => adapterTypes.value.find(type => type.type === draft.type));
 const { t } = useI18n();
-function fieldLabel(field: AdapterType['fields'][number]) { return field.label_key ? t(`features.${field.label_key}`) : field.label; }
+function fieldLabel(field: AdapterType['fields'][number]): string { if (!field.label_key) return field.label; const translated = t(`features.${field.label_key}`); return translated.startsWith('[MISSING:') ? field.label : translated; }
 async function refresh() { loading.value = true; try { instances.value = (await gatewayApi<{ instances: Instance[] }>('/adapter-instances')).instances; adapterTypes.value = (await gatewayApi<{ adapter_types: AdapterType[] }>('/adapter-types')).adapter_types; } catch (value) { error.value = String(value); } finally { loading.value = false; } }
 function resetFields() { draft.config = Object.fromEntries((selectedType.value?.fields || []).map(field => [field.name, field.default || ''])); }
 function openCreate() { draft.id = ''; draft.type = adapterTypes.value[0]?.type || ''; resetFields(); createDialog.value = true; }
