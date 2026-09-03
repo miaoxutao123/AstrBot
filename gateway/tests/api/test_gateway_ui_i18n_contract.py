@@ -1,7 +1,8 @@
 """Minimal regression checks for Gateway control-plane localization wiring."""
 
-from pathlib import Path
+from __future__ import annotations
 
+from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 GATEWAY_UI = ROOT / "dashboard" / "src" / "gateway"
