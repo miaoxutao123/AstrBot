@@ -117,6 +117,7 @@ def test_onebot_event_websocket_http_command_reconnect_and_shutdown() -> None:
 
     assert fake.stopped
     assert envelope["type"] == "event"
+    assert envelope["data"]["type"] == "im.message"
     assert envelope["data"]["payload"]["schema"] == "im.message.v1"
     assert response.status_code == 200
     assert response.json()["external_id"] == "9001"

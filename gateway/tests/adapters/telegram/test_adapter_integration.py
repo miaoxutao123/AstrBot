@@ -170,6 +170,7 @@ def test_telegram_event_commands_reconnect_and_shutdown() -> None:
         assert runtime.info("telegram-main").state == AdapterState.RUNNING
 
     assert fake.stopped
+    assert envelope["data"]["type"] == "im.message"
     assert envelope["data"]["payload"]["schema"] == "im.message.v1"
     assert all(
         response.json()["status"] == "success"

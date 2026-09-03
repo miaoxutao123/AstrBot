@@ -1,6 +1,7 @@
 export type AdapterField = {
   name: string;
   label: string;
+  label_key?: string;
   type: 'text' | 'password' | 'url' | 'select';
   required?: boolean;
   secret?: boolean;

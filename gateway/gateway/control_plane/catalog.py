@@ -34,6 +34,7 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
             {
                 "name": "mode",
                 "label": "Mode",
+                "label_key": "gateway.adapterFields.mode",
                 "type": "select",
                 "required": True,
                 "default": "websocket",
@@ -41,12 +42,14 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
             {
                 "name": "endpoint",
                 "label": "WebSocket endpoint",
+                "label_key": "gateway.adapterFields.websocketEndpoint",
                 "type": "url",
                 "required": True,
             },
             {
                 "name": "token",
                 "label": "Access token",
+                "label_key": "gateway.adapterFields.accessToken",
                 "type": "password",
                 "secret": True,
             },
@@ -61,6 +64,7 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
             {
                 "name": "token",
                 "label": "Bot token",
+                "label_key": "gateway.adapterFields.botToken",
                 "type": "password",
                 "secret": True,
                 "required": True,
@@ -77,12 +81,14 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
             {
                 "name": "endpoint",
                 "label": "Event endpoint",
+                "label_key": "gateway.adapterFields.eventEndpoint",
                 "type": "url",
                 "required": True,
             },
             {
                 "name": "api_base_url",
                 "label": "API base URL",
+                "label_key": "gateway.adapterFields.apiBaseUrl",
                 "type": "url",
                 "required": True,
             },
@@ -100,10 +106,11 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
         "im",
         "credentials",
         (
-            {"name": "app_id", "label": "App ID", "type": "text", "required": True},
+            {"name": "app_id", "label": "App ID", "label_key": "gateway.adapterFields.appId", "type": "text", "required": True},
             {
                 "name": "secret",
                 "label": "App secret",
+                "label_key": "gateway.adapterFields.appSecret",
                 "type": "password",
                 "secret": True,
                 "required": True,

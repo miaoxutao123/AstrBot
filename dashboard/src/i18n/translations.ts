@@ -37,6 +37,7 @@ import zhCNPersona from './locales/zh-CN/features/persona.json';
 import zhCNCommand from './locales/zh-CN/features/command.json';
 import zhCNSubagent from './locales/zh-CN/features/subagent.json';
 import zhCNWelcome from './locales/zh-CN/features/welcome.json';
+import zhCNGateway from './locales/zh-CN/features/gateway.json';
 
 import zhCNErrors from './locales/zh-CN/messages/errors.json';
 import zhCNSuccess from './locales/zh-CN/messages/success.json';
@@ -78,6 +79,7 @@ import enUSPersona from './locales/en-US/features/persona.json';
 import enUSCommand from './locales/en-US/features/command.json';
 import enUSSubagent from './locales/en-US/features/subagent.json';
 import enUSWelcome from './locales/en-US/features/welcome.json';
+import enUSGateway from './locales/en-US/features/gateway.json';
 
 import enUSErrors from './locales/en-US/messages/errors.json';
 import enUSSuccess from './locales/en-US/messages/success.json';
@@ -167,7 +169,8 @@ export const translations = {
       persona: zhCNPersona,
       command: zhCNCommand,
       subagent: zhCNSubagent,
-      welcome: zhCNWelcome
+      welcome: zhCNWelcome,
+      gateway: zhCNGateway
     },
     messages: {
       errors: zhCNErrors,
@@ -216,7 +219,8 @@ export const translations = {
       persona: enUSPersona,
       command: enUSCommand,
       subagent: enUSSubagent,
-      welcome: enUSWelcome
+      welcome: enUSWelcome,
+      gateway: enUSGateway
     },
     messages: {
       errors: enUSErrors,
@@ -265,7 +269,8 @@ export const translations = {
       persona: ruRUPersona,
       command: ruRUCommand,
       subagent: ruRUSubagent,
-      welcome: ruRUWelcome
+      welcome: ruRUWelcome,
+      gateway: enUSGateway
     },
     messages: {
       errors: ruRUErrors,
