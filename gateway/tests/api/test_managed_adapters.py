@@ -1,5 +1,7 @@
 """Managed connection API contracts, including secret redaction."""
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from gateway.api import ApiKey, create_app
@@ -60,7 +62,8 @@ def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None
     adapters.register_factory("qq_official", FakeIMAdapter)
     runtime = AdapterRuntime(adapters, bus)
     managed = ManagedAdapterStore(tmp_path / "managed.db")
-    secrets = ManagedSecretStore(MemorySecretStore())
+    secret_store = MemorySecretStore()
+    secrets = ManagedSecretStore(secret_store)
     app = create_app(
         runtime,
         bus,
@@ -99,6 +102,7 @@ def test_managed_instance_crud_keeps_secret_out_of_public_data(tmp_path) -> None
     assert patched.json()["config"]["secret"] == {"configured": True}
     assert b"never-public" not in (tmp_path / "managed.db").read_bytes()
     assert deleted.status_code == 200
+    assert asyncio.run(secret_store.get("managed-adapter/qq-main/secret")) is None
     assert unavailable.status_code == 400
     assert managed.list() == []
 
