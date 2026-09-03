@@ -77,6 +77,7 @@ def test_agent_can_follow_bootstrap_links_without_guessing_paths(tmp_path) -> No
         )
     assert bootstrap.status_code == 200
     assert bootstrap.json()["gateway"]["events"] == registration["gateway"]["events"]
-    assert bootstrap.json()["subscriptions"]["ordinary_im_messages"] == registration[
-        "default_event_filter"
-    ]
+    assert (
+        bootstrap.json()["subscriptions"]["ordinary_im_messages"]
+        == registration["default_event_filter"]
+    )

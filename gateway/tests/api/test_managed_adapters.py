@@ -134,6 +134,7 @@ def test_adapter_type_catalog_is_host_owned(tmp_path) -> None:  # type: ignore[n
                 {
                     "name": "token",
                     "label": "Bot token",
+                    "label_key": "gateway.adapterFields.botToken",
                     "type": "password",
                     "secret": True,
                     "required": True,

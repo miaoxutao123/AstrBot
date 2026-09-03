@@ -106,7 +106,13 @@ _IM_TYPES: tuple[AdapterTypeDefinition, ...] = (
         "im",
         "credentials",
         (
-            {"name": "app_id", "label": "App ID", "label_key": "gateway.adapterFields.appId", "type": "text", "required": True},
+            {
+                "name": "app_id",
+                "label": "App ID",
+                "label_key": "gateway.adapterFields.appId",
+                "type": "text",
+                "required": True,
+            },
             {
                 "name": "secret",
                 "label": "App secret",

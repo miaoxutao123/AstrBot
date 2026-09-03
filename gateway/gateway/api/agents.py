@@ -40,7 +40,11 @@ async def register_agent(
     result = _registry(request).register(
         str(body.get("enrollment_token", "")), dict(body.get("descriptor", {}))
     )
-    return {**result, "gateway": integration_links(), "default_event_filter": DEFAULT_IM_EVENT_FILTER}
+    return {
+        **result,
+        "gateway": integration_links(),
+        "default_event_filter": DEFAULT_IM_EVENT_FILTER,
+    }
 
 
 @router.get("/agents")
