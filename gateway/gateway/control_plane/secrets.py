@@ -17,6 +17,13 @@ class ManagedSecretStore:
     async def delete(self, adapter_id: str, field: str) -> None:
         await self._store.delete(f"managed-adapter/{adapter_id}/{field}")
 
+    async def delete_config(self, adapter_id: str, config: object) -> None:
+        """Delete every managed reference owned by one removed instance."""
+        prefix = f"managed-adapter/{adapter_id}/"
+        for reference in self.references(config):
+            if reference.startswith(prefix):
+                await self._store.delete(reference)
+
     async def populate_cache(
         self, configs: list[dict[str, object]], cache: dict[str, str]
     ) -> None:

@@ -59,3 +59,21 @@ def test_enrollment_register_heartbeat_and_revoke(tmp_path) -> None:  # type: ig
     assert agents[0]["status"] == "ONLINE"
     assert revoked.status_code == 200
     assert rejected.status_code == 401
+
+
+def test_enrollment_defaults_to_discovery_scope(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    bus = MemoryEventBus()
+    app = create_app(
+        AdapterRuntime(AdapterRegistry(), bus),
+        bus,
+        [ApiKey("admin", "admin", frozenset({"*"}))],
+        agent_registry=AgentRegistry(tmp_path / "agents.db"),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/agent-enrollments",
+            headers={"Authorization": "Bearer admin"},
+            json={"name_hint": "default"},
+        )
+    assert response.status_code == 200
+    assert response.json()["scopes"] == ["adapters:read"]

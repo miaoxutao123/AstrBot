@@ -1,6 +1,6 @@
 """Control Plane CRUD API for WebUI-managed adapter definitions."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, Request
 
@@ -108,6 +108,11 @@ async def create_instance(
     adapter_type = str(body.get("type", ""))
     if _store(request).get(adapter_id) is not None:
         raise ValueError("managed adapter id already exists; use PATCH to update it")
+    if any(
+        info.adapter_id == adapter_id
+        for info in get_services(request).runtime.list_info()
+    ):
+        raise ValueError("adapter id is already reserved by a YAML instance")
     if not get_services(request).runtime.supports_adapter_type(adapter_type):
         raise ValueError("adapter type is not available")
     config = await _save_secrets(request, adapter_id, dict(body.get("config", {})))
@@ -119,17 +124,26 @@ async def create_instance(
             config,
         )
     )
-    if instance["enabled"]:
-        secrets = get_services(request).managed_secrets
-        runtime_config = instance["config"]
-        if secrets is not None:
-            await secrets.populate_cache(
-                [instance["config"]], request.app.state.managed_secret_values
+    try:
+        if instance["enabled"]:
+            secrets = get_services(request).managed_secrets
+            runtime_config = instance["config"]
+            if secrets is not None:
+                await secrets.populate_cache(
+                    [instance["config"]], request.app.state.managed_secret_values
+                )
+                runtime_config = secrets.runtime_config(runtime_config)
+            await get_services(request).runtime.add_adapter(
+                instance["id"],
+                instance["type"],
+                cast(dict[str, object], runtime_config),
             )
-            runtime_config = secrets.runtime_config(runtime_config)
-        await get_services(request).runtime.add_adapter(
-            instance["id"], instance["type"], runtime_config
-        )
+    except Exception:
+        secrets = get_services(request).managed_secrets
+        if secrets is not None:
+            await secrets.delete_config(adapter_id, instance["config"])
+        _store(request).delete(adapter_id)
+        raise
     return _public_instance(request, instance)
 
 
@@ -167,7 +181,9 @@ async def patch_instance(
                 [instance["config"]], request.app.state.managed_secret_values
             )
             runtime_config = secrets.runtime_config(runtime_config)
-        await runtime.add_adapter(instance["id"], instance["type"], runtime_config)
+        await runtime.add_adapter(
+            instance["id"], instance["type"], cast(dict[str, object], runtime_config)
+        )
     return _public_instance(request, instance)
 
 
@@ -189,9 +205,15 @@ async def delete_instance(
     adapter_id: str,
     request: Request,
 ) -> dict[str, str]:
+    instance = _store(request).get(adapter_id)
+    if instance is None:
+        raise ValueError("managed adapter was not found")
     try:
         await get_services(request).runtime.remove_adapter(adapter_id)
     except Exception:
         pass
+    secrets = get_services(request).managed_secrets
+    if secrets is not None:
+        await secrets.delete_config(adapter_id, instance["config"])
     _store(request).delete(adapter_id)
     return {"status": "deleted"}

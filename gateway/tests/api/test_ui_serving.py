@@ -16,12 +16,10 @@ def test_gateway_ui_and_assets_are_served() -> None:
     with TestClient(app) as client:
         index = client.get("/ui")
         spa_fallback = client.get("/ui/connections")
-        asset = client.get("/ui/assets/app.js")
+        asset = client.get("/ui/gateway.html")
 
     assert index.status_code == 200
     assert "AstrBot Gateway" in index.text
     assert spa_fallback.status_code == 200
     assert asset.status_code == 200
-    assert "adapter-instances" in asset.text
-    assert "data-lifecycle" in asset.text
-    assert "auth/start" in asset.text
+    assert "gateway-" in asset.text

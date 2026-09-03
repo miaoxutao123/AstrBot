@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - 'gateway/**'
+      - 'dashboard/gateway.html'
+      - 'dashboard/vite.gateway.config.ts'
+      - 'dashboard/src/gateway/**'
+      - 'dashboard/package.json'
       - 'packages/python-sdk/**'
       - 'packages/agent-bridge/**'
       - 'packages/mcp-server/**'
@@ -12,6 +16,10 @@ on:
   pull_request:
     paths:
       - 'gateway/**'
+      - 'dashboard/gateway.html'
+      - 'dashboard/vite.gateway.config.ts'
+      - 'dashboard/src/gateway/**'
+      - 'dashboard/package.json'
       - 'packages/python-sdk/**'
       - 'packages/agent-bridge/**'
       - 'packages/mcp-server/**'
@@ -99,7 +107,9 @@ jobs:
           node-version: '24'
       - run: python -m pip install --upgrade uv
       - run: uv sync --extra api
-      - run: node --check gateway/ui/assets/app.js
+      - run: pnpm --dir ../dashboard install --frozen-lockfile
+      - run: pnpm --dir ../dashboard exec vue-tsc --noEmit
+      - run: pnpm --dir ../dashboard run build:gateway
       - run: >-
           uv run pytest -q
           tests/api/test_ui_serving.py

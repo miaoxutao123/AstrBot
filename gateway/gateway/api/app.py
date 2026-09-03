@@ -248,6 +248,12 @@ def create_app(
             candidate = ui_directory / path
             if path and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(ui_directory / "index.html")
+            entry = ui_directory / "index.html"
+            # The Gateway Vue build intentionally has an isolated Vite input
+            # and consequently emits gateway.html rather than Dashboard's
+            # normal index.html.
+            if not entry.is_file():
+                entry = ui_directory / "gateway.html"
+            return FileResponse(entry)
 
     return app
