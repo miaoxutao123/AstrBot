@@ -26,7 +26,7 @@ async def create_enrollment(
     return dict(
         _registry(request).create_enrollment(
             str(body.get("name_hint", "")),
-            list(body.get("scopes", ["adapters:read"])),
+            list(body.get("scopes", ["adapters:read", "events:read", "commands:send"])),
             float(body.get("ttl_seconds", 600)),
         )
     )

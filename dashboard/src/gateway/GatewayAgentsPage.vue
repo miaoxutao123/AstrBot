@@ -10,7 +10,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { gatewayApi } from './api';
 type Agent = { id: string; display_name: string; status: string; scopes: string[]; last_seen_at?: number };
-const agents = ref<Agent[]>([]); const loading = ref(false); const error = ref(''); const dialog = ref(false); const packageDialog = ref(false); const nameHint = ref('External Agent'); const ttl = ref(600); const selectedScopes = ref(['adapters:read']); const enrollmentToken = ref('');
+const agents = ref<Agent[]>([]); const loading = ref(false); const error = ref(''); const dialog = ref(false); const packageDialog = ref(false); const nameHint = ref('External Agent'); const ttl = ref(600); const selectedScopes = ref(['adapters:read', 'events:read', 'commands:send']); const enrollmentToken = ref('');
 const scopes = [{ value: 'adapters:read', label: 'Read adapters and discovery' }, { value: 'events:read', label: 'Receive events' }, { value: 'commands:send', label: 'Send commands' }, { value: 'hardware:control', label: 'Hardware control', dangerous: true }];
 const headers = [{ title: 'Name', key: 'display_name' }, { title: 'Status', key: 'status' }, { title: 'Scopes', key: 'scopes' }, { title: '', key: 'actions' }];
 const environment = computed(() => `export GATEWAY_URL=${location.origin}\nexport GATEWAY_ENROLLMENT_TOKEN=${enrollmentToken.value}`);

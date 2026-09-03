@@ -61,7 +61,7 @@ def test_enrollment_register_heartbeat_and_revoke(tmp_path) -> None:  # type: ig
     assert rejected.status_code == 401
 
 
-def test_enrollment_defaults_to_discovery_scope(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_enrollment_defaults_to_agent_runtime_scopes(tmp_path) -> None:  # type: ignore[no-untyped-def]
     bus = MemoryEventBus()
     app = create_app(
         AdapterRuntime(AdapterRegistry(), bus),
@@ -76,4 +76,8 @@ def test_enrollment_defaults_to_discovery_scope(tmp_path) -> None:  # type: igno
             json={"name_hint": "default"},
         )
     assert response.status_code == 200
-    assert response.json()["scopes"] == ["adapters:read"]
+    assert response.json()["scopes"] == [
+        "adapters:read",
+        "events:read",
+        "commands:send",
+    ]
