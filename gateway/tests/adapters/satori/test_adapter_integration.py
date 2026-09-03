@@ -100,6 +100,7 @@ async def test_multiple_login_event_conversion_media_reconnect_and_shutdown() ->
     await eventually(lambda: len(events) == 1)
     assert len(events) == 1
     event = events[0]
+    assert event.type == "im.message"
     assert event.source.adapter_type == "satori"
     assert event.source.endpoint_id == "account:telegram:bot-b/channel:private-1"
     assert event.metadata["satori_platform"] == "telegram"

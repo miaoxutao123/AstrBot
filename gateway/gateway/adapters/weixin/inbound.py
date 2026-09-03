@@ -86,7 +86,7 @@ async def convert_inbound_message(
     event = GatewayEvent(
         id=f"evt_weixin_{instance_id}_{message_id}",
         source=EndpointRef("im", "weixin", instance_id, sender),
-        type="im.message.received",
+        type="im.message",
         payload=profile.to_payload(),
         timestamp=timestamp,
         metadata={"platform": "weixin"},

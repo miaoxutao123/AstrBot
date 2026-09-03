@@ -123,7 +123,7 @@ async def convert_event(
     return GatewayEvent(
         id=f"evt_satori_{instance_id}_{message_id}",
         source=EndpointRef("im", "satori", instance_id, endpoint_id(login, channel_id)),
-        type="im.message.received",
+        type="im.message",
         payload=profile.to_payload(),
         timestamp=float(timestamp) / 1000
         if isinstance(timestamp, int | float) and timestamp > 1_000_000_000_000

@@ -49,7 +49,7 @@ async def convert_event(
     return GatewayEvent(
         id=f"evt_qq_official_{instance_id}_{message.message_id}",
         source=EndpointRef("im", "qq_official", instance_id, message.endpoint.encode()),
-        type="im.message.received",
+        type="im.message",
         payload=profile.to_payload(),
         timestamp=message.timestamp or time.time(),
         metadata=dict(message.metadata),

@@ -36,6 +36,7 @@ async def test_unknown_weixin_item_is_preserved_as_raw() -> None:
     assert converted.event.source.family == "im"
     assert converted.event.source.adapter_type == "weixin"
     assert converted.event.source.adapter_id == "primary"
+    assert converted.event.type == "im.message"
     assert converted.event.payload.data["segments"][0] == {
         "type": "raw",
         "data": {

@@ -122,6 +122,7 @@ async def test_message_domains(
     await runtime.start("qq-main")
     await fake.emit(event_type, data)
     await eventually(lambda: len(events) == 1)
+    assert events[0].type == "im.message"
     assert events[0].source.endpoint_id == endpoint
     assert IMMessage.from_payload(events[0].payload).conversation.type == conversation
     await runtime.stop("qq-main")
