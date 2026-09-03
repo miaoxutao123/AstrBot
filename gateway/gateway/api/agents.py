@@ -5,6 +5,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Body, Depends, Request
 
 from .auth import ApiPrincipal
+from .bootstrap_contract import DEFAULT_IM_EVENT_FILTER, integration_links
 from .dependencies import get_services, require_scope
 
 router = APIRouter(prefix="/v1", tags=["agents"])
@@ -39,10 +40,7 @@ async def register_agent(
     result = _registry(request).register(
         str(body.get("enrollment_token", "")), dict(body.get("descriptor", {}))
     )
-    return {
-        **result,
-        "gateway": {"discovery": "/v1/discovery", "events": "/v1/events/ws"},
-    }
+    return {**result, "gateway": integration_links(), "default_event_filter": DEFAULT_IM_EVENT_FILTER}
 
 
 @router.get("/agents")

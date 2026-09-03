@@ -52,6 +52,12 @@ def test_enrollment_register_heartbeat_and_revoke(tmp_path) -> None:  # type: ig
         )
 
     assert heartbeat.status_code == 200
+    assert registered["gateway"]["bootstrap"] == "/v1/agent/bootstrap"
+    assert registered["gateway"]["events"] == "/v1/events/ws"
+    assert registered["default_event_filter"] == {
+        "family": "im",
+        "event_type": "im.message",
+    }
     assert updated.json()["display_name"] == "Echo Agent v2"
     assert updated.json()["scopes"] == ["adapters:read"]
     assert detail.status_code == 200

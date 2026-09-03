@@ -12,6 +12,7 @@ from gateway.profiles.capability_traits import (
 )
 
 from .auth import ApiPrincipal
+from .bootstrap_contract import DEFAULT_IM_EVENT_FILTER, integration_links
 from .dependencies import get_services, require_scope
 from .serialization import endpoint_resource_id, endpoint_to_dict
 
@@ -103,15 +104,16 @@ async def agent_bootstrap(
     """Return authenticated, machine-readable agent bootstrap instructions."""
     return {
         "protocol": "astrbot-gateway-agent-bootstrap.v1",
-        "gateway": {"api": "/v1"},
+        "gateway": integration_links(),
+        "agent": {
+            "self": integration_links()["self"],
+            "heartbeat": integration_links()["heartbeat"],
+        },
+        "subscriptions": {"ordinary_im_messages": DEFAULT_IM_EVENT_FILTER},
         "access": (inventory := await _inventory(request, principal))["access"],
         "inventory": inventory,
         "recommended_integration": {"bridge": True, "mcp": True},
-        "agent_registration": {
-            "endpoint": "/v1/agents/register",
-            "self": "/v1/agents/me",
-            "heartbeat": "/v1/agents/me/heartbeat",
-        },
+        "agent_registration": {"endpoint": integration_links()["register"]},
         "commands": {
             "install_bridge": "pip install astrbot-gateway-agent",
             "install_mcp": "pip install astrbot-gateway-mcp",

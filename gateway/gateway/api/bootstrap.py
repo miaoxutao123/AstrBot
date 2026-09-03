@@ -3,6 +3,18 @@
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
+from .bootstrap_contract import (
+    AGENT_BOOTSTRAP_PATH,
+    AGENT_HEARTBEAT_PATH,
+    AGENT_REGISTER_PATH,
+    AGENT_SELF_PATH,
+    API_BASE,
+    COMMANDS_PATH,
+    DEFAULT_IM_EVENT_FILTER,
+    DISCOVERY_PATH,
+    EVENTS_WS_PATH,
+)
+
 router = APIRouter(tags=["bootstrap"])
 
 
@@ -11,14 +23,23 @@ async def well_known() -> dict[str, object]:
     """Expose stable bootstrap links without runtime inventory or credentials."""
     return {
         "protocol": "astrbot-gateway-agent-bootstrap.v1",
-        "gateway_api": "/v1",
+        "gateway_api": API_BASE,
+        "authenticated_bootstrap": AGENT_BOOTSTRAP_PATH,
         "authentication": {"type": "bearer", "api_key_env": "GATEWAY_API_KEY"},
-        "discovery": "/v1/discovery",
-        "events": "/v1/events/ws",
-        "commands": "/v1/commands",
+        "discovery": DISCOVERY_PATH,
+        "events": EVENTS_WS_PATH,
+        "commands": COMMANDS_PATH,
         "agent_registration": {
-            "endpoint": "/v1/agents/register",
+            "endpoint": AGENT_REGISTER_PATH,
             "enrollment_env": "GATEWAY_ENROLLMENT_TOKEN",
+            "self": AGENT_SELF_PATH,
+            "heartbeat": AGENT_HEARTBEAT_PATH,
+        },
+        "profiles": {
+            "im": {
+                "ordinary_message_event": "im.message",
+                "default_event_filter": DEFAULT_IM_EVENT_FILTER,
+            }
         },
         "integration": {
             "python_sdk": "astrbot-gateway-sdk",

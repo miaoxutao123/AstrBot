@@ -31,6 +31,19 @@ def test_well_known_is_public_and_bootstrap_is_private() -> None:
     assert guide.status_code == 200
     assert "adapters" not in manifest.json()
     assert "secret" not in str(manifest.json()).lower()
+    assert manifest.json()["authenticated_bootstrap"] == "/v1/agent/bootstrap"
+    assert manifest.json()["agent_registration"]["endpoint"] == "/v1/agents/register"
+    assert manifest.json()["profiles"]["im"]["default_event_filter"] == {
+        "family": "im",
+        "event_type": "im.message",
+    }
     assert denied.status_code == 401
     assert bootstrap.status_code == 200
     assert bootstrap.json()["recommended_integration"]["bridge"] is True
+    assert bootstrap.json()["gateway"]["events"] == "/v1/events/ws"
+    assert bootstrap.json()["gateway"]["commands"] == "/v1/commands"
+    assert bootstrap.json()["agent"]["heartbeat"] == "/v1/agents/me/heartbeat"
+    assert bootstrap.json()["subscriptions"]["ordinary_im_messages"] == {
+        "family": "im",
+        "event_type": "im.message",
+    }
