@@ -22,6 +22,7 @@ async def _doctor(config: BridgeConfig) -> int:
         print(f"Authentication              FAIL ({config.api_key_env} is unset)")
         return 1
     async with AsyncGatewayClient(config.gateway_url, api_key=key) as client:
+        bootstrap = await client.agent_bootstrap()
         inventory = await client.discover()
     event_ok = bool(inventory.access.get("events_read"))
     command_ok = bool(inventory.access.get("commands_send"))
@@ -38,20 +39,29 @@ async def _doctor(config: BridgeConfig) -> int:
             if config.mode == "command"
             else HttpInvoker(str(config.agent_url), config.invoke_timeout)
         )
-        result = await invoker.invoke(
-            {
-                "schema": INVOKE_SCHEMA,
-                "session": {"key": "doctor", "external_session_id": None},
-                "input": {
-                    "type": "im.message",
-                    "text": "doctor",
-                    "segments": [],
-                    "event": {},
-                },
-                "context": {"gateway_url": config.gateway_url},
-            }
-        )
-        parse_result(result)
+        first = {
+            "schema": INVOKE_SCHEMA,
+            "session": {"key": "doctor", "external_session_id": None},
+            "input": {
+                "type": "im.message",
+                "text": "doctor",
+                "segments": [
+                    {"type": "text", "data": {"text": "doctor-session-turn-1"}}
+                ],
+                "event": {},
+            },
+            "context": {"gateway_url": config.gateway_url},
+        }
+        _reply, external = parse_result(await invoker.invoke(first))
+        if not external:
+            raise ValueError(
+                "AgentResult requires external_session_id for session test"
+            )
+        second = {
+            **first,
+            "session": {"key": "doctor", "external_session_id": external},
+        }
+        parse_result(await invoker.invoke(second))
     except Exception as exc:
         print(f"Agent invocation            FAIL ({exc})")
         return 1
@@ -62,12 +72,17 @@ async def _doctor(config: BridgeConfig) -> int:
     )
     print(f"Event subscription          {'OK' if event_ok else 'FAIL'}")
     print(f"Command permission          {'OK' if command_ok else 'FAIL'}")
-    print("Agent invocation            OK\nSession store               OK")
+    contract = bootstrap.get("agent_integration", {})
+    print(f"Agent Integration Contract  {'OK' if contract else 'FAIL'}")
+    print("Invoke / result protocol   OK\nStructured segments         OK")
+    print(
+        "Agent invocation            OK\nSession round-trip          OK\nSession store               OK"
+    )
     for item in inventory.adapters:
         print(
             f"{item.adapter_id:<28} {item.state.upper():<10} {item.effective_direction}"
         )
-    return 0 if event_ok and command_ok else 1
+    return 0 if event_ok and command_ok and bool(contract) else 1
 
 
 async def _discover(config: BridgeConfig) -> int:

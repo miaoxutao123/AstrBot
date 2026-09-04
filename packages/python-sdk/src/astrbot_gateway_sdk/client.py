@@ -63,6 +63,10 @@ class AsyncGatewayClient:
         """Return the Gateway's complete authorized agent-facing inventory."""
         return GatewayInventory.from_wire(await self._get("/v1/discovery"))
 
+    async def agent_bootstrap(self) -> Mapping[str, Any]:
+        """Return the authenticated self-describing Agent integration contract."""
+        return await self._get("/v1/agent/bootstrap")
+
     async def find_endpoints(
         self,
         *,

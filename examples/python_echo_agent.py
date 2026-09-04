@@ -1,4 +1,8 @@
-"""Smallest useful AstrBot-Gateway Python agent."""
+"""Protocol test harness, not a production AgentFlow integration.
+
+It validates Gateway ↔ SDK transport only. Production Agents should own a
+command or HTTP adapter implementing the integration contract instead.
+"""
 
 import asyncio
 import os

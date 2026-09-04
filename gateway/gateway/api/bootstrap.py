@@ -5,7 +5,10 @@ from fastapi.responses import PlainTextResponse
 
 from .bootstrap_contract import (
     AGENT_BOOTSTRAP_PATH,
+    AGENT_COMMAND_EXAMPLE_PATH,
     AGENT_HEARTBEAT_PATH,
+    AGENT_HTTP_EXAMPLE_PATH,
+    AGENT_INTEGRATION_DOC_PATH,
     AGENT_REGISTER_PATH,
     AGENT_SELF_PATH,
     API_BASE,
@@ -46,7 +49,10 @@ async def well_known() -> dict[str, object]:
             "mcp": "astrbot-gateway-mcp",
             "agent_bridge": "astrbot-gateway-agent",
         },
-        "documentation": {"bootstrap": "/docs/agent-bootstrap"},
+        "documentation": {
+            "bootstrap": "/docs/agent-bootstrap",
+            "agent_integration": AGENT_INTEGRATION_DOC_PATH,
+        },
     }
 
 
@@ -63,3 +69,28 @@ async def bootstrap_guide() -> str:
 7. Install astrbot-gateway-agent, provide an astrbot.agent.invoke.v1 wrapper,
 then run doctor and the Bridge.
 """
+
+
+@router.get("/docs/agent-integration", response_class=PlainTextResponse)
+async def agent_integration_guide() -> str:
+    """Serve the stable human-readable integration contract."""
+    return """# AstrBot Gateway Agent Integration
+Your Agent owns its adapter or sidecar. Do not modify Gateway source or put
+transport-specific logic in Agent Core. Follow links returned by bootstrap.
+
+Use HTTP mode for a persistent Agent runtime; use command mode for a CLI Agent.
+Map `astrbot.agent.invoke.v1` to native AgentFlow and return
+`astrbot.agent.result.v1`, preserving structured segments. Persist the mapping
+from Gateway session key to `external_session_id`; reuse it on the next invoke.
+Use the bootstrap-provided commands link for proactive output, then run doctor.
+"""
+
+
+@router.get(AGENT_COMMAND_EXAMPLE_PATH, response_class=PlainTextResponse)
+async def command_example_guide() -> str:
+    return "See packages/agent-bridge/examples/command_adapter.py"
+
+
+@router.get(AGENT_HTTP_EXAMPLE_PATH, response_class=PlainTextResponse)
+async def http_example_guide() -> str:
+    return "See packages/agent-bridge/examples/http_adapter.py"

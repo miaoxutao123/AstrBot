@@ -52,6 +52,30 @@ def test_well_known_is_public_and_bootstrap_is_private() -> None:
     }
 
 
+def test_agent_bootstrap_advertises_integration_contract() -> None:
+    app, _ = build_im_app()
+    with TestClient(app) as client:
+        response = client.get("/v1/agent/bootstrap", headers=READ_HEADERS)
+        guide = client.get("/docs/agent-integration")
+    assert response.status_code == 200
+    assert guide.status_code == 200
+    contract = response.json()["agent_integration"]
+    assert contract["protocol"] == "astrbot.gateway.agent-integration.v1"
+    assert contract["invoke"] == {
+        "schema": "astrbot.agent.invoke.v1",
+        "supported_modes": ["command", "http"],
+    }
+    assert contract["result"]["schema"] == "astrbot.agent.result.v1"
+    assert contract["session"] == {
+        "gateway_session_key": True,
+        "external_session_id": True,
+    }
+    assert contract["documentation"] == "/docs/agent-integration"
+    assert set(contract["examples"]) == {"command_python", "http_python"}
+    assert "doctor" in contract["validation"]
+    assert contract["validation"]["invoke_example"]["input"]["segments"]
+
+
 def test_agent_can_follow_bootstrap_links_without_guessing_paths(tmp_path) -> None:  # type: ignore[no-untyped-def]
     bus = MemoryEventBus()
     app = create_app(

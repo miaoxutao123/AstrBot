@@ -1,9 +1,9 @@
 """Generic invocation protocol and local session-store tests."""
 
+import importlib.util
 from pathlib import Path
 
 import pytest
-
 from astrbot_gateway_agent.config import BridgeConfig
 from astrbot_gateway_agent.protocol import RESULT_SCHEMA, parse_result
 from astrbot_gateway_agent.runtime import AgentBridge
@@ -23,6 +23,46 @@ def test_result_requires_canonical_schema_and_text() -> None:
         parse_result({"schema": RESULT_SCHEMA, "reply": {}})
 
 
+def test_result_accepts_canonical_structured_segments() -> None:
+    assert parse_result(
+        {
+            "schema": RESULT_SCHEMA,
+            "reply": {
+                "segments": [
+                    {"type": "text", "data": {"text": "hello"}},
+                    {"type": "image", "data": {"url": "https://example.test/a"}},
+                    {"type": "text", "data": {"text": " world"}},
+                ]
+            },
+            "external_session_id": "session-1",
+        }
+    ) == ("hello world", "session-1")
+
+
+def test_command_adapter_conforms_and_round_trips_session() -> None:
+    path = Path(__file__).parents[1] / "examples" / "command_adapter.py"
+    spec = importlib.util.spec_from_file_location("command_adapter", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    request = {
+        "schema": "astrbot.agent.invoke.v1",
+        "session": {"key": "im/fake/main/private/1", "external_session_id": None},
+        "input": {
+            "type": "im.message",
+            "text": "hello",
+            "segments": [{"type": "text", "data": {"text": "hello"}}],
+            "event": {},
+        },
+        "context": {"gateway_url": "http://gateway"},
+    }
+    first = module.handle(request)
+    assert parse_result(first) == ("echo: hello", "example-session")
+    request["session"]["external_session_id"] = "example-session"
+    second = module.handle(request)
+    assert parse_result(second) == ("echo: hello", "example-session")
+
+
 def test_session_store_persists_mapping(tmp_path: Path) -> None:
     path = tmp_path / "sessions.db"
     store = SessionStore(path)
@@ -33,10 +73,23 @@ def test_session_store_persists_mapping(tmp_path: Path) -> None:
     reopened.close()
 
 
-@pytest.mark.parametrize("setting", ["max_concurrency: 0", "max_pending: -1", "invoke_timeout: 0", "max_stdout_bytes: nope"])
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "max_concurrency: 0",
+        "max_pending: -1",
+        "invoke_timeout: 0",
+        "max_stdout_bytes: nope",
+    ],
+)
 def test_runtime_config_requires_positive_values(tmp_path: Path, setting: str) -> None:
     config = tmp_path / "agent-gateway.yaml"
-    config.write_text("gateway:\n  url: http://gateway\n  api_key_env: KEY\nagent:\n  mode: command\n  command: [python, wrapper.py]\nruntime:\n  " + setting + "\n", encoding="utf-8")
+    config.write_text(
+        "gateway:\n  url: http://gateway\n  api_key_env: KEY\nagent:\n  mode: command\n  command: [python, wrapper.py]\nruntime:\n  "
+        + setting
+        + "\n",
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="runtime"):
         BridgeConfig.load(config)
 
