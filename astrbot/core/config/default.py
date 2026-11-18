@@ -36,6 +36,7 @@ def get_local_permission_defaults(system: str | None = None) -> dict:
 
 
 VERSION = __version__
+DEFAULT_PLUGIN_PAGE_TOKEN_TTL_MINUTES = 5
 
 DB_PATH = os.path.join(get_astrbot_data_path(), "data_v4.db")
 PERSONAL_WECHAT_CONFIG_METADATA = {
@@ -257,6 +258,7 @@ DEFAULT_CONFIG = {
         "password_storage_upgraded": False,
         "password_change_required": False,
         "jwt_secret": "",
+        "plugin_page_token_ttl_minutes": DEFAULT_PLUGIN_PAGE_TOKEN_TTL_MINUTES,
         "host": "0.0.0.0",
         "port": 6185,
         "disable_access_log": True,

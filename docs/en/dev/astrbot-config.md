@@ -122,6 +122,7 @@ The default AstrBot configuration is as follows:
         "username": "astrbot",
         "password": "<your_password_md5>",
         "jwt_secret": "",
+        "plugin_page_token_ttl_minutes": 5,
         "host": "0.0.0.0",
         "port": 6185,
     },
@@ -523,6 +524,7 @@ Please do not change the `password` value arbitrarily. It is an `md5` encoded pa
 - `username`: Username for the AstrBot WebUI.
 - `password`: Password for the AstrBot WebUI. It is initialized from a random password generated on first startup (logged at startup). Do not modify directly unless you know what you are doing.
 - `jwt_secret`: JWT secret key. AstrBot generates this randomly at initialization. Do not modify unless you know what you are doing.
+- `plugin_page_token_ttl_minutes` sets the lifetime of newly issued plugin view resource tokens. Use an integer from 1 to 60. Missing or invalid values default to 5 minutes. Reopen the view if it needs to load new resources after expiry.
 - `host`: Address the AstrBot WebUI listens on. Default is `0.0.0.0`.
 - `port`: Port the AstrBot WebUI listens on. Default is `6185`.
 

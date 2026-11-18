@@ -122,6 +122,7 @@ AstrBot 默认配置如下：
         "username": "astrbot",
         "password": "<your_password_md5>",
         "jwt_secret": "",
+        "plugin_page_token_ttl_minutes": 5,
         "host": "0.0.0.0",
         "port": 6185,
     },
@@ -523,6 +524,7 @@ AstrBot WebUI 配置。
 - `username`: AstrBot WebUI 的用户名。
 - `password`: AstrBot WebUI 的密码。首次启动会随机生成初始密码（已在日志中打印），这里保存的是该密码的 `md5` 值。请勿直接修改，除非您知道自己在做什么。
 - `jwt_secret`: JWT 的密钥。AstrBot 会在初始化时随机生成。请勿修改，除非您知道自己在做什么。
+- `plugin_page_token_ttl_minutes` 控制新签发的插件页面资源令牌的有效期，接受 1 到 60 的整数。缺失或无效时使用默认值 5 分钟。令牌过期后，如需加载新资源，请重新打开插件页面。
 - `host`: AstrBot WebUI 监听的地址。默认为 `0.0.0.0`。
 - `port`: AstrBot WebUI 监听的端口。默认为 `6185`。
 

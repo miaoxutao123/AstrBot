@@ -16,14 +16,12 @@ import jwt
 from aiofiles import ospath as aio_ospath
 
 from astrbot.core.config.astrbot_config import AstrBotConfig
+from astrbot.core.config.default import DEFAULT_PLUGIN_PAGE_TOKEN_TTL_MINUTES
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
 from astrbot.core.star.star import StarMetadata
 from astrbot.core.star.star_manager import PluginManager
 
 PLUGIN_PAGE_ASSET_TOKEN_TYPE = "plugin_page_asset"
-# Aligned with the dashboard session lifetime (7 days): a plugin view
-# cannot outlive its parent dashboard page anyway.
-PLUGIN_PAGE_ASSET_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
 # Directory names that hold plugin views inside a plugin package, in
 # preference order. "views" is preferred; "pages" stays as an alias.
 PLUGIN_PAGE_ROOT_DIR_NAMES = ("views", "pages")
@@ -713,18 +711,21 @@ class PluginPageService:
         if not isinstance(username, str) or not username.strip():
             return None
 
+        dashboard_config = self.config.get("dashboard", {}) if self.config else {}
+        ttl_minutes = dashboard_config.get("plugin_page_token_ttl_minutes")
+        if type(ttl_minutes) is not int or not 1 <= ttl_minutes <= 60:
+            ttl_minutes = DEFAULT_PLUGIN_PAGE_TOKEN_TTL_MINUTES
+
         now = datetime.now(timezone.utc)
         payload = {
             "username": username,
             "token_type": PLUGIN_PAGE_ASSET_TOKEN_TYPE,
-            # Distinguishes long-lived view-session tokens from future
-            # one-shot presigned tokens (e.g. direct downloads).
             "purpose": "page_session",
             "plugin_name": plugin_name,
             "page_name": view_name,
             "locale": locale,
             "iat": now,
-            "exp": now + timedelta(seconds=PLUGIN_PAGE_ASSET_TOKEN_TTL_SECONDS),
+            "exp": now + timedelta(minutes=ttl_minutes),
         }
         return cast(str, jwt.encode(payload, jwt_secret, algorithm="HS256"))
 
